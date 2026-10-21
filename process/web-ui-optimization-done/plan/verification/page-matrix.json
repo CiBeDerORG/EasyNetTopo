@@ -1,0 +1,1178 @@
+[
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": "login-en-light-1440.png"
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": "register-en-light-1440.png"
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": "password-en-light-1440.png"
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": "users-en-light-1440.png"
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": "dashboard-en-light-1440.png"
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": "devices-en-light-1440.png"
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": "networks-en-light-1440.png"
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": "network-detail-en-light-1440.png"
+  },
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Login"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Register"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "User management"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Dashboard",
+      "Device List",
+      "No devices yet",
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Device List",
+      "No devices yet"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "Networks"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "en",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "light",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "light",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "light",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": "login-cn-dark-360.png"
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": "register-cn-dark-360.png"
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": "password-cn-dark-360.png"
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": "users-cn-dark-360.png"
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": "dashboard-cn-dark-360.png"
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": "devices-cn-dark-360.png"
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": "networks-cn-dark-360.png"
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "dark",
+    "width": 360,
+    "scrollWidth": 360,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": "network-detail-cn-dark-360.png"
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "dark",
+    "width": 768,
+    "scrollWidth": 768,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "login",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "登录"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "register",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "注册"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "password",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "users",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "用户管理"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "dashboard",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "仪表盘",
+      "设备列表",
+      "还没有设备",
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "devices",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "设备列表",
+      "还没有设备"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "networks",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "网络"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  },
+  {
+    "page": "network-detail",
+    "language": "cn",
+    "theme": "dark",
+    "width": 1440,
+    "scrollWidth": 1440,
+    "headings": [
+      "fictional-wui-long-network-name-for-responsive-layout"
+    ],
+    "pageErrors": [],
+    "screenshot": null
+  }
+]

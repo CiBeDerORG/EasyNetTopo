@@ -1,0 +1,186 @@
+{
+  "baseline": "1e92296b17fc2e85dcd4521b6012232e11abed95",
+  "capturedAt": "2026-10-21T08:58:01.286Z",
+  "viewport": {
+    "desktop": [
+      1440,
+      1000
+    ],
+    "narrow": [
+      360,
+      800
+    ]
+  },
+  "fixture": "isolated SQLite; fictional admin; no attached host or VPN instance",
+  "requests": [
+    {
+      "phase": "auth",
+      "elapsedMs": 1852,
+      "method": "GET",
+      "path": "/api/v1/auth/policy",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4011,
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4053,
+      "method": "GET",
+      "path": "/api/v1/console-info",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4054,
+      "method": "GET",
+      "path": "/api/v1/console-info",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4077,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4112,
+      "method": "GET",
+      "path": "/api/v1/blocked-devices",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 4115,
+      "method": "GET",
+      "path": "/api/v1/networks",
+      "status": 200
+    },
+    {
+      "phase": "device-list",
+      "elapsedMs": 5087,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 6101,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 7115,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 8132,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 9146,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 10168,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 11177,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 12189,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 13203,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 13949,
+      "method": "GET",
+      "path": "/api/v1/auth/me",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 13966,
+      "method": "GET",
+      "path": "/api/v1/blocked-devices",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 13969,
+      "method": "GET",
+      "path": "/api/v1/networks",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 14214,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 15225,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "device-list-idle",
+      "elapsedMs": 16240,
+      "method": "GET",
+      "path": "/api/v1/machines",
+      "status": 200
+    },
+    {
+      "phase": "network-list",
+      "elapsedMs": 16852,
+      "method": "GET",
+      "path": "/api/v1/networks/gateway-info",
+      "status": 200
+    },
+    {
+      "phase": "network-list",
+      "elapsedMs": 17001,
+      "method": "GET",
+      "path": "/api/v1/networks",
+      "status": 200
+    }
+  ],
+  "errors": []
+}

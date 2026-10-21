@@ -1,0 +1,67 @@
+{
+  "capturedAt": "2026-10-21T08:58:40.577Z",
+  "fixture": "fictional-wui network with zero members; missing UUID not in SQLite",
+  "observations": [
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/auth/me",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/console-info",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks/gateway-info",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55/members",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/blocked-devices",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "status": 200
+    },
+    {
+      "phase": "empty-members",
+      "path": "/api/v1/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55/members",
+      "status": 200
+    },
+    {
+      "phase": "missing-network",
+      "path": "/api/v1/networks/gateway-info",
+      "status": 200
+    },
+    {
+      "phase": "missing-network",
+      "path": "/api/v1/networks/00000000-0000-4000-8000-000000000000",
+      "status": 404
+    },
+    {
+      "phase": "missing-network",
+      "path": "/api/v1/networks/00000000-0000-4000-8000-000000000000",
+      "status": 404
+    }
+  ],
+  "errors": []
+}

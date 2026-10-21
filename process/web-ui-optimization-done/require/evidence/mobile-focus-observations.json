@@ -1,0 +1,24 @@
+{
+  "viewport": 360,
+  "mode": "real isolated API; keyboard Enter then Escape; 500ms after hidden",
+  "rows": [
+    {
+      "tag": "BODY",
+      "ariaLabel": null,
+      "className": "",
+      "returned": false
+    },
+    {
+      "tag": "BODY",
+      "ariaLabel": null,
+      "className": "",
+      "returned": false
+    },
+    {
+      "tag": "BODY",
+      "ariaLabel": null,
+      "className": "",
+      "returned": false
+    }
+  ]
+}

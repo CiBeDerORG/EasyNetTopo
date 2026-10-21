@@ -1,0 +1,15 @@
+{
+  "userTable": {
+    "tableWidth": 806.390625,
+    "containerWidth": 299,
+    "usernameWidth": 172.953125
+  },
+  "title": {
+    "height": 65,
+    "buttonWidth": 36
+  },
+  "escapeFocusRestored": 3,
+  "enrollmentMatchesRendered": true,
+  "configServerCommandStructureUnchanged": true,
+  "commandExecuted": false
+}

@@ -1,0 +1,101 @@
+name: ${COMPOSE_PROJECT_NAME:-easytier-modding}
+
+x-development: &development
+  image: ${COMPOSE_PROJECT_NAME:-easytier-modding}-dev:local
+  build:
+    context: ./deploy
+    dockerfile: Dockerfile
+    args:
+      RUST_VERSION: ${RUST_VERSION:-1.95}
+      NODE_VERSION: ${NODE_VERSION:-22}
+      PNPM_VERSION: ${PNPM_VERSION:-10.34.7}
+      PROTOC_VERSION: ${PROTOC_VERSION:-35.1}
+  init: true
+  user: '${LOCAL_UID:?Run deploy.sh}:${LOCAL_GID:?Run deploy.sh}'
+  # The watcher can retry changed source, but Docker must not hide a failed
+  # one-shot build or runtime exit in an automatic restart loop.
+  restart: 'no'
+  stop_grace_period: 20s
+  working_dir: /data
+  volumes:
+    - type: bind
+      source: ${EASYTIER_SOURCE_DIR:?Run deploy.sh from the checked-out repository}
+      target: /source
+      read_only: true
+    - type: bind
+      source: ${EASYTIER_DATA_DIR:?Run deploy.sh from the checked-out repository}
+      target: /data
+  logging:
+    driver: local
+    options:
+      max-size: 10m
+      max-file: '3'
+
+x-environment: &environment
+  EASYTIER_SOURCE_DIR: /source
+  EASYTIER_DATA_DIR: /data
+  EASYTIER_WATCH: ${EASYTIER_WATCH:-true}
+  EASYTIER_POLL_INTERVAL: ${EASYTIER_POLL_INTERVAL:-1}
+  EASYTIER_DEBOUNCE: ${EASYTIER_DEBOUNCE:-1}
+  XDG_CACHE_HOME: /data/cache/xdg
+  XDG_CONFIG_HOME: /data/config/xdg
+  XDG_STATE_HOME: /data/state
+  XDG_DATA_HOME: /data/cache/xdg-data
+  npm_config_cache: /data/cache/npm
+  CARGO_HOME: /data/cache/cargo
+  CARGO_TARGET_DIR: /data/cache/target
+  CARGO_BUILD_PROFILE: ${CARGO_BUILD_PROFILE:-dev}
+  CARGO_BUILD_JOBS: ${CARGO_BUILD_JOBS:-2}
+
+services:
+  backend:
+    <<: *development
+    command: [python3, /source/deploy/runner.py, backend]
+    environment:
+      <<: *environment
+      ET_WEB_DB: /data/web/et.db
+      ET_WEB_FILE_LOG_DIR: /data/logs/backend
+      ET_WEB_CONSOLE_LOG_LEVEL: info
+      ET_API_SERVER_ADDR: 0.0.0.0
+      ET_API_SERVER_PORT: ${ET_API_SERVER_PORT:-11211}
+      ET_CONFIG_SERVER_PORT: ${ET_CONFIG_SERVER_PORT:-22020}
+      ET_CONFIG_SERVER_PROTOCOL: ${ET_CONFIG_SERVER_PROTOCOL:-udp}
+      ET_WEB_PUBLIC_ORIGIN: ${ET_WEB_PUBLIC_ORIGIN:-}
+      ET_DISABLE_REGISTRATION: ${ET_DISABLE_REGISTRATION:-false}
+      ET_ALLOW_AUTO_CREATE_USER: ${ET_ALLOW_AUTO_CREATE_USER:-false}
+      ET_WEBHOOK_URL: ${ET_WEBHOOK_URL:-}
+      ET_WEBHOOK_SECRET: ${ET_WEBHOOK_SECRET:-}
+      ET_INTERNAL_AUTH_TOKEN: ${ET_INTERNAL_AUTH_TOKEN:-}
+      ET_WEB_INSTANCE_ID: ${ET_WEB_INSTANCE_ID:-}
+      ET_WEB_INSTANCE_API_BASE_URL: ${ET_WEB_INSTANCE_API_BASE_URL:-}
+      ET_GATEWAY_PEER_URL: ${ET_GATEWAY_PEER_URL:-}
+      ET_GATEWAY_RELAY_DATA: ${ET_GATEWAY_RELAY_DATA:-false}
+    ports:
+      - '${API_BIND_ADDRESS:-127.0.0.1}:${ET_API_SERVER_PORT:-11211}:${ET_API_SERVER_PORT:-11211}/tcp'
+      - '${CONFIG_BIND_ADDRESS:-0.0.0.0}:${ET_CONFIG_SERVER_PORT:-22020}:${ET_CONFIG_SERVER_PORT:-22020}/${CONFIG_TRANSPORT:-udp}'
+    healthcheck:
+      test: [CMD, python3, /source/deploy/runner.py, health, backend]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 5s
+
+  frontend:
+    <<: *development
+    command: [python3, /source/deploy/runner.py, frontend]
+    environment:
+      <<: *environment
+      WEB_PORT: ${WEB_PORT:-11210}
+      API_BASE_URL: http://backend:${ET_API_SERVER_PORT:-11211}
+      VITE_HMR_HOST: ${VITE_HMR_HOST:-}
+      VITE_HMR_PORT: ${VITE_HMR_PORT:-}
+      VITE_HMR_PROTOCOL: ${VITE_HMR_PROTOCOL:-}
+      VITE_ALLOWED_HOSTS: ${VITE_ALLOWED_HOSTS:-}
+    ports:
+      - '${WEB_BIND_ADDRESS:-127.0.0.1}:${WEB_PORT:-11210}:${WEB_PORT:-11210}/tcp'
+    healthcheck:
+      test: [CMD, python3, /source/deploy/runner.py, health, frontend]
+      interval: 5s
+      timeout: 3s
+      retries: 1
+      start_period: 5s

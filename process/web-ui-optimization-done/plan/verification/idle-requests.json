@@ -1,0 +1,91 @@
+{
+  "durationMs": 22000,
+  "requests": [
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578400025
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578402042
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578404059
+    },
+    {
+      "path": "/api/v1/auth/me",
+      "method": "GET",
+      "at": 1792578405539
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578405555
+    },
+    {
+      "path": "/api/v1/blocked-devices",
+      "method": "GET",
+      "at": 1792578405555
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578406074
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578408101
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578410121
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578412141
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578414176
+    },
+    {
+      "path": "/api/v1/auth/me",
+      "method": "GET",
+      "at": 1792578415543
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578415562
+    },
+    {
+      "path": "/api/v1/blocked-devices",
+      "method": "GET",
+      "at": 1792578415562
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578416191
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578418208
+    },
+    {
+      "path": "/api/v1/networks",
+      "method": "GET",
+      "at": 1792578420227
+    }
+  ],
+  "interpretation": "existing 2-second NetworkList and 10-second shell refresh; no device polling after navigation"
+}

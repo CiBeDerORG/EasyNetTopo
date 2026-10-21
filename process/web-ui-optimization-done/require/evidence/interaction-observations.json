@@ -1,0 +1,38 @@
+{
+  "baseline": "1e92296b17fc2e85dcd4521b6012232e11abed95",
+  "results": [
+    {
+      "name": "user-create-failure-draft-duplicate-focus",
+      "status": "observed",
+      "faultInjection": "POST aborted before backend; other API real",
+      "writeRequests": 1,
+      "busyDisabled": true,
+      "draftRetained": true,
+      "focusReturned": true
+    },
+    {
+      "name": "login-failure-draft-and-keyboard",
+      "status": "observed",
+      "backend": "real isolated API",
+      "usernameRetained": true,
+      "keyboardSubmitted": true,
+      "error": [
+        "Invalid username or password. Please try again."
+      ]
+    },
+    {
+      "name": "mobile-menu-keyboard-and-focus",
+      "status": "observed",
+      "escapeClosed": true,
+      "focusReturned": false
+    },
+    {
+      "name": "late-user-list-after-navigation",
+      "status": "observed",
+      "faultInjection": "delayed delivery of real GET response",
+      "delayApplied": true,
+      "passwordStillVisible": true,
+      "userTableAbsent": true
+    }
+  ]
+}

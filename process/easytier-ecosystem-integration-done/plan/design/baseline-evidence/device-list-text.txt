@@ -1,0 +1,20 @@
+Skip to content
+EasyTier
+Management console
+Workspace
+Dashboard
+Device List
+User management
+Networks
+Networks
+Documentation
+Workspace
+Device List
+Device Enrollment
+Device List
+0 items
+No devices yet
+
+Connect an EasyTier client to this controller to start managing it here.
+
+easytier-core --config-server tcp://127.0.0.1:0/fictional-eco-admin

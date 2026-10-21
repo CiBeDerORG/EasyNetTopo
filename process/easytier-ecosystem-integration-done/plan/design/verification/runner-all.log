@@ -1,0 +1,112 @@
+Ecosystem suites: support, shared, topology, nodes, resources, access, navigation, api, composition, host, integration. Development fixtures are not real API acceptance.
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ access capabilities: en/light/360 (1903.767792ms)
+✔ access capabilities: en/light/768 (441.434548ms)
+✔ access capabilities: en/light/1440 (391.900148ms)
+✔ access capabilities: en/dark/360 (384.574668ms)
+✔ access capabilities: en/dark/768 (399.257105ms)
+✔ access capabilities: en/dark/1440 (404.264281ms)
+✔ access capabilities: cn/light/360 (366.397304ms)
+✔ access capabilities: cn/light/768 (435.269872ms)
+✔ access capabilities: cn/light/1440 (365.669201ms)
+✔ access capabilities: cn/dark/360 (381.983237ms)
+✔ access capabilities: cn/dark/768 (433.491698ms)
+✔ access capabilities: cn/dark/1440 (497.553024ms)
+✔ changing one capability never changes the other two or creates an action (434.094109ms)
+✔ access component owns no request, timer, persistence or write event (5.802652ms)
+(node:81114) [DEP0169] DeprecationWarning: `url.parse()` behavior is not standardized and prone to errors that have security implications. Use the WHATWG URL API instead. CVEs are not issued for `url.parse()` vulnerabilities.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+✔ central exact paths, real UUID utility, scoped identity, unknown values and secret omission (29.619276ms)
+✔ webhook and uninitialized/guessed selections never issue central reads (8.28835ms)
+✔ missing booleans/counts remain unknown while explicit empty arrays succeed (6.275499ms)
+✔ malformed arrays/IDs/booleans/counts and null heartbeat fail without inventing nodes (18.085684ms)
+✔ members require registered UUID and safe temporary peer number (5.022302ms)
+✔ safe HTTP categories preserve existing 401 callback and never retry (49.717764ms)
+✔ actual Axios timeout ends read with no retry (161.631748ms)
+✔ late overview cannot overwrite new mode; concurrent member snapshots retain network identity (7.629779ms)
+✔ existing no-options consumers remain compatible and factory input is validated (3.043412ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ initial read, member races, focus, errors preserve snapshots and manual recovery (2905.504641ms)
+✔ identity clears old results; late overview and unmounted responses cannot update page (647.927728ms)
+✔ clearing selection drops pending members and identity resets visible host and resource choices (832.399421ms)
+✔ pending members exit loading after overview failure and late response cannot replace previous data (888.93251ms)
+✔ ordinary deep link renders ecosystem, active navigation and existing account controls (973.748357ms)
+✔ webhook mobile navigation keeps ecosystem available and restores content focus (2145.886989ms)
+✔ forced-password deep link cannot mount ecosystem or expose its navigation (535.6068ms)
+✔ Chinese production ecosystem labels and unsupported notices are bundled (705.392915ms)
+✔ ecosystem retains config-server command copy and theme switching (810.943853ms)
+{"mode":"central","idleMilliseconds":22000,"idlePaths":["/auth/me","/networks","/blocked-devices","/auth/me","/networks","/blocked-devices"],"initialMachines":1}
+✔ real central identity, network boundaries and 22s idle request ownership (24621.3168ms)
+{"mode":"webhook","idleMilliseconds":22000,"idlePaths":["/auth/me","/auth/me"],"initialMachines":1}
+✔ real webhook identity, network boundaries and 22s idle request ownership (24167.09017ms)
+✔ real ordinary identity cannot read another user network and forced identity cannot mount ecosystem (12405.301478ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ navigation: en/light/360 (2072.070124ms)
+✔ navigation: en/light/768 (448.29625ms)
+✔ navigation: en/light/1440 (470.005447ms)
+✔ navigation: en/dark/360 (423.947793ms)
+✔ navigation: en/dark/768 (444.87346ms)
+✔ navigation: en/dark/1440 (424.021483ms)
+✔ navigation: cn/light/360 (421.536643ms)
+✔ navigation: cn/light/768 (445.431448ms)
+✔ navigation: cn/light/1440 (436.842625ms)
+✔ navigation: cn/dark/360 (411.070305ms)
+✔ navigation: cn/dark/768 (429.286571ms)
+✔ navigation: cn/dark/1440 (477.634568ms)
+✔ null, unknown and replaced hosts cannot retain a stale return target; supported never invents links (475.534915ms)
+✔ navigation owns no requests, timer, persistence or external URL construction (3.650647ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ unknown host fields remain unknown and unsupported metadata has no fake save controls (2093.700787ms)
+✔ reported OS, GeoIP, membership and instance IDs stay distinct and switch with the selected host (579.088135ms)
+✔ resource category buttons emit typed navigation intent through keyboard without changing the host (512.788825ms)
+✔ webhook membership is unsupported rather than a false empty network success (514.722922ms)
+✔ CN/EN and light/dark at 360/768/1440 preserve long untrusted text, keyboard controls and readonly semantics (6732.970967ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ all three resource categories identify the host without inventing resource records or operations (2080.53281ms)
+✔ host changes and deselection remove stale resource context without persisting a draft (512.705951ms)
+✔ a capability flag alone never manufactures records, endpoints or a successful action (440.81785ms)
+✔ untrusted host text stays plain text across CN/EN, themes and 360/768/1440 layouts (5789.550666ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ refresh is an explicit keyboard event; loading prevents duplicates (2466.247169ms)
+✔ failed reads preserve a visible prior observation and never show raw diagnostics (491.582849ms)
+✔ permission, missing object, timeout and unknown error remain distinct (472.695424ms)
+✔ unsupported capability is explicit and supported capability does not invent success (551.352698ms)
+✔ CN/EN, light/dark and 360/768/1440 layouts use real locale keys without overflow (13715.185639ms)
+✔ ecosystem CN/EN leaf keys match and all translated values are nonempty (589.519758ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ actual Vue contract consumer renders every fixture state without API calls (4685.46275ms)
+✔ fixture captures typed selection events and reactive prop transitions (460.663035ms)
+✔ fixture refuses arbitrary production paths and invalid fixture names (3.511188ms)
+✔ simultaneous previews use distinct explicitly reserved loopback ports (30.465035ms)
+Browserslist: browsers data (caniuse-lite) is 13 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+✔ membership and temporary peers stay distinct; keyboard selects the stable host identity (2163.516108ms)
+✔ multi-network hosts remain one record and location filters only use supplied GeoIP fields (558.668246ms)
+✔ webhook mode shows unavailable membership without an empty central-network claim (545.79511ms)
+✔ initial loading and failures do not masquerade as empty or offline (528.72026ms)
+✔ unknown data is explicit; unrelated tenant and stale-network members cannot become selected hosts (530.515709ms)
+✔ successful empty data and retained failed snapshots are separately described (982.490391ms)
+✔ CN/EN, themes and 360/768/1440 layouts retain controls with long host and network names (6611.337245ms)
+ℹ tests 75
+ℹ suites 0
+ℹ pass 75
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 147213.127815

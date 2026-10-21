@@ -1,0 +1,32 @@
+{
+  "userTable": {
+    "rows": [
+      {
+        "height": 124.21875,
+        "usernameCellWidth": 32.71875,
+        "usernameLength": 4
+      },
+      {
+        "height": 124.71875,
+        "usernameCellWidth": 32.71875,
+        "usernameLength": 5
+      },
+      {
+        "height": 292.71875,
+        "usernameCellWidth": 32.71875,
+        "usernameLength": 19
+      }
+    ],
+    "containerWidth": 299,
+    "tableWidth": 551.375
+  },
+  "longTitle": {
+    "topbarHeight": 147,
+    "menuButtonWidth": 9.40625,
+    "titleWidth": 78.265625
+  },
+  "enrollmentCopy": {
+    "matchesRendered": true,
+    "expectedStructure": true
+  }
+}

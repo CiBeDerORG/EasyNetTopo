@@ -1,0 +1,1662 @@
+{
+  "baseline": "1e92296b17fc2e85dcd4521b6012232e11abed95",
+  "mode": "real isolated Web API via Vite; no mocked responses; no Core/VPN/device",
+  "matrix": [
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "login-en-light-1440.png"
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "register-en-light-1440.png"
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "password-en-light-1440.png"
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "users-en-light-1440.png"
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "dashboard-en-light-1440.png"
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "devices-en-light-1440.png"
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "networks-en-light-1440.png"
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "network-detail-en-light-1440.png"
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Login"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Register"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "User management"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Dashboard",
+        "Device List",
+        "No devices yet",
+        "Networks"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Device List",
+        "No devices yet"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "Networks"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "en",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "light",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "light",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "light",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "login-cn-dark-360.png"
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "register-cn-dark-360.png"
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "password-cn-dark-360.png"
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "users-cn-dark-360.png"
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "dashboard-cn-dark-360.png"
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "devices-cn-dark-360.png"
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "networks-cn-dark-360.png"
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 360,
+      "scrollWidth": 360,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": "network-detail-cn-dark-360.png"
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 768,
+      "scrollWidth": 768,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "login",
+      "path": "/auth",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "登录"
+      ],
+      "inputCount": 2,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "register",
+      "path": "/auth/register",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "注册"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "password",
+      "path": "/h/password",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "users",
+      "path": "/h/users",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "用户管理"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "dashboard",
+      "path": "/h",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "仪表盘",
+        "设备列表",
+        "还没有设备",
+        "网络"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "devices",
+      "path": "/h/deviceList",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "设备列表",
+        "还没有设备"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "networks",
+      "path": "/h/networks",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "网络"
+      ],
+      "inputCount": 1,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    },
+    {
+      "page": "network-detail",
+      "path": "/h/networks/b4efa55f-d5df-453d-bf1a-c8674c27fa55",
+      "lang": "cn",
+      "theme": "dark",
+      "width": 1440,
+      "scrollWidth": 1440,
+      "height": 900,
+      "headings": [
+        "fictional-wui-long-network-name-for-responsive-layout"
+      ],
+      "inputCount": 0,
+      "empty": false,
+      "errorCount": 0,
+      "errors": [],
+      "screenshot": null
+    }
+  ]
+}

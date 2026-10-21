@@ -1,0 +1,9 @@
+{
+  "frontendCommit": "97112bef",
+  "frontendIndexSha256": "9e89c4b52c28f2a00be1a16cf31d1b8567bafff44f3af7cd1875ea74b8c1e976",
+  "binary": "/workspace/EasyTier/target/debug/easytier-web",
+  "backendRebuilt": false,
+  "base": "http://127.0.0.1:34511",
+  "backendBase": "http://127.0.0.1:40009",
+  "mode": "real isolated API and SQLite; no connected devices, no VPN; config-server TCP port 0"
+}
