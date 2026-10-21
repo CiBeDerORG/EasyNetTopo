@@ -227,7 +227,14 @@ if [[ "$ACTION" == update ]]; then
 fi
 
 info "构建开发环境；源码分支：$selected_branch；构建器：${BUILDX_BUILDER:-Docker 当前默认选择}；构建日志：$BUILDKIT_PROGRESS"
-"${COMPOSE[@]}" build backend
+# The dedicated EasyADB BuildKit has two proxy paths: the Buildx client needs
+# a host-reachable address for Docker Hub tokens, while Dockerfile RUN stages
+# use its proxy-net address. Reuse it without recreating/changing the builder.
+if [[ "$BUILDX_BUILDER" == "easyadb-proxy" ]]; then
+    bash "$REPO_DIR/deploy/build-mihomo.sh" "$REPO_DIR/deploy" "${COMPOSE_PROJECT_NAME}-dev:local"
+else
+    "${COMPOSE[@]}" build backend
+fi
 rm -f -- "$DATA_DIR/run/pause"
 "${COMPOSE[@]}" up --detach --no-build --force-recreate --remove-orphans
 info '正在安装依赖/增量编译；可在另一终端运行 deploy.sh logs 查看进度。'

@@ -109,3 +109,9 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 - `bash -n deploy.sh`、`git diff --check` 通过。
 - /root/migration_runtime_review 独立静态复审通过：先取非空调用环境、文件值或默认 auto，再校验；重新执行前分别恢复 builder 与 progress 的原始调用环境。
 - 未新增或执行测试，未构建镜像、安装依赖或触发 CI；没有连接 NAS。此项只解除配置解析阻塞，不代表代理下载或部署运行通过。
+
+## easyadb-proxy 镜像认证修复（2026-10-22）
+
+用户在 FnOS 的 easyadb-proxy BuildKit 模式下遇到 `auth.docker.io/token` 连接超时。本轮依据 EasyADB 已有 `scripts/build-with-mihomo.sh`、`proxy-host.sh`、`proxy-config.sh`，增加 `deploy/build-mihomo.sh`，在已明确指定 `BUILDX_BUILDER=easyadb-proxy` 时分别配置宿主 Buildx 认证代理与 Dockerfile RUN 代理，生成镜像导入本机后保持原 Compose 部署。
+
+共享 BuildKit、Mihomo、Docker daemon 均不修改。代理地址只从已有 BuildKit 容器读取，敏感值不写入仓库与常规日志；非 easyadb-proxy 构建路径不变。该修复未在用户 NAS 实测，镜像代理和运行时 Cargo/pnpm 下载待目标机验证。

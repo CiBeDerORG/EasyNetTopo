@@ -59,3 +59,7 @@ updated_at: 2026-10-22
 - 2026-10-22：补齐 `.env` 的已有 Buildx 构建器选择，保留命令环境覆盖并修正重执行时的来源区分；模板和说明同步，仅执行语法与静态审阅。
 
 - 2026-10-22：继续补齐 `.env` 的 `BUILDKIT_PROGRESS`，默认 auto，示例 plain；沿用相同覆盖和重执行规则，仅执行语法与静态审阅。
+
+## 2026-10-22：已配置构建器的镜像认证超时
+
+用户提供真实 FNOS 日志：在 `easyadb-proxy` 选择后拉取基础镜像仍于 `auth.docker.io/token` 超时。核对 EasyADB 原构建脚本后确定原流程还为宿主 Buildx CLI 的令牌请求注入 Mihomo 代理，并通过 Buildx 参数单独为 Dockerfile RUN 下载提供代理。DDP-101 本轮增加 `deploy/build-mihomo.sh`，仅选中 `easyadb-proxy` 时复用其现有配置，不新建或修改共享构建器；其余默认 Compose 构建路径保留。仍待 NAS 首次真实镜像构建、Cargo/pnpm 运行网络的验收，DDP-104 保持 in_review。

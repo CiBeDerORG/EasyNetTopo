@@ -117,11 +117,11 @@ BUILDKIT_PROGRESS=plain
 sudo env BUILDX_BUILDER=easyadb-proxy BUILDKIT_PROGRESS=plain bash deploy.sh
 ```
 
-选择顺序为：命令环境中的非空 `BUILDX_BUILDER` → `.env` 的值 → Docker 当前选择。`update` 或切换分支重新执行入口时继续使用相同规则。脚本将此变量传给 [Compose 构建](https://docs.docker.com/build-cloud/usage/#use-with-docker-compose)，不创建、重配或删除既有构建器，也不更改全局默认。
+选择顺序为：命令环境中的非空 `BUILDX_BUILDER` → `.env` 的值 → Docker 当前选择。`update` 或切换分支重新执行入口时继续使用相同规则。填写 `easyadb-proxy` 时，根入口调用 `deploy/build-mihomo.sh` 复用已有构建器内的 Mihomo 代理：宿主 Buildx 获取 Docker Hub 认证令牌走可达的 `proxy-net` 网桥地址，Dockerfile 的 apt/npm/protoc 下载走构建器原有代理地址。构建产物通过 `--load` 导入本机，随后继续使用原有 Docker Compose 启动服务；不会创建、重配或删除已有 BuildKit，也不会修改 Docker daemon。其他构建器仍使用原 Compose 构建路径。
 
 `BUILDKIT_PROGRESS` 同样支持命令环境中的非空值覆盖 `.env`，留空默认 `auto`；选择 `plain` 可逐行显示构建步骤，便于复制日志。可选值为 `auto`、`plain`、`tty`、`quiet`、`none`、`rawjson`，含义见 [Docker 构建日志配置](https://docs.docker.com/build/building/variables/#buildkit_progress)。它只控制构建日志，不影响代理或应用配置。
 
-宿主端镜像认证、Dockerfile 内下载与运行容器中 Cargo/pnpm 的代理设置各自独立；已有构建器的代理不会把其他项目脚本中的代理参数一并带入。若仍提示 `.env` 不支持 `BUILDX_BUILDER` 或 `BUILDKIT_PROGRESS`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
+`easyadb-proxy` 模式从现有 `buildx_buildkit_easyadb-proxy0` 容器读取代理设置，不把凭据写入项目仓库或日志。前置要求是已有 BuildKit 容器已连接 `proxy-net`，且运行中的 `mihomo` 也连接此网络；若已有代理凭据发生变化，先通过 EasyADB 原部署入口维护共享构建器。**该模式仅覆盖镜像认证和 Dockerfile RUN 下载；运行容器内 Cargo/pnpm 的下载代理仍需单独验证。**若仍提示 `.env` 不支持 `BUILDX_BUILDER` 或 `BUILDKIT_PROGRESS`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
 
 ### 远程域名与 HMR
 
