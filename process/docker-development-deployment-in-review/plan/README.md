@@ -2,7 +2,7 @@
 id: PLAN-DDP
 feature: docker-development-deployment
 status: in-review
-updated_at: 2026-10-21
+updated_at: 2026-10-22
 ---
 
 # 计划索引
@@ -25,5 +25,6 @@ updated_at: 2026-10-21
 - 前端接收 WEB_PORT=11210，API_BASE_URL=http://backend:11211（由 Compose 拼接实际端口），VITE_HMR_HOST/PORT/PROTOCOL 可空，VITE_ALLOWED_HOSTS 可空；缓存 /data/cache/vite。共享库源码 alias；/api_meta.js 返回空 api_host；代理仅 ^/api/，保留原 Host。
 - 改源码只同步，前端 HMR；依赖/Proto 变化先停前端、重装/生成再启动；Rust 变化先停后端再编译，失败保持停止。构建期间再次变更必须重试最新快照，不能声称半途产物对应最新源码。
 - 默认命令 up 构建并启动；update 快进拉取后 up；stop、status、logs 为辅助命令。GIT_BRANCH 为空则当前分支；不强制 reset/stash。up/update 失败返回非零。
+- 构建器选择使用 BUILDX_BUILDER：非空调用环境优先于 .env，二者均空时使用 Docker 当前选择。入口重新执行前恢复原始调用环境，再读取 .env；仅选择已有构建器，不负责创建或重配 BuildKit，也不代替各下载阶段的代理配置。
 
 公共写入唯一归 DDP-101：deploy.sh、Compose、Dockerfile、模板、.gitignore 和过程文档。运行器与前端不改这些文件，只提出接线需求；完成后交给 DDP-104。

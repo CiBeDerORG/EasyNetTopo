@@ -71,6 +71,7 @@ ssh -L 11210:127.0.0.1:11210 your-user@your-nas
 # 留空使用当前 Git 分支；新仓库默认分支为 main，也可显式设置 main。
 GIT_BRANCH=
 COMPOSE_PROJECT_NAME=easynettopo-modding
+BUILDX_BUILDER=
 
 CARGO_BUILD_PROFILE=dev
 CARGO_BUILD_JOBS=2
@@ -97,6 +98,26 @@ ET_INTERNAL_AUTH_TOKEN=
 内部容器固定使用 `/data`；部署总目录由你克隆仓库的位置决定，不需要在 `.env` 重复配置绝对路径。Web、API、配置服务端口都由 `.env` 决定；`ws` 配置服务使用 TCP 端口。
 
 新模板的 Compose 项目名默认为 `easynettopo-modding`。已有 `.env` 中的项目名保持不变；若此前依赖旧默认值且未填写此项，可显式设置 `COMPOSE_PROJECT_NAME=easytier-modding` 继续管理原有容器。不同部署并存时应使用不同项目名和宿主端口。沿用旧 `.env` 时也请检查 `GIT_BRANCH`，使用新仓库中实际存在的分支。
+
+### 复用已有 BuildKit
+
+在仓库 `.env` 中填写 Buildx 构建器名称，例如：
+
+```dotenv
+BUILDX_BUILDER=easyadb-proxy
+```
+
+`easyadb-proxy` 是构建器名称，对应容器可以叫 `buildx_buildkit_easyadb-proxy0`。使用 `sudo docker buildx ls` 查看以 root 部署时可用的名称；填写后照常执行 `sudo bash deploy.sh`，启动日志会显示选用的构建器。已有配置文件不会被模板覆盖。
+
+也可仅对本次命令指定：
+
+```bash
+sudo env BUILDX_BUILDER=easyadb-proxy BUILDKIT_PROGRESS=plain bash deploy.sh
+```
+
+选择顺序为：命令环境中的非空 `BUILDX_BUILDER` → `.env` 的值 → Docker 当前选择。`update` 或切换分支重新执行入口时继续使用相同规则。脚本将此变量传给 [Compose 构建](https://docs.docker.com/build-cloud/usage/#use-with-docker-compose)，不创建、重配或删除既有构建器，也不更改全局默认。
+
+此配置只选择构建器。宿主端镜像认证、Dockerfile 内下载与运行容器中 Cargo/pnpm 的代理设置各自独立；已有构建器的代理不会把其他项目脚本中的代理参数一并带入。若仍提示 `.env` 不支持 `BUILDX_BUILDER`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
 
 ### 远程域名与 HMR
 

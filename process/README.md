@@ -6,7 +6,7 @@
 
 | 独立需求 / 汇总入口 | 总体状态 | 需求 | 计划 | 任务看板 |
 | --- | --- | --- | --- | --- |
-| [Docker 开发部署](docker-development-deployment-in-review/README.md) | `in-review`；已适配 EasyNetTopo，待目标机 Docker/Rust 验收 | [require](docker-development-deployment-in-review/require/README.md) | [plan](docker-development-deployment-in-review/plan/README.md) | [task](docker-development-deployment-in-review/task/README.md) |
+| [Docker 开发部署](docker-development-deployment-in-review/README.md) | `in-review`；已适配 EasyNetTopo，支持已有 Buildx 构建器配置，待目标机 Docker/Rust 验收 | [require](docker-development-deployment-in-review/require/README.md) | [plan](docker-development-deployment-in-review/plan/README.md) | [task](docker-development-deployment-in-review/task/README.md) |
 | [Web 用户管理](web-user-management-done/README.md) | `done`；交付基线 `feat/web-user-management@1e92296b` | [require](web-user-management-done/require/README.md) | [plan](web-user-management-done/plan/README.md) | [task](web-user-management-done/task/README.md) |
 | [网络拓扑与资源集成](easytier-ecosystem-integration-done/README.md) | `done`；ECO-101–115已验收，缺失外部能力明确未支持 | [require](easytier-ecosystem-integration-done/require/README.md) | [plan](easytier-ecosystem-integration-done/plan/README.md) | [task](easytier-ecosystem-integration-done/task/README.md) |
 | [现有 Web 交互优化与页面美化](web-ui-optimization-done/README.md) | `done`；WUI-101–113已验收，真实与fixture证据分列 | [require](web-ui-optimization-done/require/README.md) | [plan](web-ui-optimization-done/plan/README.md) | [task](web-ui-optimization-done/task/README.md) |

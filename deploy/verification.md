@@ -87,3 +87,17 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 ### 本轮未执行
 
 按用户对简单改动的要求，未运行测试、安装依赖、构建镜像或触发 GitHub Actions。未连接用户 NAS，真实 Docker/Rust 启动验收仍待目标主机完成；这些静态结果只证明迁移改动与目录约束的审查范围。
+
+## 已有 Buildx 构建器配置修复（2026-10-22）
+
+基线：`CiBeDerORG/EasyNetTopo:main@d986fc68800a0c66df99b268aacece1aadeb2bd0`。用户 NAS 日志明确报告 `.env` 中 `BUILDX_BUILDER` 被白名单拒绝；本轮增加该配置，复用现有 Compose 构建调用。模板留空，用户可设置已有的 `easyadb-proxy`。
+
+### 本轮已执行
+
+- `bash -n deploy.sh`、`git diff --check` 通过。
+- /root/migration_runtime_review 独立静态复审通过：非空调用环境优先于 `.env`，均空时交给 Docker；重执行入口前恢复原始调用环境，避免把 `.env` 值提升成命令覆盖；统一导出传给原 Compose 调用。
+- 模板与使用说明同步；已有 `.env` 的首次创建/保留规则不变，入口继续使用 `100755`。
+
+### 本轮未执行与边界
+
+按用户对简单改动的要求，未增加或执行测试，未构建镜像、安装依赖或触发 GitHub Actions。未连接 NAS 验证新入口；不将本轮静态结果记作镜像拉取或应用启动成功。此前日志中的镜像站 502、宿主端认证请求、Dockerfile 下载和运行容器依赖下载的代理接线均不在此配置修复范围内。
