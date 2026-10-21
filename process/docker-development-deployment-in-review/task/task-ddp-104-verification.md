@@ -27,3 +27,5 @@ updated_at: 2026-10-21
 ## 执行与验收记录
 
 前三项已交接。统一复跑 Python 30/30、Node 8/8 通过，Bash 与 diff 检查通过；证据见 [verification.md](../../../deploy/verification.md)。Docker daemon/Rust 环境未提供，真实镜像构建与完整后端启动未执行，任务保留 in_review。
+
+2026-10-21 收到 DDP-101 的 EasyNetTopo 迁移维护交接：仓库校验、入口执行位、默认 Compose 项目名及说明已修复；独立审查完成主目录约束核对。按用户要求仅执行源码、语法和差异核查，本轮不复跑应用或脚本测试，不构建镜像、不触发 CI；结果追加到 verification.md，与上面的初次实现验证分开。NAS Docker/Rust 验收仍未执行，状态保持 in_review。

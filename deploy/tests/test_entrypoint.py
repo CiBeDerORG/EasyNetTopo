@@ -48,9 +48,9 @@ GIT_STUB = r'''#!/usr/bin/env python3
 import os, sys
 args = sys.argv[1:]
 # Only the network operation uses the local bare remote. Origin inspection
-# still validates the actual CiBeDerORG/EasyTier URL configured in the repo.
+# still validates the actual CiBeDerORG/EasyNetTopo URL configured in the repo.
 if any(arg in ('pull', 'fetch') for arg in args):
-    args = ['-c', 'url.' + os.environ['TEST_REMOTE'] + '.insteadOf=https://github.com/CiBeDerORG/EasyTier.git'] + args
+    args = ['-c', 'url.' + os.environ['TEST_REMOTE'] + '.insteadOf=https://github.com/CiBeDerORG/EasyNetTopo.git'] + args
 os.execv(os.environ['TEST_REAL_GIT'], [os.environ['TEST_REAL_GIT'], *args])
 '''
 
@@ -61,7 +61,7 @@ class EntrypointTests(unittest.TestCase):
         self.temp = tempfile.TemporaryDirectory(prefix="easytier-entry-")
         self.addCleanup(self.temp.cleanup)
         self.base = Path(self.temp.name)
-        self.repo = self.base / "modding with spaces" / "easytier"
+        self.repo = self.base / "modding with spaces" / "custom checkout"
         (self.repo / "deploy").mkdir(parents=True)
         shutil.copy2(REPO / "deploy.sh", self.repo / "deploy.sh")
         for name in (".env.example", "compose.yaml", "Dockerfile"):
@@ -73,7 +73,7 @@ class EntrypointTests(unittest.TestCase):
         self.git("config", "user.email", "deployment-test@example.invalid")
         self.git("add", ".")
         self.git("commit", "-m", "fixture")
-        self.git("remote", "add", "origin", "https://github.com/CiBeDerORG/EasyTier.git")
+        self.git("remote", "add", "origin", "https://github.com/CiBeDerORG/EasyNetTopo.git")
         self.remote = self.base / "remote.git"
         subprocess.run([REAL_GIT, "init", "--bare", str(self.remote)], check=True, capture_output=True)
         self.git("push", str(self.remote), "HEAD:refs/heads/dev")
@@ -238,7 +238,7 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.actions(), [])
 
     def test_same_repository_path_on_another_host_is_rejected(self):
-        self.git("remote", "set-url", "origin", "https://example.invalid/CiBeDerORG/EasyTier.git")
+        self.git("remote", "set-url", "origin", "https://example.invalid/CiBeDerORG/EasyNetTopo.git")
         result = self.run_entry("up")
         self.assertNotEqual(result.returncode, 0)
         self.assertEqual(self.actions(), [])

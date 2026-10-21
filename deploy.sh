@@ -15,7 +15,7 @@ usage() {
   status  查看容器和编译状态；服务未就绪时退出码非零
   logs    跟随日志，可指定 backend 或 frontend
 
-可在父目录运行 ./easytier/deploy.sh。编译失败直接失败，不回滚。
+可在父目录运行 ./EasyNetTopo/deploy.sh；仓库目录名可自定义。编译失败直接失败，不回滚。
 USAGE
 }
 
@@ -33,7 +33,7 @@ DATA_DIR="$REPO_DIR/data"
 [[ "$REPO_DIR" != *$'\n'* && "$REPO_DIR" != *$'\r'* ]] || fail '仓库路径不能包含换行。'
 [[ -f "$REPO_DIR/deploy/.env.example" && -f "$REPO_DIR/deploy/compose.yaml" ]] || fail '缺少 deploy/ 配套文件；请使用包含部署文件的分支。'
 [[ ! -L "$ENV_FILE" ]] || fail '.env 必须是当前仓库中的普通文件，不能是符号链接。'
-[[ ! -L "$DATA_DIR" ]] || fail 'data/ 不能是符号链接；移动整个 easytier/ 可更改部署总目录。'
+[[ ! -L "$DATA_DIR" ]] || fail 'data/ 不能是符号链接；移动整个仓库目录可更改部署总目录。'
 mkdir -p -- "$DATA_DIR/run"
 
 if [[ ! -e "$ENV_FILE" ]]; then
@@ -73,7 +73,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
     export "$key"
 done < "$ENV_FILE"
 
-: "${GIT_BRANCH:=}" "${COMPOSE_PROJECT_NAME:=easytier-modding}"
+: "${GIT_BRANCH:=}" "${COMPOSE_PROJECT_NAME:=easynettopo-modding}"
 : "${RUST_VERSION:=1.95}" "${NODE_VERSION:=22}" "${PNPM_VERSION:=10.34.7}" "${PROTOC_VERSION:=35.1}"
 : "${CARGO_BUILD_PROFILE:=dev}" "${CARGO_BUILD_JOBS:=2}"
 : "${EASYTIER_WATCH:=true}" "${EASYTIER_POLL_INTERVAL:=1}" "${EASYTIER_DEBOUNCE:=1}" "${START_TIMEOUT:=1800}"
@@ -165,9 +165,9 @@ if [[ "$ACTION" == stop ]]; then
 fi
 
 command -v git >/dev/null || fail '需要 git。'
-[[ "$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null)" == "$REPO_DIR" ]] || fail 'deploy.sh 必须位于 EasyTier Git 仓库根目录。'
+[[ "$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null)" == "$REPO_DIR" ]] || fail 'deploy.sh 必须位于项目 Git 仓库根目录；仓库目录名可自定义。'
 origin=$(git -C "$REPO_DIR" remote get-url origin)
-[[ "${origin,,}" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)cibederorg/easytier(\.git)?/?$ ]] || fail 'origin 必须指向 GitHub 上的 CiBeDerORG/EasyTier（HTTPS 或 SSH）。'
+[[ "${origin,,}" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)cibederorg/easynettopo(\.git)?/?$ ]] || fail 'origin 必须指向 GitHub 上的 CiBeDerORG/EasyNetTopo（HTTPS 或 SSH）。'
 current_branch=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD || true)
 selected_branch=${GIT_BRANCH:-$current_branch}
 [[ -n "$selected_branch" ]] || fail '当前为 detached HEAD；请在 .env 中填写 GIT_BRANCH。'

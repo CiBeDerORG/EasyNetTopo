@@ -61,3 +61,29 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 4. 目标 NAS 文件系统上的监听时延、主机重启后的手动启动，以及 HTTPS 反向代理部署。
 
 浏览器完整页面与真实后端账户流程也未执行；本次没有修改这些业务流程。功能实现已交付，需求总体保留 `in-review`，等待目标主机的 Docker/Rust 验收证据。
+
+## EasyNetTopo 仓库迁移核查（2026-10-21）
+
+迁移基线：`CiBeDerORG/EasyNetTopo:main@a3e35a2a01ca87a87f356763a69fc49a38cb6258`。上面的 Python 30/30、Node 8/8 等结果属于旧仓库的初次实现，本轮没有复跑，也不据此宣称新仓库的 Docker 部署通过。
+
+### 本轮已执行
+
+| 核查 | 结果与边界 |
+| --- | --- |
+| 仓库快照 | 1526 个文件逐 blob 核对，树 `a2a421b44cd29d6795fd28632a76af06c072bbaa` 与远端基线一致；仅在该基线上修改部署相关文件。 |
+| `bash -n deploy.sh`、`git diff --check` | 通过，覆盖入口语法和变更空白。 |
+| Python `ast.parse` | 迁移后的入口测试夹具语法通过；没有执行测试。 |
+| 入口执行权限 | 新仓库原模式为 `100644`；已恢复 `100755`，直接调用无需另加 `bash`。 |
+| 迁移配置静态复核 | origin 接受新仓库的 HTTPS、SCP 风格 SSH、`ssh://` 地址；入口、模板、Compose 默认项目名一致；已有 `.env` 创建/保留逻辑不变。 |
+| 独立目录审查 | /root/migration_runtime_review 核对部署入口、运行器、Cargo/build.rs、pnpm、Vite 和 Proto 生成器：当前 Linux Docker 链路没有外层目录名或宿主固定绝对路径校验。 |
+
+### 主目录约束结论
+
+- `deploy.sh` 根据脚本目录和 `pwd -P` 定位；`up/update` 要求该目录就是 Git 仓库根。Git、Compose、构建子进程使用明确的工作目录，不依赖调用时的 cwd。
+- `.env` 必须是普通文件，`data/` 不能是符号链接；路径不能包含 CR/LF。仓库外的单文件入口符号链接不在现有支持范围内。
+- 容器中的 `/source`、`/data` 是挂载约定；内部 `easytier-*` 目录、Cargo 包名、pnpm 成员和生成器相对路径应保留。
+- `.cargo/config.toml` 中 OHOS 专用绝对 SDK 路径属于其他目标平台，不参与本次 Linux amd64/arm64 Docker 构建。
+
+### 本轮未执行
+
+按用户对简单改动的要求，未运行测试、安装依赖、构建镜像或触发 GitHub Actions。未连接用户 NAS，真实 Docker/Rust 启动验收仍待目标主机完成；这些静态结果只证明迁移改动与目录约束的审查范围。
