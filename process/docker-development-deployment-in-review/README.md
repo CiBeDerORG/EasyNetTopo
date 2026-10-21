@@ -1,7 +1,7 @@
 ---
 feature: docker-development-deployment
 status: in-review
-baseline: main@d986fc68800a0c66df99b268aacece1aadeb2bd0
+baseline: main@2b2372a6ee7b6daa7323e71b95f5cb3de38e924d
 initial_baseline: CiBeDerORG/EasyTier:feat/ecosystem-web-ui@753339df58d842ab4de36f5cd1c90788c995ea0c
 updated_at: 2026-10-22
 ---
@@ -25,6 +25,7 @@ updated_at: 2026-10-22
 | EV-DDP-05 | 拟新增方案 | 容器只读挂载源码，同步到各自 `data/workspaces/` 编译；共享库源码 alias、同源 API 与独立增量 watcher。 |
 | EV-DDP-06 | 已核实事实 | 新仓库 `deploy.sh` 的 origin 校验仍指向旧仓库，Git 模式为 `100644`，不能按说明直接执行；入口按脚本位置定位并校验 Git 根目录，Cargo/pnpm/生成器依赖内部相对布局，不校验外层目录名。DDP-101 负责迁移修复，/root/migration_runtime_review 只读核查目录约束与差异。 |
 | EV-DDP-07 | 已核实事实 | `main@d986fc68800a0c66df99b268aacece1aadeb2bd0` 的 `deploy.sh::ENV_KEYS` 不接受 `BUILDX_BUILDER`；用户在 NAS 的 `.env` 配置此项后被拒绝。已有 EasyADB 构建器为 `easyadb-proxy`，当前入口仅接受从调用环境继承它。DDP-101 负责补齐配置契约，独立审查只读复核优先级与重新执行行为。 |
+| EV-DDP-08 | 已核实事实 | `main@2b2372a6ee7b6daa7323e71b95f5cb3de38e924d` 已接受构建器名称，但 `ENV_KEYS` 仍未接受 `BUILDKIT_PROGRESS`；用户的 `.env` 第 59 行因此阻塞。DDP-101 补齐日志格式配置，沿用非空调用环境覆盖与重执行来源规则。 |
 
 ## 进度与下一步
 
@@ -33,6 +34,8 @@ updated_at: 2026-10-22
 本轮 DDP-101 已完成入口、执行权限、模板、Compose 默认项目名、使用说明和原有测试夹具的迁移维护；目录约束由独立只读审查并行核对。Bash/Python 语法与差异检查通过，证据交给 DDP-104 记录于 [verification.md](../../deploy/verification.md)。按用户对简单改动的要求，本轮未运行测试、构建或 GitHub Actions；总体仍等待目标 NAS 的完整部署验收。
 
 2026-10-22：DDP-101 已修复 `.env` 对 `BUILDX_BUILDER` 的支持；保留命令环境覆盖、默认构建器与现有失败语义。/root 唯一写入入口、模板和过程文档，/root/migration_runtime_review 的独立只读审查通过；本轮 Bash 语法和差异检查通过，未运行测试、构建或 CI。DDP-104 继续等待目标机完整部署结果。
+
+2026-10-22：DDP-101 已补齐 `.env` 的 `BUILDKIT_PROGRESS` 支持；/root 唯一写入，/root/migration_runtime_review 独立静态复审通过。Bash 语法与差异检查通过，未运行测试、构建或 CI；目标机部署验收仍由 DDP-104 跟进。
 
 ## 问题与限制
 
@@ -43,6 +46,7 @@ updated_at: 2026-10-22
 | ISSUE-DDP-03 | 已决策 | Docker 自身镜像层仍由 Docker data-root 管理；项目运行、构建工作区与缓存全部位于仓库 data，不调整 daemon 配置。 |
 | ISSUE-DDP-04 | 已解决 | DDP-101 已将 origin 白名单迁移到新仓库，恢复入口 `100755`，同步文档和模板，并明确外层目录自由、入口必须位于 Git 根目录及 .env/data 的符号链接限制。验证范围见本轮记录。 |
 | ISSUE-DDP-05 | 配置修复已交付 | `.env` 中的 `BUILDX_BUILDER` 被白名单拒绝，阻塞复用已有构建器。DDP-101 已补齐解析、模板与使用说明；此修复不包含镜像认证、Dockerfile 下载或运行时依赖的代理接线，目标机完整部署仍待验证。 |
+| ISSUE-DDP-06 | 配置修复已交付 | `.env` 中的 `BUILDKIT_PROGRESS` 未被接受；DDP-101 已增加日志格式项、模板与说明，修复不改变构建器或下载代理。 |
 
 ## 维护记录
 
@@ -53,3 +57,5 @@ updated_at: 2026-10-22
 - 2026-10-21：完成 EasyNetTopo 仓库迁移与主目录约束复核；修复 origin 白名单与入口执行位，内部包名和源码相对布局保持兼容。仅执行本轮静态核查，保留原项目历史测试记录。
 
 - 2026-10-22：补齐 `.env` 的已有 Buildx 构建器选择，保留命令环境覆盖并修正重执行时的来源区分；模板和说明同步，仅执行语法与静态审阅。
+
+- 2026-10-22：继续补齐 `.env` 的 `BUILDKIT_PROGRESS`，默认 auto，示例 plain；沿用相同覆盖和重执行规则，仅执行语法与静态审阅。

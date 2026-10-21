@@ -39,3 +39,9 @@ updated_at: 2026-10-22
 依据 EV-DDP-07，/root 重新认领入口、模板和文档，补齐 `.env` 的 `BUILDX_BUILDER` 配置。非空调用环境优先于 `.env`；二者均空时交给 Docker 当前选择。`update` / 分支切换重新执行入口前恢复原始调用环境，避免把文件配置误当作命令环境覆盖。复用现有 Compose 构建，不创建或修改共享构建器。独立审查 /root/migration_runtime_review 只读复核；本轮按用户要求仅做语法与静态核查，不运行测试或 CI。
 
 修复已交付：`bash -n deploy.sh`、`git diff --check` 通过；独立静态复审未发现阻塞。既有 `.env` 保留，新增字段可由用户直接填写；构建前和 `init` 显示选用名称。首次更新须手动 Git 拉取，旧入口的 `update` 会先因未知字段失败。验证说明交接 DDP-104；真实 NAS 构建结果仍待回传。
+
+## 构建日志配置补充（2026-10-22）
+
+依据 EV-DDP-08，/root 认领入口、模板和文档，补齐 `BUILDKIT_PROGRESS`；沿用构建器项的非空调用环境覆盖和重执行恢复规则。空值默认 `auto`，支持 Docker 文档中的 `auto/plain/tty/quiet/none/rawjson`。独立审查只读复核，不运行测试或 CI。
+
+补充已交付：Bash 语法、差异检查和 /root/migration_runtime_review 独立静态复审通过。现有 `.env` 保留，两种 Docker 控制项分别保存调用环境，重新执行时分别恢复；仅控制 BuildKit 输出，不影响后续应用日志或代理。结果交接 DDP-104，真实构建未执行。

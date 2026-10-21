@@ -46,9 +46,10 @@ fi
 
 # Parse data, never source/eval the file. Compose receives these exact values as
 # exported variables, so '$' in a secret cannot be reinterpreted by .env expansion.
-# Keep Docker's caller-supplied builder override while loading repository defaults.
+# Keep Docker's caller-supplied build overrides while loading repository defaults.
 BUILDX_BUILDER_OVERRIDE=${BUILDX_BUILDER:-}
-ENV_KEYS='GIT_BRANCH COMPOSE_PROJECT_NAME BUILDX_BUILDER RUST_VERSION NODE_VERSION PNPM_VERSION PROTOC_VERSION CARGO_BUILD_PROFILE CARGO_BUILD_JOBS EASYTIER_WATCH EASYTIER_POLL_INTERVAL EASYTIER_DEBOUNCE START_TIMEOUT WEB_BIND_ADDRESS WEB_PORT API_BIND_ADDRESS ET_API_SERVER_PORT CONFIG_BIND_ADDRESS ET_CONFIG_SERVER_PORT ET_CONFIG_SERVER_PROTOCOL ET_WEB_PUBLIC_ORIGIN ET_DISABLE_REGISTRATION ET_ALLOW_AUTO_CREATE_USER ET_WEBHOOK_URL ET_WEBHOOK_SECRET ET_INTERNAL_AUTH_TOKEN ET_WEB_INSTANCE_ID ET_WEB_INSTANCE_API_BASE_URL ET_GATEWAY_PEER_URL ET_GATEWAY_RELAY_DATA VITE_HMR_HOST VITE_HMR_PORT VITE_HMR_PROTOCOL VITE_ALLOWED_HOSTS'
+BUILDKIT_PROGRESS_OVERRIDE=${BUILDKIT_PROGRESS:-}
+ENV_KEYS='GIT_BRANCH COMPOSE_PROJECT_NAME BUILDX_BUILDER BUILDKIT_PROGRESS RUST_VERSION NODE_VERSION PNPM_VERSION PROTOC_VERSION CARGO_BUILD_PROFILE CARGO_BUILD_JOBS EASYTIER_WATCH EASYTIER_POLL_INTERVAL EASYTIER_DEBOUNCE START_TIMEOUT WEB_BIND_ADDRESS WEB_PORT API_BIND_ADDRESS ET_API_SERVER_PORT CONFIG_BIND_ADDRESS ET_CONFIG_SERVER_PORT ET_CONFIG_SERVER_PROTOCOL ET_WEB_PUBLIC_ORIGIN ET_DISABLE_REGISTRATION ET_ALLOW_AUTO_CREATE_USER ET_WEBHOOK_URL ET_WEBHOOK_SECRET ET_INTERNAL_AUTH_TOKEN ET_WEB_INSTANCE_ID ET_WEB_INSTANCE_API_BASE_URL ET_GATEWAY_PEER_URL ET_GATEWAY_RELAY_DATA VITE_HMR_HOST VITE_HMR_PORT VITE_HMR_PROTOCOL VITE_ALLOWED_HOSTS'
 for key in $ENV_KEYS; do unset "$key"; done
 trim() {
     TRIMMED=${1#"${1%%[![:space:]]*}"}
@@ -76,6 +77,7 @@ while IFS= read -r line || [[ -n "$line" ]]; do
 done < "$ENV_FILE"
 
 BUILDX_BUILDER=${BUILDX_BUILDER_OVERRIDE:-${BUILDX_BUILDER:-}}
+BUILDKIT_PROGRESS=${BUILDKIT_PROGRESS_OVERRIDE:-${BUILDKIT_PROGRESS:-auto}}
 : "${GIT_BRANCH:=}" "${COMPOSE_PROJECT_NAME:=easynettopo-modding}"
 : "${RUST_VERSION:=1.95}" "${NODE_VERSION:=22}" "${PNPM_VERSION:=10.34.7}" "${PROTOC_VERSION:=35.1}"
 : "${CARGO_BUILD_PROFILE:=dev}" "${CARGO_BUILD_JOBS:=2}"
@@ -86,6 +88,10 @@ BUILDX_BUILDER=${BUILDX_BUILDER_OVERRIDE:-${BUILDX_BUILDER:-}}
 for key in $ENV_KEYS; do export "$key"; done
 
 [[ "$COMPOSE_PROJECT_NAME" =~ ^[a-z0-9][a-z0-9_-]*$ ]] || fail 'COMPOSE_PROJECT_NAME 只能使用小写字母、数字、下划线与连字符。'
+case "$BUILDKIT_PROGRESS" in
+    auto|plain|tty|quiet|none|rawjson) ;;
+    *) fail 'BUILDKIT_PROGRESS 只能是 auto、plain、tty、quiet、none 或 rawjson。' ;;
+esac
 for key in WEB_PORT ET_API_SERVER_PORT ET_CONFIG_SERVER_PORT; do
     value=${!key}
     [[ "$value" =~ ^[0-9]{1,5}$ ]] && (( 10#$value >= 1 && 10#$value <= 65535 )) || fail "$key 必须是 1–65535 的端口。"
@@ -120,7 +126,7 @@ if [[ "$ACTION" == init ]]; then
     info "配置：$ENV_FILE"
     info "数据：$DATA_DIR"
     info "分支：${GIT_BRANCH:-当前检出分支}；Web 端口：$WEB_PORT"
-    info "构建器：${BUILDX_BUILDER:-Docker 当前默认选择}"
+    info "构建器：${BUILDX_BUILDER:-Docker 当前默认选择}；构建日志：$BUILDKIT_PROGRESS"
     exit 0
 fi
 
@@ -198,6 +204,11 @@ reexec_up() {
     else
         unset BUILDX_BUILDER
     fi
+    if [[ -n "$BUILDKIT_PROGRESS_OVERRIDE" ]]; then
+        export BUILDKIT_PROGRESS="$BUILDKIT_PROGRESS_OVERRIDE"
+    else
+        unset BUILDKIT_PROGRESS
+    fi
     exec bash "$REPO_DIR/deploy.sh" up
 }
 
@@ -215,7 +226,7 @@ if [[ "$ACTION" == update ]]; then
     reexec_up
 fi
 
-info "构建开发环境；源码分支：$selected_branch；构建器：${BUILDX_BUILDER:-Docker 当前默认选择}"
+info "构建开发环境；源码分支：$selected_branch；构建器：${BUILDX_BUILDER:-Docker 当前默认选择}；构建日志：$BUILDKIT_PROGRESS"
 "${COMPOSE[@]}" build backend
 rm -f -- "$DATA_DIR/run/pause"
 "${COMPOSE[@]}" up --detach --no-build --force-recreate --remove-orphans

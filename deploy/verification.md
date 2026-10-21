@@ -101,3 +101,11 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 ### 本轮未执行与边界
 
 按用户对简单改动的要求，未增加或执行测试，未构建镜像、安装依赖或触发 GitHub Actions。未连接 NAS 验证新入口；不将本轮静态结果记作镜像拉取或应用启动成功。此前日志中的镜像站 502、宿主端认证请求、Dockerfile 下载和运行容器依赖下载的代理接线均不在此配置修复范围内。
+
+## BuildKit 日志配置补充（2026-10-22）
+
+基线：`main@2b2372a6ee7b6daa7323e71b95f5cb3de38e924d`。用户随后反馈 `.env` 第 59 行 `BUILDKIT_PROGRESS` 被拒绝。本轮补齐解析、默认值、合法日志格式校验、模板和说明；默认 `auto`，支持 `plain` 排错。
+
+- `bash -n deploy.sh`、`git diff --check` 通过。
+- /root/migration_runtime_review 独立静态复审通过：先取非空调用环境、文件值或默认 auto，再校验；重新执行前分别恢复 builder 与 progress 的原始调用环境。
+- 未新增或执行测试，未构建镜像、安装依赖或触发 CI；没有连接 NAS。此项只解除配置解析阻塞，不代表代理下载或部署运行通过。
