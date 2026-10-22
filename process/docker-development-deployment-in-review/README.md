@@ -83,3 +83,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：protoc Release Assets TLS 握手失败
 
 用户 FnOS 构建已到 `protoc 35.1` 安装阶段，下载过程中在 `release-assets.githubusercontent.com:443` 遇到 `curl (35) SSL_ERROR_SYSCALL`。DDP-101 增加 `deploy/install-protoc.sh`：先官方 GitHub Release，再 SourceForge 同版本非官方镜像；均校验官方 GitHub Release API 提供的架构 SHA-256，拒绝校验失败文件，不降低 TLS 校验也不修改共享 BuildKit/Mihomo。隔离模拟 4/4 通过，真实 NAS 网络下载和应用部署仍由 DDP-104 验收。
+
+## 2026-10-22：运行阶段 Cargo 代理缺口及前端 API 连带故障
+
+FNOS Docker 镜像已构建，backend 在 crates.io 索引下载持续超时，尝试获取 `EasyTier/kcp-sys` Git 依赖；frontend 访问后端 `:11211` 报 ECONNREFUSED。DDP-101 阅读 `deploy/build-mihomo.sh`、`deploy/runner.py` 和 `deploy/compose.yaml` 后确认 Buildx 构建代理未延伸到运行服务。现按 BUILDX_BUILDER=easyadb-proxy 选项叠加 compose.proxy.yaml，运行容器加入 proxy-net，读取既有 BuildKit 的认证代理，仅用于出站依赖下载；NO_PROXY 保留内部 backend/frontend 通信。状态保留 in-review，完整 FnOS Cargo 构建及 API 就绪待验收。

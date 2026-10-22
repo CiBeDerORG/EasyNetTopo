@@ -65,3 +65,7 @@ updated_at: 2026-10-22
 ## protoc 安装下载源容错（2026-10-22）
 
 在 `deploy/Dockerfile` 接入可检查的 `deploy/install-protoc.sh`，解决 GitHub Release 重定向到 `release-assets.githubusercontent.com` 后 TLS 连接失败。下载先走官方 Release，失败再尝试 SourceForge exact mirror；必须匹配 35.1 对应架构的官方 SHA-256。维护 amd64/arm64 和版本固定契约，未知版本无校验值拒绝；不改变安装目标、BuildKit 或运行时配置。隔离模拟 4 个场景通过，FnOS 端到端待确认。
+
+## 运行容器 Cargo/pnpm 代理修复（2026-10-22）
+
+只修改部署层，新增 `deploy/compose.proxy.yaml`、`deploy/runtime-proxy.sh` 并在根 `deploy.sh` 通过显式的 `easyadb-proxy` 模式启用。Compose 服务同时连接默认网络和已有 proxy-net，代理认证从 BuildKit 内只读提取，不提交密钥；NO_PROXY 限定内部直连，Cargo Git fetch 可使用代理。对默认无代理部署路径、API 端口、Git 定时检查与已有配置保持兼容。定向静态/代理模拟通过，实际 FnOS 运行时构建留 DDP-104 验收。

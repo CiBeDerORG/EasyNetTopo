@@ -148,6 +148,16 @@ export LOCAL_UID="$(id -u)" LOCAL_GID="$(id -g)"
 # Use only the explicit config; never accidentally load another Compose project.
 unset COMPOSE_FILE COMPOSE_PROFILES
 COMPOSE=(docker compose --project-directory "$REPO_DIR" --env-file /dev/null --project-name "$COMPOSE_PROJECT_NAME" --file "$REPO_DIR/deploy/compose.yaml")
+# BuildKit's proxy environment is not inherited by Cargo/pnpm processes in the
+# running services. Only the existing EasyADB builder opts into this overlay.
+unset EASYTIER_RUNTIME_PROXY
+if [[ "$BUILDX_BUILDER" == easyadb-proxy ]]; then
+    COMPOSE+=(--file "$REPO_DIR/deploy/compose.proxy.yaml")
+    if [[ "$ACTION" == up || "$ACTION" == update ]]; then
+        source "$REPO_DIR/deploy/runtime-proxy.sh"
+        info '运行容器代理已配置：backend/frontend 访问外网走 Mihomo，内部服务直连。'
+    fi
+fi
 
 show_status() {
     "${COMPOSE[@]}" ps --all

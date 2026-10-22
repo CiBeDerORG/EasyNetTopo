@@ -121,7 +121,7 @@ sudo env BUILDX_BUILDER=easyadb-proxy BUILDKIT_PROGRESS=plain bash deploy.sh
 
 `BUILDKIT_PROGRESS` 同样支持命令环境中的非空值覆盖 `.env`，留空默认 `auto`；选择 `plain` 可逐行显示构建步骤，便于复制日志。可选值为 `auto`、`plain`、`tty`、`quiet`、`none`、`rawjson`，含义见 [Docker 构建日志配置](https://docs.docker.com/build/building/variables/#buildkit_progress)。它只控制构建日志，不影响代理或应用配置。
 
-`easyadb-proxy` 模式从现有 `buildx_buildkit_easyadb-proxy0` 容器读取代理设置，不把凭据写入项目仓库或日志。前置要求是已有 BuildKit 容器已连接 `proxy-net`，且运行中的 `mihomo` 也连接此网络；若已有代理凭据发生变化，先通过 EasyADB 原部署入口维护共享构建器。**该模式仅覆盖镜像认证和 Dockerfile RUN 下载；运行容器内 Cargo/pnpm 的下载代理仍需单独验证。**若仍提示 `.env` 不支持 `BUILDX_BUILDER` 或 `BUILDKIT_PROGRESS`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
+`easyadb-proxy` 模式从现有 `buildx_buildkit_easyadb-proxy0` 容器读取代理设置，不把凭据写入项目仓库或日志。前置要求是已有 BuildKit 容器已连接 `proxy-net`，且运行中的 `mihomo` 也连接此网络；若已有代理凭据发生变化，先通过 EasyADB 原部署入口维护共享构建器。**新版本也给 backend/frontend 运行容器接线 Mihomo；首次 Cargo 和 pnpm 的真实网络访问仍须在 FNOS 实测。**若仍提示 `.env` 不支持 `BUILDX_BUILDER` 或 `BUILDKIT_PROGRESS`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
 
 ### Dockerfile 中的 Debian 软件源 502
 
@@ -130,6 +130,16 @@ sudo env BUILDX_BUILDER=easyadb-proxy BUILDKIT_PROGRESS=plain bash deploy.sh
 `deploy/Dockerfile` 在执行 APT 前将 Debian 官方 `deb.debian.org` / `security.debian.org` 的 HTTP 源切换为 HTTPS，保留原有 `Signed-By`，并为索引、包下载设置最多三次重试。不改 EasyADB 共用的 BuildKit，也不更换镜像站或要求修改主机全局设置。
 
 如果 HTTPS 仍返回代理 `502`，请检查 Mihomo 针对 `deb.debian.org` 的路由、上游节点或 DNS；这类网络故障无法靠放宽 APT 签名验证解决。运行容器内 Cargo/pnpm 下载仍是独立阶段，不能因 Dockerfile 构建通过就认定运行时网络也已配置妥当。
+
+### 运行容器 Cargo / pnpm 的 Mihomo 代理
+
+通过 BuildKit 构建完成镜像**不代表**运行容器里的 Cargo、Git、pnpm 下载可以上网。此前 FNOS 首次启动时 backend 的 `Updating crates.io index` 不断超时，导致 Rust 后端尚未监听端口；frontend 随后出现 `/api/v1/auth/me` 的 `ECONNREFUSED backend:11211` 是连带故障，并非需要改变前端 API 地址。
+
+当 `.env` 使用 `BUILDX_BUILDER=easyadb-proxy` 时，入口自动叠加 [compose.proxy.yaml](compose.proxy.yaml)，在原项目网络之外为 backend/frontend 额外接入已有 `proxy-net` 网络，两个容器通过 `mihomo:7890` 出站下载 crates.io、GitHub Git 依赖、npm 包。Cargo 设置 `CARGO_NET_GIT_FETCH_WITH_CLI=true` 和单请求超时 120 秒。 `NO_PROXY` 排除 `backend`、`frontend`、`localhost` 等名称，内部 API / WebSocket 通信仍保持直连。
+
+代理认证 URL 从已有 `buildx_buildkit_easyadb-proxy0` 的环境变量取得，不写进项目 `.env`、源码或常规日志。此 URL 会进入运行容器环境，拥有 Docker 管理权限的用户仍能从 `docker inspect` 查看；**不要公开带有容器环境变量的 Docker inspect 或 Compose config 输出**。模式启用前会检查 Mihomo 运行状态及网络连接，不会重建 BuildKit、修改 Mihomo 或 Docker daemon。
+
+根目录 `deploy.sh` 不变：拉取代码后运行 `sudo bash deploy.sh` 会重新创建 backend/frontend，把网络和代理传进去；仅 `git pull` 不会给已经启动的容器补充环境变量。非 `easyadb-proxy` 模式保持原 Compose 网络配置。`deploy.sh check` 在 Git 文件树无变化时仍不触碰 Docker；`status/logs/stop` 也不要求 Mihomo 始终在线。此修复不绕过管理后台 HTTPS 来源校验。
 
 ### 远程域名与 HMR
 

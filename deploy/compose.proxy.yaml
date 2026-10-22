@@ -1,0 +1,32 @@
+# Only applied for the existing easyadb-proxy Buildx builder.
+# Keep the default Compose network for backend/frontend API traffic.
+x-proxy-environment: &proxy_environment
+  HTTP_PROXY: ${EASYTIER_RUNTIME_PROXY:-}
+  HTTPS_PROXY: ${EASYTIER_RUNTIME_PROXY:-}
+  http_proxy: ${EASYTIER_RUNTIME_PROXY:-}
+  https_proxy: ${EASYTIER_RUNTIME_PROXY:-}
+  NO_PROXY: localhost,127.0.0.1,::1,backend,frontend,mihomo
+  no_proxy: localhost,127.0.0.1,::1,backend,frontend,mihomo
+
+services:
+  backend:
+    networks:
+      - default
+      - proxy-net
+    environment:
+      <<: *proxy_environment
+      CARGO_HTTP_PROXY: ${EASYTIER_RUNTIME_PROXY:-}
+      CARGO_NET_GIT_FETCH_WITH_CLI: 'true'
+      CARGO_HTTP_TIMEOUT: '120'
+  frontend:
+    networks:
+      - default
+      - proxy-net
+    environment:
+      <<: *proxy_environment
+
+networks:
+  default: {}
+  proxy-net:
+    external: true
+    name: proxy-net

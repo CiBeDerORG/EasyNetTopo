@@ -43,3 +43,5 @@ updated_at: 2026-10-22
 2026-10-22 修复 cron/root Git 身份冲突，收到非 root-owned Git 仓库由 root cron 执行时触发 safe.directory 的用户日志证据。入口现由原登录用户执行全部 Git，Docker 保持 root；新加跨 UID 测试。仍需在 FnOS 回测每分钟检查、成功更新与失败重试。
 
 2026-10-22 DDP-101 已添加 protoc 35.1 官方 Release/SourceForge 双源与 SHA-256 钉住的安装方案，模拟失败回退、错误哈希拒绝和成功版本验证 4/4 通过。未访问用户 FnOS，也未真实下载这两台架构的镜像包；仍需记录目标设备的 curl 下载、哈希校验和容器最终启动结果，方可验收。
+
+2026-10-22 收到 DDP-101 运行期 Cargo/pnpm 代理修复：已核对 BuildKit 构建与运行容器是两个独立代理层；Compose 新覆盖只在 easyadb-proxy 模式启用。模拟验证代理提取和内部网络保留，真实 FNOS 要分别确认 backend crates.io/Git、frontend pnpm 下载、后端健康检查和登录 API /api/v1/auth/me 正常响应，之前的 ECONNREFUSED 为后端未就绪导致。未连接 NAS 完成运行验收。

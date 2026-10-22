@@ -156,3 +156,13 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 在 `deploy/install-protoc.sh` 中先尝试官方 GitHub Release，连接失败时使用 SourceForge 的非官方同版本镜像，文件通过官方 SHA-256 校验、ZIP 解压和版本验证后才安装。保留 HTTPS 协议和证书验证；两个域名均无法访问时明确报代理路由问题。其他版本/架构没有官方校验值时拒绝下载，需要先补充对应哈希。
 
 隔离测试：在本地 shell/Python 虚拟的 curl/ZIP/sha256sum 环境中执行 4/4 通过，覆盖无匹配版本、双下载源均不可达、镜像数据篡改拒装、官方失败后镜像成功。实际 FnOS 双源网络连通性、Docker 构建及运行容器内依赖下载安装尚未执行。
+
+## FNOS 运行容器 Cargo 超时 / 前端 API ECONNREFUSED（2026-10-22）
+
+真实用户日志：`backend` 在 `Updating crates.io index` 阶段连续 `[28] Timeout was reached`，又尝试下载 Git 依赖 `https://github.com/EasyTier/kcp-sys`；frontend Vite 反复报告 `http proxy error: /api/v1/auth/me` 与 `ECONNREFUSED 172.24.0.3:11211`。推断后端尚未完成 Rust 编译/启动，所以前端错误是后端不可用的次生结果；不应直接修改前端 API IP/端口。
+
+代码核对：`deploy/build-mihomo.sh` 仅覆盖 Docker 镜像 Buildx 和 Dockerfile RUN 的代理；Compose backend/frontend 原先只连接默认网络，运行时 Cargo/pnpm 继承不到 Mihomo。 `deploy/runner.py` 以自身进程环境启动 Cargo、Git、pnpm，适合由 Compose 额外注入运行期变量。
+
+本轮（DDP-101）新增 `deploy/compose.proxy.yaml` 及 `deploy/runtime-proxy.sh`，在用户显式选择 `BUILDX_BUILDER=easyadb-proxy` 时让两个运行服务同时连接默认网络和现有 external `proxy-net`，通过既有 BuildKit 环境提取认证 HTTP(S) 代理，设置大小写 HTTP(S)_PROXY、NO_PROXY，backend 增加 CARGO_HTTP_PROXY / CARGO_NET_GIT_FETCH_WITH_CLI / CARGO_HTTP_TIMEOUT。其他构建器、现有业务网络/端口、后台来源校验不变；无代码更新的定时 check 不获取代理也不操作 Docker。
+
+本地隔离核查已覆盖 Compose 覆盖结构、内部 NO_PROXY、现有 BuildKit 环境的代理提取及停止 Mihomo 时显式失败。新增自动化针对性测试；真实 FNOS 的 crates.io、GitHub、npm 下载和两端服务健康状态尚未验收。带认证的代理地址可被有 Docker 管理权限的人从容器环境中读取，文档明确禁止公开分享容器 inspect/config 的敏感输出。
