@@ -24,15 +24,40 @@ RUN set -eu; \
             "$source"; \
     done
 
-RUN ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm \
-    && apt-get -o Acquire::Retries=3 update \
-    && apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
+# Keep logically independent operations in separate build layers. An error in
+# npm/Rust tooling should not force APT to run again, and logs identify the
+# failing command instead of reporting one large chained RUN instruction.
+RUN set -eux; \
+    if [ ! -e /usr/local/bin/npm ]; then \
+        ln -s ../lib/node_modules/npm/bin/npm-cli.js /usr/local/bin/npm; \
+    fi; \
+    node --version; \
+    npm --version
+
+RUN set -eux; \
+    apt-get -o Acquire::Retries=3 update; \
+    apt-get -o Acquire::Retries=3 install -y --no-install-recommends \
        build-essential ca-certificates clang cmake curl git libclang-dev \
-       libssl-dev mold pkg-config python3 rsync unzip \
-    && rm -rf /var/lib/apt/lists/* \
-    && npm install --global "pnpm@${PNPM_VERSION}" \
-    && npm cache clean --force \
-    && rustup toolchain install "${RUST_VERSION}" --profile minimal
+       libssl-dev mold pkg-config python3 rsync unzip; \
+    rm -rf /var/lib/apt/lists/*
+
+RUN set -eux; \
+    npm install --global "pnpm@${PNPM_VERSION}"; \
+    pnpm --version; \
+    npm cache clean --force
+
+# Official Rust images already include the toolchain. Only install a
+# rustup minor-version name when the base image's patch-version toolchain
+# cannot satisfy the project's RUSTUP_TOOLCHAIN override.
+RUN set -eux; \
+    rustc --version; \
+    cargo --version; \
+    if ! RUSTUP_TOOLCHAIN="${RUST_VERSION}" rustc --version >/dev/null 2>&1; then \
+        echo 'Pinned rustup toolchain name is missing; installing requested channel'; \
+        rustup toolchain install "${RUST_VERSION}" --profile minimal; \
+    fi; \
+    RUSTUP_TOOLCHAIN="${RUST_VERSION}" rustc --version; \
+    RUSTUP_TOOLCHAIN="${RUST_VERSION}" cargo --version
 
 RUN set -eu; \
     case "$(dpkg --print-architecture)" in \

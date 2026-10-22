@@ -37,3 +37,5 @@ updated_at: 2026-10-22
 2026-10-22 收到 DDP-101 的 Debian APT 源 HTTP 502 修复：仅针对 `deploy/Dockerfile` 中官方 Debian 源的 HTTP → HTTPS 和有限下载重试。临时 deb822/legacy 文件的源转换与 Signed-By 保留检查通过；尚未在 FNOS 重跑 `apt-get update`、完整 Docker 镜像或 Cargo/pnpm 下载，验收状态仍为 in_review。
 
 2026-10-22 新增定时部署待验收：必须在目标 FnOS 实测 cron 启停、重启后调度、原 Git 用户 SSH 凭据、无变更跳过 Docker、有变更快进部署、失败保持待重试，以及与人工部署锁竞争。模拟检查不能替代真机验收；保持 in_review。
+
+2026-10-22 新收到 Dockerfile 工具链构建退出码 1 的诊断修复：拆分 RUN 缓存/错误边界，将额外 Rustup 安装改为工具链版本名缺失时才执行。没有完整旧构建日志，不将推测归因为 npm/APT/Rustup 中的任何一步。须在实际 FnOS 再次运行 plain 日志并记录失败的具体层或完整镜像成功证据。

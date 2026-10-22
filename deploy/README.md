@@ -186,6 +186,12 @@ sudo bash deploy.sh schedule stop        # 关闭定时任务，不停止当前�
 
 手动 `git pull` 的文件更新不是跨服务原子事务；监听器会防抖并在编译期间检查源码是否又变更。需要一次明确停止、拉取、重新部署时使用 `update`。
 
+### 工具链镜像构建失败定位
+
+如构建输出只有 `RUN ... did not complete successfully: exit code: 1`，这**不足以确定失败的是哪条联网命令**。目前 Dockerfile 已把 Node/npm 初始化、Debian APT 安装、pnpm 安装和 Rust 工具链检查拆成不同的 `RUN` 层；`rust:${RUST_VERSION}-bookworm` 基础镜像已提供 Rust，仅在项目要求的 Rustup 名称缺失时补装，不再无条件重复下载。这是减少重复下载并提高故障定位能力，不会自动修复 Mihomo 的上游网络故障。
+
+在 `.env` 中配置 `BUILDKIT_PROGRESS=plain`，再次运行根目录部署入口，重点查找失败步骤**上方首次出现的** `npm ERR!`、`E:`、`error:`、`502` 或连接超时信息。若需要分享完整日志，请遮盖可能出现的代理认证地址、密钥、令牌和其他敏感值。下层构建成功会复用缓存；运行容器内部 Cargo/pnpm 依赖下载仍另行排查。
+
 ## 失败语义
 
 编译失败就是失败：旧后端在编译前停止，失败后不重新启动旧二进制，不恢复旧镜像、不切回旧提交、不回滚数据库。`data/cache/target` 中可能仍有之前的编译文件，它们只是缓存，失败路径不会启动它们。

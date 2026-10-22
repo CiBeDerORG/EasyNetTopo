@@ -71,3 +71,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：定时分支更新
 
 参照已交付 EasyADB 的 cron 定时更新接口新增 EasyNetTopo 根入口 `deploy.sh schedule start <间隔>/status/logs/stop`；所有辅助实现在 `deploy/scheduled-deploy.sh`，状态/日志放入 `data/run/`。新增 `deploy.sh check` 先 fetch/快进检查远端 Git 树，只有树变化、部署尚无成功记录或上轮失败才构建，未变化不碰 Docker。cron 登记每分钟轮询与用户设定频率的到期节流，Git 操作沿用原 sudo 登录用户身份，复用应用部署锁。本次不改变已知编译失败不回滚原则；NAS cron/构建整体验收待实机测试。
+
+## 2026-10-22：工具链 RUN 退出码 1
+
+用户在源 HTTPS 修复后回传 `deploy/Dockerfile` 的整段工具链安装 RUN 以退出码 1 失败，未包含失败命令前面的日志。确认现有 Dockerfile 将 APT/npm/rustup 联网步骤混在同一个 RUN 中，且 `rust:1.95-bookworm` 已有 Rust 工具链；DDP-101 本轮拆分缓存层以便定位，并将无条件执行的 `rustup toolchain install` 改为版本名缺失时才执行，保留既定版本及安全边界。该修改已审阅但尚未在目标 FnOS 上真实构建，DDP-104 继续根据下一次具体日志验收。

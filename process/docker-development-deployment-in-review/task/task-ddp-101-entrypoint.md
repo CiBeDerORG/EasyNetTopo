@@ -53,3 +53,7 @@ updated_at: 2026-10-22
 ## 定时更新接入（2026-10-22）
 
 新增 `deploy/scheduled-deploy.sh` 辅助脚本，根入口 `schedule` 委派 start/status/logs/stop，`check` 提供有条件 Git fetch/快进/部署。状态与成功 Git 树保存在 data/run，不复制业务数据；cron 精确标记、Git 原用户、部署锁和失败标记确保不覆盖本地改动，也不误把未成功构建记为成功。实际 FnOS 上 Cron / root UID / Docker 联调交给 DDP-104。
+
+## 工具链构建阶段拆分（2026-10-22）
+
+针对用户仅有复合 RUN 退出码 1 的日志，在 `deploy/Dockerfile` 将 Node/npm 软链接与校验、Debian APT 安装、pnpm 安装和 Rust 工具链检查独立成层，确保失败能落到具体步骤并让已成功层被缓存。基础 `rust:1.95-bookworm` 已安装目标 Rust 工具链，因此优先复用已有 Rust，只有版本名缺失时才补装 Rustup。不修改认证代理、版本、签名校验或服务运行规则；待目标 FnOS 验证实际构建。

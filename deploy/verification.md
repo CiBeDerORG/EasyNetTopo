@@ -136,3 +136,9 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 - 通过场景：`start 2h` 安装受管 cron 并保留不相关任务、`status` 读取配置与最近结果、`stop` 仅移除本任务；`run` 的 15 分钟节流、成功标记推进、失败不覆盖成功标记、主部署锁冲突下次重试、非法间隔拒绝。
 - 在原有 `deploy/tests/test_entrypoint.py` 中新增 6 个真实临时 Git + 替身 Docker 的 `check` 测试（无变动、快进、空提交、失败重试、远端变化时拒绝 dirty checkout、无成功标记时拒绝 dirty 本地源）；本轮未完整复跑该入口测试套件，不能将新增测试视为实际通过。
 - 目标 FnOS 的 `cron/crond` 服务状态、Git 用户权限、Mihomo Docker 运行、真实 Rust 构建及 NAS 重启后调度仍未执行验收。
+
+## 复合工具链 RUN 的退出码 1（2026-10-22）
+
+用户回传 Dockerfile 第 27～35 行整段 RUN 以 `exit code: 1` 结束，但未提供该 RUN 的上游命令输出，**不能从该摘要确认失败的具体子命令**。审查 `deploy/Dockerfile` 后发现 Node/npm 软链接、APT update/install、pnpm 全局安装、Rustup 网络安装处于同一个 RUN，导致定位困难和缓存重复工作。官方 `rust:${RUST_VERSION}-bookworm` 基础镜像已包括对应 Rust 工具链，不应无条件重装；但须考虑基础镜像的补丁版本名与项目所需的次版本名可能不同。
+
+本轮将 Node/npm 验证、APT 安装、pnpm 安装与 rustc/cargo 检查拆成独立 RUN 层，并将 Rustup 安装改为仅版本名缺失时执行。保留 Rust/Node/pnpm/protoc 固定版本、Mihomo BuildKit 选择、APT 仓库签名检查及现有失败不回滚行为。未获取完整构建日志，也没有在 FnOS 构建；真实故障需继续根据 `BUILDKIT_PROGRESS=plain` 的首次出错命令判断。
