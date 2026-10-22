@@ -148,3 +148,11 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 用户回传 cron 日志：`deploy.sh 必须位于项目 Git 仓库根目录`。根因位于 `deploy.sh` 的 Git 根路径预检：此处原先由 root 直接执行 `git -C <repo> rev-parse --show-toplevel` 并隐藏 stderr；后续正常部署路径中的 `git status/pull/switch/rev-parse` 也使用 root。对于普通登录用户持有的 Git 仓库，Git 的 `safe.directory` 保护会拒绝上述调用，造成误报，而 check 子流程后面的 git_as_owner 函数在校验后才定义，根本无法到达。
 
 修复：Git 命令统一在最早的仓库校验之前配置原登录用户 UID（`EASYNETTOPO_GIT_UID` / `SUDO_UID`），以该 UID 执行**全部** Git 操作，root 继续调用 Docker。拒绝全局禁用 safe.directory；工作区状态读取失败时明确失败，不把 Git 错误当作干净状态。相关回归测试新增 root + 非 root 仓库所有权场景。真实 FNOS cron 和 Docker 服务不在当前执行环境，仍待用户日志验收。
+
+## protoc 35.1 Release ZIP 下载 TLS 失败（2026-10-22）
+
+用户报告 GitHub Release 文件跳转到 `release-assets.githubusercontent.com:443` 时 `curl: (35) OpenSSL SSL_connect: SSL_ERROR_SYSCALL`。基础镜像、APT、Node/pnpm/Rust 已通过，失败发生于 Dockerfile 最后一段 `protoc` 压缩包下载；并非源码编译或版本检查失败。经 Protobuf 官方 GitHub Release API 查询，v35.1 SHA-256：x86_64 为 `6930ebf62bd4ea607b98fff052596c6ee564b9835b4ce172c75a3f53ae9d91b7`，aarch_64 为 `01bf9d08808c7f96678b63f4bd8efa559bb4f83d5a7a270d5edaf507f9d5d9cf`。
+
+在 `deploy/install-protoc.sh` 中先尝试官方 GitHub Release，连接失败时使用 SourceForge 的非官方同版本镜像，文件通过官方 SHA-256 校验、ZIP 解压和版本验证后才安装。保留 HTTPS 协议和证书验证；两个域名均无法访问时明确报代理路由问题。其他版本/架构没有官方校验值时拒绝下载，需要先补充对应哈希。
+
+隔离测试：在本地 shell/Python 虚拟的 curl/ZIP/sha256sum 环境中执行 4/4 通过，覆盖无匹配版本、双下载源均不可达、镜像数据篡改拒装、官方失败后镜像成功。实际 FnOS 双源网络连通性、Docker 构建及运行容器内依赖下载安装尚未执行。

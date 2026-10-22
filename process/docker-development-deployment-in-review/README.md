@@ -79,3 +79,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：修复 cron Git 根目录校验的 root 身份错误
 
 用户实际 cron 日志显示每分钟检查在 `deploy.sh` 的 Git 根目录预检报错。经代码核对，root 直接执行 `git -C` 触发 Git 对登录用户所拥有仓库的 dubious ownership 防护， stderr 被原代码重定向，错误误报为目录错误。DDP-101 已统一全部 Git 操作使用用户 UID，含预检、更新、快进、HEAD/工作区状态与部署成功标记；不关闭安全检查、不调整共享 BuildKit 或 root cron 身份。DDP-104 继续等待 NAS 实测。
+
+## 2026-10-22：protoc Release Assets TLS 握手失败
+
+用户 FnOS 构建已到 `protoc 35.1` 安装阶段，下载过程中在 `release-assets.githubusercontent.com:443` 遇到 `curl (35) SSL_ERROR_SYSCALL`。DDP-101 增加 `deploy/install-protoc.sh`：先官方 GitHub Release，再 SourceForge 同版本非官方镜像；均校验官方 GitHub Release API 提供的架构 SHA-256，拒绝校验失败文件，不降低 TLS 校验也不修改共享 BuildKit/Mihomo。隔离模拟 4/4 通过，真实 NAS 网络下载和应用部署仍由 DDP-104 验收。

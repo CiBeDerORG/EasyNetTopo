@@ -59,18 +59,11 @@ RUN set -eux; \
     RUSTUP_TOOLCHAIN="${RUST_VERSION}" rustc --version; \
     RUSTUP_TOOLCHAIN="${RUST_VERSION}" cargo --version
 
-RUN set -eu; \
-    case "$(dpkg --print-architecture)" in \
-      amd64) protoc_arch=x86_64 ;; \
-      arm64) protoc_arch=aarch_64 ;; \
-      *) echo 'This development image supports Linux amd64 and arm64.' >&2; exit 1 ;; \
-    esac; \
-    curl --fail --location --retry 3 \
-      "https://github.com/protocolbuffers/protobuf/releases/download/v${PROTOC_VERSION}/protoc-${PROTOC_VERSION}-linux-${protoc_arch}.zip" \
-      --output /tmp/protoc.zip; \
-    unzip -q /tmp/protoc.zip -d /usr/local; \
-    rm /tmp/protoc.zip; \
-    test "$(protoc --version)" = "libprotoc ${PROTOC_VERSION}"
+# Keep protoc's release zip (including well-known .proto files). GitHub
+# redirects assets to release-assets.githubusercontent.com, which can fail TLS
+# on proxy-limited NAS hosts. Verified mirror fallback lives in a small helper.
+COPY install-protoc.sh /tmp/install-protoc.sh
+RUN sh /tmp/install-protoc.sh "${PROTOC_VERSION}" && rm /tmp/install-protoc.sh
 
 ENV RUSTUP_TOOLCHAIN=${RUST_VERSION} \
     PYTHONDONTWRITEBYTECODE=1 \

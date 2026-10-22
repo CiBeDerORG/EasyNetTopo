@@ -198,6 +198,13 @@ FnOS 的 cron 以 root 运行，但仓库通常归登录用户所有。Git 的 `
 
 不要添加 `git config --global --add safe.directory '*'` 或修改全局 Git 信任列表来绕过此检查。常规更新仍推荐**不用 sudo** 运行 `git pull --ff-only origin main`，随后用 `sudo bash deploy.sh ...` 管理 Docker。已有 cron 定时配置无需重建；拉取新代码后，后续检查会使用更新后的入口。
 
+
+### protoc 35.1：GitHub Release TLS 失败时的备用下载
+
+FNOS 通过 Mihomo 下载 `https://github.com/protocolbuffers/protobuf/releases/download/...` 时，可能在重定向到 `release-assets.githubusercontent.com` 后收到 `curl: (35) SSL_ERROR_SYSCALL`。本项目在 `deploy/install-protoc.sh` 中保留官方 Release ZIP（含标准 `.proto` 文件），GitHub 下载失败时自动尝试 [SourceForge 的同版本镜像](https://sourceforge.net/projects/protocol-buffers.mirror/files/v35.1/)；该镜像与 Protobuf 官方**没有隶属关系**。
+
+无论从何处下载，均核对 [Protobuf v35.1 GitHub official release assets](https://github.com/protocolbuffers/protobuf/releases/tag/v35.1) 元数据记录的 SHA-256，只有哈希完全一致且 `protoc --version` 为 `libprotoc 35.1` 才会安装。支持 Linux amd64、arm64；若将 `.env` 的 `PROTOC_VERSION` 更换为其他版本，需先为对应文件在安装脚本补充官方 SHA-256，否则会拒绝构建。不会关闭 TLS/证书校验，也不会调整已有 `easyadb-proxy` 配置。两个来源均无法访问时，请检查 Mihomo 的 SourceForge/GitHub 分流；这不是软件包版本错误。
+
 ## 失败语义
 
 编译失败就是失败：旧后端在编译前停止，失败后不重新启动旧二进制，不恢复旧镜像、不切回旧提交、不回滚数据库。`data/cache/target` 中可能仍有之前的编译文件，它们只是缓存，失败路径不会启动它们。

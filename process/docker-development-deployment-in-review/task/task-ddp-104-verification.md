@@ -41,3 +41,5 @@ updated_at: 2026-10-22
 2026-10-22 新收到 Dockerfile 工具链构建退出码 1 的诊断修复：拆分 RUN 缓存/错误边界，将额外 Rustup 安装改为工具链版本名缺失时才执行。没有完整旧构建日志，不将推测归因为 npm/APT/Rustup 中的任何一步。须在实际 FnOS 再次运行 plain 日志并记录失败的具体层或完整镜像成功证据。
 
 2026-10-22 修复 cron/root Git 身份冲突，收到非 root-owned Git 仓库由 root cron 执行时触发 safe.directory 的用户日志证据。入口现由原登录用户执行全部 Git，Docker 保持 root；新加跨 UID 测试。仍需在 FnOS 回测每分钟检查、成功更新与失败重试。
+
+2026-10-22 DDP-101 已添加 protoc 35.1 官方 Release/SourceForge 双源与 SHA-256 钉住的安装方案，模拟失败回退、错误哈希拒绝和成功版本验证 4/4 通过。未访问用户 FnOS，也未真实下载这两台架构的镜像包；仍需记录目标设备的 curl 下载、哈希校验和容器最终启动结果，方可验收。

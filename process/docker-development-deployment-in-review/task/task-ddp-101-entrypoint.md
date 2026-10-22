@@ -61,3 +61,7 @@ updated_at: 2026-10-22
 ## 定时任务 root Git 身份修复（2026-10-22）
 
 将 `deploy.sh` 中散落的 root `git` 调用统一为在部署入口最早位置定义的 `git_as_owner`，按 `EASYNETTOPO_GIT_UID` 或 `SUDO_UID` 切换原登录用户执行 Git，仅 Docker/Compose 继续由 root 运行。修复 `safe.directory` 导致定时任务在根目录预检阶段失败；工作区状态失败不视为干净，保留快进、dirty 保护、无变更跳过和失败重试语义。不新增 root 全局 safe.directory 豁免。增加 root 执行非 root 自有仓库的回归场景，FnOS 实际执行交 DDP-104。
+
+## protoc 安装下载源容错（2026-10-22）
+
+在 `deploy/Dockerfile` 接入可检查的 `deploy/install-protoc.sh`，解决 GitHub Release 重定向到 `release-assets.githubusercontent.com` 后 TLS 连接失败。下载先走官方 Release，失败再尝试 SourceForge exact mirror；必须匹配 35.1 对应架构的官方 SHA-256。维护 amd64/arm64 和版本固定契约，未知版本无校验值拒绝；不改变安装目标、BuildKit 或运行时配置。隔离模拟 4 个场景通过，FnOS 端到端待确认。
