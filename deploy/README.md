@@ -192,6 +192,12 @@ sudo bash deploy.sh schedule stop        # 关闭定时任务，不停止当前�
 
 在 `.env` 中配置 `BUILDKIT_PROGRESS=plain`，再次运行根目录部署入口，重点查找失败步骤**上方首次出现的** `npm ERR!`、`E:`、`error:`、`502` 或连接超时信息。若需要分享完整日志，请遮盖可能出现的代理认证地址、密钥、令牌和其他敏感值。下层构建成功会复用缓存；运行容器内部 Cargo/pnpm 依赖下载仍另行排查。
 
+### root 定时任务与 Git 仓库所有者
+
+FnOS 的 cron 以 root 运行，但仓库通常归登录用户所有。Git 的 `safe.directory` 安全检查可能拒绝 root 对该仓库的直接操作，曾因此出现含糊的“deploy.sh 必须位于项目 Git 仓库根目录”错误。现在 `deploy.sh` 的所有 Git 操作（仓库根目录校验、远端来源、工作区状态、分支切换、fetch/pull 和成功部署标记）统一使用 `SUDO_UID` 或定时任务保存的 `EASYNETTOPO_GIT_UID`，而 Docker 仍按调用者的 root 权限运行。
+
+不要添加 `git config --global --add safe.directory '*'` 或修改全局 Git 信任列表来绕过此检查。常规更新仍推荐**不用 sudo** 运行 `git pull --ff-only origin main`，随后用 `sudo bash deploy.sh ...` 管理 Docker。已有 cron 定时配置无需重建；拉取新代码后，后续检查会使用更新后的入口。
+
 ## 失败语义
 
 编译失败就是失败：旧后端在编译前停止，失败后不重新启动旧二进制，不恢复旧镜像、不切回旧提交、不回滚数据库。`data/cache/target` 中可能仍有之前的编译文件，它们只是缓存，失败路径不会启动它们。

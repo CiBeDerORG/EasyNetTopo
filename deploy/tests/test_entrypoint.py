@@ -311,6 +311,36 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.actions(), [])
         self.assertEqual((self.repo / "tracked.txt").read_text(), "uncommitted local change\n")
 
+    @unittest.skipUnless(os.geteuid() == 0 and shutil.which("sudo"),
+                         "requires root and sudo for a cross-user Git safe.directory regression")
+    def test_root_docker_uses_original_checkout_uid_for_every_git_operation(self):
+        # Root must not execute Git in a repository owned by a NAS login
+        # user, even when root itself can read the files on disk.
+        import pwd
+        try:
+            identity = pwd.getpwnam("nobody")
+        except KeyError:
+            self.skipTest("system has no nobody account")
+        uid, gid = identity.pw_uid, identity.pw_gid
+        head_tree = self.git("rev-parse", "HEAD^{tree}")
+        os.chmod(self.base, 0o755)
+        for path in self.repo.rglob("*"):
+            if not path.is_symlink():
+                os.chown(path, uid, gid)
+        os.chown(self.repo, uid, gid)
+
+        result = self.run_entry("up", EASYNETTOPO_GIT_UID=str(uid))
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual((self.repo / "data/run/deployed-git-tree").read_text().strip(),
+                         head_tree)
+        self.assertEqual(self.actions().count("build"), 1)
+
+    def test_invalid_git_user_uid_stops_before_any_docker_mutation(self):
+        result = self.run_entry("up", EASYNETTOPO_GIT_UID="not-a-number")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("Git 登录用户 UID", result.stderr)
+        self.assertEqual(self.actions(), [])
+
     def test_another_repository_is_rejected(self):
         self.git("remote", "set-url", "origin", "https://github.com/Example/Another.git")
         result = self.run_entry("up")

@@ -142,3 +142,9 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 用户回传 Dockerfile 第 27～35 行整段 RUN 以 `exit code: 1` 结束，但未提供该 RUN 的上游命令输出，**不能从该摘要确认失败的具体子命令**。审查 `deploy/Dockerfile` 后发现 Node/npm 软链接、APT update/install、pnpm 全局安装、Rustup 网络安装处于同一个 RUN，导致定位困难和缓存重复工作。官方 `rust:${RUST_VERSION}-bookworm` 基础镜像已包括对应 Rust 工具链，不应无条件重装；但须考虑基础镜像的补丁版本名与项目所需的次版本名可能不同。
 
 本轮将 Node/npm 验证、APT 安装、pnpm 安装与 rustc/cargo 检查拆成独立 RUN 层，并将 Rustup 安装改为仅版本名缺失时执行。保留 Rust/Node/pnpm/protoc 固定版本、Mihomo BuildKit 选择、APT 仓库签名检查及现有失败不回滚行为。未获取完整构建日志，也没有在 FnOS 构建；真实故障需继续根据 `BUILDKIT_PROGRESS=plain` 的首次出错命令判断。
+
+## FNOS cron root 与仓库 Git 所有者冲突（2026-10-22）
+
+用户回传 cron 日志：`deploy.sh 必须位于项目 Git 仓库根目录`。根因位于 `deploy.sh` 的 Git 根路径预检：此处原先由 root 直接执行 `git -C <repo> rev-parse --show-toplevel` 并隐藏 stderr；后续正常部署路径中的 `git status/pull/switch/rev-parse` 也使用 root。对于普通登录用户持有的 Git 仓库，Git 的 `safe.directory` 保护会拒绝上述调用，造成误报，而 check 子流程后面的 git_as_owner 函数在校验后才定义，根本无法到达。
+
+修复：Git 命令统一在最早的仓库校验之前配置原登录用户 UID（`EASYNETTOPO_GIT_UID` / `SUDO_UID`），以该 UID 执行**全部** Git 操作，root 继续调用 Docker。拒绝全局禁用 safe.directory；工作区状态读取失败时明确失败，不把 Git 错误当作干净状态。相关回归测试新增 root + 非 root 仓库所有权场景。真实 FNOS cron 和 Docker 服务不在当前执行环境，仍待用户日志验收。

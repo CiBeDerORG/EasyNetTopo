@@ -191,15 +191,39 @@ if [[ "$ACTION" == stop ]]; then
 fi
 
 command -v git >/dev/null || fail '需要 git。'
-[[ "$(git -C "$REPO_DIR" rev-parse --show-toplevel 2>/dev/null)" == "$REPO_DIR" ]] || fail 'deploy.sh 必须位于项目 Git 仓库根目录；仓库目录名可自定义。'
-origin=$(git -C "$REPO_DIR" remote get-url origin)
+# Git treats root as a different owner and can reject regular NAS checkouts
+# with "dubious ownership". ALL Git operations run as the sudo login user;
+# Docker/Compose retain the caller's privileges.
+git_user_uid=${EASYNETTOPO_GIT_UID:-${SUDO_UID:-$(id -u)}}
+[[ "$git_user_uid" =~ ^[0-9]{1,10}$ ]] || fail 'Git 登录用户 UID 无效。'
+git_as_owner() {
+    if (( EUID == 0 )) && [[ "$git_user_uid" != 0 ]]; then
+        sudo -n -H -u "#$git_user_uid" env GIT_TERMINAL_PROMPT=0 \
+            GIT_SSH_COMMAND='ssh -o BatchMode=yes' \
+            git -C "$REPO_DIR" "$@"
+    else
+        GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes' \
+            git -C "$REPO_DIR" "$@"
+    fi
+}
+git_clean() {
+    local dirty_files
+    dirty_files=$(git_as_owner status --porcelain) ||
+        fail '无法读取 Git 工作区状态；请检查仓库权限和 Git 登录用户。'
+    [[ -z "$dirty_files" ]]
+}
+git_root=$(git_as_owner rev-parse --show-toplevel) ||
+    fail "Git 登录用户 UID $git_user_uid 无法读取仓库；请检查目录权限和 Git 仓库。"
+[[ "$git_root" == "$REPO_DIR" ]] ||
+    fail 'deploy.sh 必须位于项目 Git 仓库根目录；仓库目录名可自定义。'
+origin=$(git_as_owner remote get-url origin)
 [[ "${origin,,}" =~ ^(https://github\.com/|git@github\.com:|ssh://git@github\.com/)cibederorg/easynettopo(\.git)?/?$ ]] || fail 'origin 必须指向 GitHub 上的 CiBeDerORG/EasyNetTopo（HTTPS 或 SSH）。'
-current_branch=$(git -C "$REPO_DIR" symbolic-ref --quiet --short HEAD || true)
+current_branch=$(git_as_owner symbolic-ref --quiet --short HEAD || true)
 selected_branch=${GIT_BRANCH:-$current_branch}
 [[ -n "$selected_branch" ]] || fail '当前为 detached HEAD；请在 .env 中填写 GIT_BRANCH。'
-git check-ref-format --branch "$selected_branch" >/dev/null 2>&1 || fail 'GIT_BRANCH 不是有效的分支名。'
+git_as_owner check-ref-format --branch "$selected_branch" >/dev/null 2>&1 || fail 'GIT_BRANCH 不是有效的分支名。'
 if [[ "$selected_branch" != "$current_branch" || "$ACTION" == update ]]; then
-    [[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]] || fail '切换分支或 update 前请先提交本地改动；脚本不会 reset 或 stash。'
+    git_clean || fail '切换分支或 update 前请先提交本地改动；脚本不会 reset 或 stash。'
 fi
 
 reexec_up() {
@@ -227,18 +251,6 @@ reexec_up() {
 # eligible. Git runs as the original login user so root cron needs no SSH key.
 # Do not stop Docker until a changed tree or a previous failed deployment is known.
 if [[ "$ACTION" == check ]]; then
-    git_user_uid=${EASYNETTOPO_GIT_UID:-${SUDO_UID:-$(id -u)}}
-    [[ "$git_user_uid" =~ ^[0-9]{1,10}$ ]] || fail 'Git 用户 UID 无效。'
-    git_as_owner() {
-        if (( EUID == 0 )) && [[ "$git_user_uid" != 0 ]]; then
-            sudo -n -H -u "#$git_user_uid" env GIT_TERMINAL_PROMPT=0 \
-                GIT_SSH_COMMAND='ssh -o BatchMode=yes' \
-                git -C "$REPO_DIR" "$@"
-        else
-            GIT_TERMINAL_PROMPT=0 GIT_SSH_COMMAND='ssh -o BatchMode=yes' \
-                git -C "$REPO_DIR" "$@"
-        fi
-    }
     [[ "$(git_as_owner rev-parse --show-toplevel)" == "$REPO_DIR" ]] ||
         fail '原始 Git 用户无法访问该仓库根目录。'
     owner_origin=$(git_as_owner remote get-url origin)
@@ -260,7 +272,7 @@ if [[ "$ACTION" == check ]]; then
         local_target_tip=
     fi
     if [[ "$owner_branch" != "$selected_branch" || "$local_target_tip" != "$remote_tip" ]]; then
-        [[ -z "$(git_as_owner status --porcelain)" ]] ||
+        git_clean ||
             fail '存在本地 Git 改动；为避免覆盖，定时更新已停止。请先人工处理。'
         if [[ "$owner_branch" != "$selected_branch" ]]; then
             if [[ -n "$local_target_tip" ]]; then
@@ -282,7 +294,7 @@ if [[ "$ACTION" == check ]]; then
     fi
     # Even without remote changes, an untracked success marker may trigger a
     # retry. Never use cron to deploy arbitrary uncommitted local source.
-    [[ -z "$(git_as_owner status --porcelain)" ]] ||
+    git_clean ||
         fail '存在本地 Git 改动；拒绝定时构建，避免覆盖或部署未提交代码。'
     info '检测到 Git 文件树变化，或上次尚未成功部署；现在开始部署。'
     reexec_up
@@ -296,24 +308,24 @@ touch "$DATA_DIR/run/pause"
 rm -f -- "$DATA_DIR/run/backend.json" "$DATA_DIR/run/frontend.json"
 
 if [[ "$selected_branch" != "$current_branch" ]]; then
-    if git -C "$REPO_DIR" show-ref --verify --quiet "refs/heads/$selected_branch"; then
-        git -C "$REPO_DIR" switch "$selected_branch"
+    if git_as_owner show-ref --verify --quiet "refs/heads/$selected_branch"; then
+        git_as_owner switch "$selected_branch"
     else
-        git -C "$REPO_DIR" fetch --no-tags origin "refs/heads/$selected_branch:refs/remotes/origin/$selected_branch"
-        git -C "$REPO_DIR" switch --create "$selected_branch" --track "origin/$selected_branch"
+        git_as_owner fetch --no-tags origin "refs/heads/$selected_branch:refs/remotes/origin/$selected_branch"
+        git_as_owner switch --create "$selected_branch" --track "origin/$selected_branch"
     fi
     if [[ "$ACTION" != update ]]; then reexec_up; fi
 fi
 if [[ "$ACTION" == update ]]; then
-    git -C "$REPO_DIR" pull --ff-only origin "$selected_branch"
+    git_as_owner pull --ff-only origin "$selected_branch"
     reexec_up
 fi
 
 # Record the exact clean source snapshot that is about to be built.
-snapshot_head=$(git -C "$REPO_DIR" rev-parse HEAD)
-snapshot_tree=$(git -C "$REPO_DIR" rev-parse 'HEAD^{tree}')
+snapshot_head=$(git_as_owner rev-parse HEAD)
+snapshot_tree=$(git_as_owner rev-parse 'HEAD^{tree}')
 snapshot_clean=false
-if [[ -z "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
+if git_clean; then
     snapshot_clean=true
 fi
 info "构建开发环境；源码分支：$selected_branch；构建器：${BUILDX_BUILDER:-Docker 当前默认选择}；构建日志：$BUILDKIT_PROGRESS"
@@ -347,8 +359,8 @@ while (( SECONDS < deadline )); do
     if (( ready == 2 )); then
         # Never advance the successful Git marker after a failed or dirty build.
         if [[ "$snapshot_clean" == true &&
-              "$(git -C "$REPO_DIR" rev-parse HEAD)" == "$snapshot_head" &&
-              -z "$(git -C "$REPO_DIR" status --porcelain)" ]]; then
+              "$(git_as_owner rev-parse HEAD)" == "$snapshot_head" ]] &&
+              git_clean; then
             version_tmp="$DATA_DIR/run/deployed-git-tree.tmp.$$"
             printf '%s\n' "$snapshot_tree" > "$version_tmp"
             mv -f -- "$version_tmp" "$DATA_DIR/run/deployed-git-tree"

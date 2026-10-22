@@ -39,3 +39,5 @@ updated_at: 2026-10-22
 2026-10-22 新增定时部署待验收：必须在目标 FnOS 实测 cron 启停、重启后调度、原 Git 用户 SSH 凭据、无变更跳过 Docker、有变更快进部署、失败保持待重试，以及与人工部署锁竞争。模拟检查不能替代真机验收；保持 in_review。
 
 2026-10-22 新收到 Dockerfile 工具链构建退出码 1 的诊断修复：拆分 RUN 缓存/错误边界，将额外 Rustup 安装改为工具链版本名缺失时才执行。没有完整旧构建日志，不将推测归因为 npm/APT/Rustup 中的任何一步。须在实际 FnOS 再次运行 plain 日志并记录失败的具体层或完整镜像成功证据。
+
+2026-10-22 修复 cron/root Git 身份冲突，收到非 root-owned Git 仓库由 root cron 执行时触发 safe.directory 的用户日志证据。入口现由原登录用户执行全部 Git，Docker 保持 root；新加跨 UID 测试。仍需在 FnOS 回测每分钟检查、成功更新与失败重试。

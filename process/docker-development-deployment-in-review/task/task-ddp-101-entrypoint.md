@@ -57,3 +57,7 @@ updated_at: 2026-10-22
 ## 工具链构建阶段拆分（2026-10-22）
 
 针对用户仅有复合 RUN 退出码 1 的日志，在 `deploy/Dockerfile` 将 Node/npm 软链接与校验、Debian APT 安装、pnpm 安装和 Rust 工具链检查独立成层，确保失败能落到具体步骤并让已成功层被缓存。基础 `rust:1.95-bookworm` 已安装目标 Rust 工具链，因此优先复用已有 Rust，只有版本名缺失时才补装 Rustup。不修改认证代理、版本、签名校验或服务运行规则；待目标 FnOS 验证实际构建。
+
+## 定时任务 root Git 身份修复（2026-10-22）
+
+将 `deploy.sh` 中散落的 root `git` 调用统一为在部署入口最早位置定义的 `git_as_owner`，按 `EASYNETTOPO_GIT_UID` 或 `SUDO_UID` 切换原登录用户执行 Git，仅 Docker/Compose 继续由 root 运行。修复 `safe.directory` 导致定时任务在根目录预检阶段失败；工作区状态失败不视为干净，保留快进、dirty 保护、无变更跳过和失败重试语义。不新增 root 全局 safe.directory 豁免。增加 root 执行非 root 自有仓库的回归场景，FnOS 实际执行交 DDP-104。

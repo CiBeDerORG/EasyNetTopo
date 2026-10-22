@@ -75,3 +75,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：工具链 RUN 退出码 1
 
 用户在源 HTTPS 修复后回传 `deploy/Dockerfile` 的整段工具链安装 RUN 以退出码 1 失败，未包含失败命令前面的日志。确认现有 Dockerfile 将 APT/npm/rustup 联网步骤混在同一个 RUN 中，且 `rust:1.95-bookworm` 已有 Rust 工具链；DDP-101 本轮拆分缓存层以便定位，并将无条件执行的 `rustup toolchain install` 改为版本名缺失时才执行，保留既定版本及安全边界。该修改已审阅但尚未在目标 FnOS 上真实构建，DDP-104 继续根据下一次具体日志验收。
+
+## 2026-10-22：修复 cron Git 根目录校验的 root 身份错误
+
+用户实际 cron 日志显示每分钟检查在 `deploy.sh` 的 Git 根目录预检报错。经代码核对，root 直接执行 `git -C` 触发 Git 对登录用户所拥有仓库的 dubious ownership 防护， stderr 被原代码重定向，错误误报为目录错误。DDP-101 已统一全部 Git 操作使用用户 UID，含预检、更新、快进、HEAD/工作区状态与部署成功标记；不关闭安全检查、不调整共享 BuildKit 或 root cron 身份。DDP-104 继续等待 NAS 实测。
