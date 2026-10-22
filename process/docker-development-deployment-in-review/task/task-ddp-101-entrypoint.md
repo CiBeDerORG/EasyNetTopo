@@ -49,3 +49,7 @@ updated_at: 2026-10-22
 ## Debian APT HTTP 502 的局部修复（2026-10-22）
 
 按 FNOS 构建日志定位到 `deploy/Dockerfile` 的 HTTP Debian 官方源被 Mihomo 代理返回 502；由于 InRelease 没有下载成功引发的 `not signed` 不属于真实仓库签名校验失败。本轮在 Dockerfile 内将 `deb.debian.org`、`security.debian.org` 官方源改成 HTTPS，保留 apt-secure 和原来源的 Signed-By，并添加 `Acquire::Retries=3`。不修改 Buildx/Mihomo 共享配置、Node/Rust 版本及运行容器网络；已使用临时两种格式来源作定向转换核查，完整 FnOS 构建未执行，交 DDP-104 验收。
+
+## 定时更新接入（2026-10-22）
+
+新增 `deploy/scheduled-deploy.sh` 辅助脚本，根入口 `schedule` 委派 start/status/logs/stop，`check` 提供有条件 Git fetch/快进/部署。状态与成功 Git 树保存在 data/run，不复制业务数据；cron 精确标记、Git 原用户、部署锁和失败标记确保不覆盖本地改动，也不误把未成功构建记为成功。实际 FnOS 上 Cron / root UID / Docker 联调交给 DDP-104。

@@ -29,3 +29,5 @@ updated_at: 2026-10-22
 - 构建日志使用 BUILDKIT_PROGRESS：非空调用环境优先于 .env，空值默认 auto；支持 auto/plain/tty/quiet/none/rawjson。重新执行入口同样恢复原始调用环境，日志格式不改变构建器或代理配置。
 
 公共写入唯一归 DDP-101：deploy.sh、Compose、Dockerfile、模板、.gitignore 和过程文档。运行器与前端不改这些文件，只提出接线需求；完成后交给 DDP-104。
+
+- 定时管理入口 `deploy.sh schedule start/status/logs/stop` 由 `deploy/scheduled-deploy.sh` 管理本项目 root crontab（每分钟 tick、周期节流）、状态与私有日志；`deploy.sh check` 负责在共享部署锁内以原 Git 登录 UID fetch / 快进，按远端 Git 文件树与最近成功部署树判断是否运行 up。仅健康成功标记为已部署，失败重试但不回滚，也不清理本地改动。

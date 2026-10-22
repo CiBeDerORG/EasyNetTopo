@@ -231,6 +231,86 @@ class EntrypointTests(unittest.TestCase):
         self.assertEqual(self.git("rev-parse", "HEAD"), local_head)
         self.assertEqual(self.actions(), ["stop"])
 
+    def test_check_unchanged_git_tree_skips_docker(self):
+        first = self.run_entry("up")
+        self.assertEqual(first.returncode, 0, first.stderr)
+        marker = self.repo / "data/run/deployed-git-tree"
+        self.assertEqual(marker.read_text().strip(), self.git("rev-parse", "HEAD^{tree}"))
+        before = self.actions()
+        result = self.run_entry("check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("跳过 Docker", result.stdout)
+        self.assertEqual(self.actions(), before)
+
+    def test_check_fast_forward_deploys_only_when_files_change(self):
+        self.assertEqual(self.run_entry("up").returncode, 0)
+        old = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked.txt").write_text("new content\n")
+        self.git("commit", "-am", "remote file edit")
+        latest = self.git("rev-parse", "HEAD")
+        self.git("push", str(self.remote), "HEAD:refs/heads/dev")
+        self.git("reset", "--hard", old)
+        result = self.run_entry("check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), latest)
+        self.assertEqual(self.actions().count("build"), 2)
+        self.assertEqual((self.repo / "data/run/deployed-git-tree").read_text().strip(),
+                         self.git("rev-parse", "HEAD^{tree}"))
+
+    def test_check_empty_commit_fast_forwards_without_rebuilding(self):
+        self.assertEqual(self.run_entry("up").returncode, 0)
+        old = self.git("rev-parse", "HEAD")
+        self.git("commit", "--allow-empty", "-m", "metadata only")
+        latest = self.git("rev-parse", "HEAD")
+        self.git("push", str(self.remote), "HEAD:refs/heads/dev")
+        self.git("reset", "--hard", old)
+        result = self.run_entry("check")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(self.git("rev-parse", "HEAD"), latest)
+        self.assertEqual(self.actions().count("build"), 1)
+
+    def test_check_failed_build_retries_without_advancing_marker(self):
+        self.assertEqual(self.run_entry("up").returncode, 0)
+        marker = self.repo / "data/run/deployed-git-tree"
+        successful_tree = marker.read_text()
+        old = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked.txt").write_text("remote changed\n")
+        self.git("commit", "-am", "changed")
+        self.git("push", str(self.remote), "HEAD:refs/heads/dev")
+        self.git("reset", "--hard", old)
+        failed = self.run_entry("check", TEST_FAIL_BUILD="23")
+        self.assertEqual(failed.returncode, 23, failed.stderr)
+        self.assertEqual(marker.read_text(), successful_tree)
+        self.assertTrue((self.repo / "data/run/deploy-pending").exists())
+        retry = self.run_entry("check")
+        self.assertEqual(retry.returncode, 0, retry.stderr)
+        self.assertNotEqual(marker.read_text(), successful_tree)
+        self.assertFalse((self.repo / "data/run/deploy-pending").exists())
+        self.assertEqual(self.actions().count("build"), 3)
+
+    def test_check_dirty_checkout_refuses_remote_changes_without_docker(self):
+        self.assertEqual(self.run_entry("up").returncode, 0)
+        old = self.git("rev-parse", "HEAD")
+        (self.repo / "tracked.txt").write_text("remote changed\n")
+        self.git("commit", "-am", "changed")
+        self.git("push", str(self.remote), "HEAD:refs/heads/dev")
+        self.git("reset", "--hard", old)
+        (self.repo / "tracked.txt").write_text("local dirty edit\n")
+        before = self.actions()
+        result = self.run_entry("check")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("本地 Git 改动", result.stderr)
+        self.assertEqual(self.actions(), before)
+        self.assertEqual((self.repo / "tracked.txt").read_text(), "local dirty edit\n")
+
+    def test_check_no_deployed_marker_rejects_dirty_local_source(self):
+        (self.repo / "tracked.txt").write_text("uncommitted local change\n")
+        result = self.run_entry("check")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn("本地 Git 改动", result.stderr)
+        self.assertEqual(self.actions(), [])
+        self.assertEqual((self.repo / "tracked.txt").read_text(), "uncommitted local change\n")
+
     def test_another_repository_is_rejected(self):
         self.git("remote", "set-url", "origin", "https://github.com/Example/Another.git")
         result = self.run_entry("up")

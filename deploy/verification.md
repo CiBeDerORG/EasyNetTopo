@@ -121,3 +121,18 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 用户在 `easyadb-proxy` 成功进入工具链镜像构建后，`apt-get update` 通过 `172.19.0.2:7890` 请求 `http://deb.debian.org/debian/dists/bookworm/InRelease` 返回 `502 Bad Gateway`，随后 APT 报 `repository is not signed`。这是索引未取得导致的连带错误，不能关闭 apt-secure 或放宽签名检查。
 
 本轮仅修改 `deploy/Dockerfile`：将 Debian 官方 HTTP 源替换为 HTTPS，兼容 deb822 `debian.sources` 和旧 `sources.list`，并为 APT update/install 指定 `Acquire::Retries=3`。采用临时 Bookworm 来源文件核对了两种格式的替换，`Signed-By` 未改；没有 Docker daemon 或目标 FnOS 的网络可供真实构建。**HTTPS 是否能通过现有 Mihomo 上游还须目标 NAS 验证。**
+
+## cron 定时更新与变更判定（2026-10-22）
+
+基于现有 EasyADB `scripts/scheduled-deploy.sh` 定时轮询设计，EasyNetTopo 将管理入口统一为 `deploy.sh schedule start/status/logs/stop`，具体 cron/状态保存在 `deploy/scheduled-deploy.sh` 与 `data/run/`。cron 每分钟触发轻量脚本，按 1～10080 分钟配置节流；Git fetch/switch/快进用原登录 UID，不用 root 的 SSH 密钥；本仓库的 cron 标记避免删除其他任务。
+
+新增 `deploy.sh check`：先在 deploy.lock 保护下 fetch、校验远端分支与快进关系，比较远端 Git 文件树、成功标记及失败待处理标记；无更新直接退出，不停止容器或调用 Docker；有更新时运行标准部署流程。标记只在干净且对应 HEAD 的成功健康检查后写入，失败保留此前标记并等待重试。已有人工 `up/update` 语义不变。
+
+验证需要区分替身 Git/Docker/crontab 的状态与用户 FnOS 的真实 root cron、Mihomo BuildKit、Docker、Rust；后者未执行，不标为通过。
+
+### 本轮针对性验证（2026-10-22）
+
+- 使用独立临时 Git 仓库和替身 crontab 检查 `deploy/scheduled-deploy.sh` 的 Bash 语法与管理行为；Python unittest 6/6 通过（仅隔离 fixture，未操作 NAS 的真实 root crontab）。
+- 通过场景：`start 2h` 安装受管 cron 并保留不相关任务、`status` 读取配置与最近结果、`stop` 仅移除本任务；`run` 的 15 分钟节流、成功标记推进、失败不覆盖成功标记、主部署锁冲突下次重试、非法间隔拒绝。
+- 在原有 `deploy/tests/test_entrypoint.py` 中新增 6 个真实临时 Git + 替身 Docker 的 `check` 测试（无变动、快进、空提交、失败重试、远端变化时拒绝 dirty checkout、无成功标记时拒绝 dirty 本地源）；本轮未完整复跑该入口测试套件，不能将新增测试视为实际通过。
+- 目标 FnOS 的 `cron/crond` 服务状态、Git 用户权限、Mihomo Docker 运行、真实 Rust 构建及 NAS 重启后调度仍未执行验收。

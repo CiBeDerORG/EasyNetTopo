@@ -67,3 +67,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：Debian 软件源经 Mihomo 返回 HTTP 502
 
 用户 FNOS 日志确认基础镜像认证已通过，下一失败发生在 `deploy/Dockerfile` 的 `apt-get update`：`http://deb.debian.org/debian/dists/bookworm/InRelease` 经 `172.19.0.2:7890` 代理返回 502。DDP-101 将现有 Debian 官方 APT 源转为 HTTPS，并对索引、软件包下载配置有限重试；不改共享 BuildKit / Docker daemon、不关闭 Debian 仓库签名检查。已在临时 deb822/legacy 来源上核对替换与 Signed-By 保留，未运行真正镜像构建，DDP-104 继续等待 FNOS 验证；如 HTTPS 仍 502，应检查 Mihomo 上游网络与规则。
+
+## 2026-10-22：定时分支更新
+
+参照已交付 EasyADB 的 cron 定时更新接口新增 EasyNetTopo 根入口 `deploy.sh schedule start <间隔>/status/logs/stop`；所有辅助实现在 `deploy/scheduled-deploy.sh`，状态/日志放入 `data/run/`。新增 `deploy.sh check` 先 fetch/快进检查远端 Git 树，只有树变化、部署尚无成功记录或上轮失败才构建，未变化不碰 Docker。cron 登记每分钟轮询与用户设定频率的到期节流，Git 操作沿用原 sudo 登录用户身份，复用应用部署锁。本次不改变已知编译失败不回滚原则；NAS cron/构建整体验收待实机测试。

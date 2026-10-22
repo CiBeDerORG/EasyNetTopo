@@ -146,12 +146,31 @@ VITE_HMR_PROTOCOL=wss
 
 将 HTTPS 和 WebSocket 转发至配置的 Web 端口，并保留浏览器 Host。浏览器始终请求同源 `/api/`，由 Vite 转发到 backend；不会拿到 Docker 内部的服务名或后端共享密钥。这里复用已有反向代理，不增加第二套登录或权限逻辑。
 
+## 定时拉取分支并部署
+
+沿用 EasyADB 的 cron 定时方案，但保持本项目**根目录唯一入口**。需要 FnOS 的 cron/crond 服务、Git、flock 和 sudo。推荐用同一个 NAS 登录用户执行启动命令，脚本会在 root 的 crontab 安装此仓库专属任务，并记录该用户的 UID；之后以该用户的 Git 凭据拉取代码、以 root 调用 Docker，不需要给 root 配置 GitHub SSH 密钥。
+
+```bash
+cd /vol3/1000/software/modding/EasyNetTopo
+sudo bash deploy.sh schedule start 15m   # 每 15 分钟检查一次
+sudo bash deploy.sh schedule status      # 查看频率、当前分支、最近检查及结果
+sudo bash deploy.sh schedule logs        # 最近 80 行定时运行日志
+sudo bash deploy.sh schedule stop        # 关闭定时任务，不停止当前容器
+```
+
+支持 `start 5m`、`start 30m`、`start 2h`、`start 1d`、`start 15`（单位分钟），范围 1 分钟到 7 天；再次 `start` 会覆盖当前频率。cron 每分钟检查一次到期时间，未到用户设定间隔则直接退出。使用 `sudo bash deploy.sh check` 可立即执行一次 Git 更新检查，**不受周期限制**。
+
+目标分支来自仓库根 `.env` 的 `GIT_BRANCH`，留空采用当前本地分支；修改后下一次检查生效。定时任务会先在**原登录用户身份**下 fetch 并只允许快进切换/更新，检查远端 Git 文件树与 `data/run/deployed-git-tree` 记录的最近成功部署树是否一致。无文件变化时**不调用 Docker，也不停服务**；检测到新文件树或上一次部署失败/无成功记录时才重新部署。构建和服务健康检查全部成功后才更新成功标记；失败则保留历史成功标记，等待下一次周期重试。无论何时都不自动 reset、stash、覆盖本地修改或回滚旧二进制。
+
+定时配置、最近检查、结果、私有日志都放在 `data/run/`，日志权限为 `0600`；只移除带本仓库精确标记的 crontab 行，保留其他服务任务。`schedule status` 表示 cron 条目是否安装，**不保证 cron 服务正在运行**，FnOS 还需检查其 cron/crond 服务状态。所有定时部署与手动部署共享 `data/run/deploy.lock`：若手动部署占用锁，定时本轮跳过，下一分钟重新尝试。首次启用时不立即执行构建，经过一次设定的检查间隔后开始。
+
 ## 日常命令
 
 | 命令（在总目录执行） | 行为 |
 | --- | --- |
 | `./EasyNetTopo/deploy.sh` | 等同 `up`：选择 `.env` 分支，停止旧服务，构建环境并启动，等待后端/前端就绪。 |
 | `./EasyNetTopo/deploy.sh update` | 停服务，按所选分支执行 `git pull --ff-only`，重新读取更新后的部署入口并部署。 |
+| `sudo bash ./EasyNetTopo/deploy.sh check` | 检查远端 Git 文件树，只有内容更新或上次未成功部署才执行构建/重启。 |
 | `./EasyNetTopo/deploy.sh stop` | 停止并删除项目容器/网络，保留 `data/`。 |
 | `./EasyNetTopo/deploy.sh status` | 显示容器和编译状态；未就绪时返回非零退出码。 |
 | `./EasyNetTopo/deploy.sh logs` | 跟随全部日志；可追加 `backend` 或 `frontend`。 |
