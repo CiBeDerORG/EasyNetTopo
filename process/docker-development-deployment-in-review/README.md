@@ -63,3 +63,7 @@ updated_at: 2026-10-22
 ## 2026-10-22：已配置构建器的镜像认证超时
 
 用户提供真实 FNOS 日志：在 `easyadb-proxy` 选择后拉取基础镜像仍于 `auth.docker.io/token` 超时。核对 EasyADB 原构建脚本后确定原流程还为宿主 Buildx CLI 的令牌请求注入 Mihomo 代理，并通过 Buildx 参数单独为 Dockerfile RUN 下载提供代理。DDP-101 本轮增加 `deploy/build-mihomo.sh`，仅选中 `easyadb-proxy` 时复用其现有配置，不新建或修改共享构建器；其余默认 Compose 构建路径保留。仍待 NAS 首次真实镜像构建、Cargo/pnpm 运行网络的验收，DDP-104 保持 in_review。
+
+## 2026-10-22：Debian 软件源经 Mihomo 返回 HTTP 502
+
+用户 FNOS 日志确认基础镜像认证已通过，下一失败发生在 `deploy/Dockerfile` 的 `apt-get update`：`http://deb.debian.org/debian/dists/bookworm/InRelease` 经 `172.19.0.2:7890` 代理返回 502。DDP-101 将现有 Debian 官方 APT 源转为 HTTPS，并对索引、软件包下载配置有限重试；不改共享 BuildKit / Docker daemon、不关闭 Debian 仓库签名检查。已在临时 deb822/legacy 来源上核对替换与 Signed-By 保留，未运行真正镜像构建，DDP-104 继续等待 FNOS 验证；如 HTTPS 仍 502，应检查 Mihomo 上游网络与规则。

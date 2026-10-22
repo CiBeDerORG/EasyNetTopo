@@ -115,3 +115,9 @@ npm --cache "$PWD/data/verification/npm-cache" exec \
 用户在 FnOS 的 easyadb-proxy BuildKit 模式下遇到 `auth.docker.io/token` 连接超时。本轮依据 EasyADB 已有 `scripts/build-with-mihomo.sh`、`proxy-host.sh`、`proxy-config.sh`，增加 `deploy/build-mihomo.sh`，在已明确指定 `BUILDX_BUILDER=easyadb-proxy` 时分别配置宿主 Buildx 认证代理与 Dockerfile RUN 代理，生成镜像导入本机后保持原 Compose 部署。
 
 共享 BuildKit、Mihomo、Docker daemon 均不修改。代理地址只从已有 BuildKit 容器读取，敏感值不写入仓库与常规日志；非 easyadb-proxy 构建路径不变。该修复未在用户 NAS 实测，镜像代理和运行时 Cargo/pnpm 下载待目标机验证。
+
+## Debian APT 源经 Mihomo 返回 502（2026-10-22）
+
+用户在 `easyadb-proxy` 成功进入工具链镜像构建后，`apt-get update` 通过 `172.19.0.2:7890` 请求 `http://deb.debian.org/debian/dists/bookworm/InRelease` 返回 `502 Bad Gateway`，随后 APT 报 `repository is not signed`。这是索引未取得导致的连带错误，不能关闭 apt-secure 或放宽签名检查。
+
+本轮仅修改 `deploy/Dockerfile`：将 Debian 官方 HTTP 源替换为 HTTPS，兼容 deb822 `debian.sources` 和旧 `sources.list`，并为 APT update/install 指定 `Acquire::Retries=3`。采用临时 Bookworm 来源文件核对了两种格式的替换，`Signed-By` 未改；没有 Docker daemon 或目标 FnOS 的网络可供真实构建。**HTTPS 是否能通过现有 Mihomo 上游还须目标 NAS 验证。**

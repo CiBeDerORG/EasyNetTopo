@@ -45,3 +45,7 @@ updated_at: 2026-10-22
 依据 EV-DDP-08，/root 认领入口、模板和文档，补齐 `BUILDKIT_PROGRESS`；沿用构建器项的非空调用环境覆盖和重执行恢复规则。空值默认 `auto`，支持 Docker 文档中的 `auto/plain/tty/quiet/none/rawjson`。独立审查只读复核，不运行测试或 CI。
 
 补充已交付：Bash 语法、差异检查和 /root/migration_runtime_review 独立静态复审通过。现有 `.env` 保留，两种 Docker 控制项分别保存调用环境，重新执行时分别恢复；仅控制 BuildKit 输出，不影响后续应用日志或代理。结果交接 DDP-104，真实构建未执行。
+
+## Debian APT HTTP 502 的局部修复（2026-10-22）
+
+按 FNOS 构建日志定位到 `deploy/Dockerfile` 的 HTTP Debian 官方源被 Mihomo 代理返回 502；由于 InRelease 没有下载成功引发的 `not signed` 不属于真实仓库签名校验失败。本轮在 Dockerfile 内将 `deb.debian.org`、`security.debian.org` 官方源改成 HTTPS，保留 apt-secure 和原来源的 Signed-By，并添加 `Acquire::Retries=3`。不修改 Buildx/Mihomo 共享配置、Node/Rust 版本及运行容器网络；已使用临时两种格式来源作定向转换核查，完整 FnOS 构建未执行，交 DDP-104 验收。

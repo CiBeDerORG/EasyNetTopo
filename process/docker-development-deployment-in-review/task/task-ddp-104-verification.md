@@ -33,3 +33,5 @@ updated_at: 2026-10-22
 2026-10-22 收到 DDP-101 的 `BUILDX_BUILDER` 配置修复：语法/差异检查及独立静态复审通过，详情见 verification.md。用户已提供默认构建路径中镜像站 `docker.ketches.cn` 返回 502、以及 `.env` 未接受构建器配置的日志；前者属于目标机下载路径故障，本轮只修复后者。未执行测试、真实构建或 CI，完整 NAS 部署仍未验收通过。
 
 2026-10-22 收到 DDP-101 的 `BUILDKIT_PROGRESS` 配置补充：语法/差异检查和独立静态复审通过，支持 `.env` 的 plain 日志格式，模板默认 auto；未运行测试、构建或 CI。该修复解除第 59 行未知配置阻塞，不代表 NAS 镜像拉取已成功。
+
+2026-10-22 收到 DDP-101 的 Debian APT 源 HTTP 502 修复：仅针对 `deploy/Dockerfile` 中官方 Debian 源的 HTTP → HTTPS 和有限下载重试。临时 deb822/legacy 文件的源转换与 Signed-By 保留检查通过；尚未在 FNOS 重跑 `apt-get update`、完整 Docker 镜像或 Cargo/pnpm 下载，验收状态仍为 in_review。

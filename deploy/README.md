@@ -123,6 +123,14 @@ sudo env BUILDX_BUILDER=easyadb-proxy BUILDKIT_PROGRESS=plain bash deploy.sh
 
 `easyadb-proxy` 模式从现有 `buildx_buildkit_easyadb-proxy0` 容器读取代理设置，不把凭据写入项目仓库或日志。前置要求是已有 BuildKit 容器已连接 `proxy-net`，且运行中的 `mihomo` 也连接此网络；若已有代理凭据发生变化，先通过 EasyADB 原部署入口维护共享构建器。**该模式仅覆盖镜像认证和 Dockerfile RUN 下载；运行容器内 Cargo/pnpm 的下载代理仍需单独验证。**若仍提示 `.env` 不支持 `BUILDX_BUILDER` 或 `BUILDKIT_PROGRESS`，先手动 `git pull --ff-only origin main` 更新入口，再执行部署；旧版入口的 `update` 同样会在读取配置时被拒绝。
 
+### Dockerfile 中的 Debian 软件源 502
+
+如果 BuildKit 已经正常拉取 Node/Rust 基础镜像，但 `apt-get update` 显示 `502 Bad Gateway [IP: ... 7890]`，表示请求到达 Mihomo 代理，却未成功取得 Debian 索引；后续 `repository is not signed` 是 InRelease 下载失败引出的错误，不应关闭 APT 签名校验。
+
+`deploy/Dockerfile` 在执行 APT 前将 Debian 官方 `deb.debian.org` / `security.debian.org` 的 HTTP 源切换为 HTTPS，保留原有 `Signed-By`，并为索引、包下载设置最多三次重试。不改 EasyADB 共用的 BuildKit，也不更换镜像站或要求修改主机全局设置。
+
+如果 HTTPS 仍返回代理 `502`，请检查 Mihomo 针对 `deb.debian.org` 的路由、上游节点或 DNS；这类网络故障无法靠放宽 APT 签名验证解决。运行容器内 Cargo/pnpm 下载仍是独立阶段，不能因 Dockerfile 构建通过就认定运行时网络也已配置妥当。
+
 ### 远程域名与 HMR
 
 项目现有管理 API 的来源校验要求 **HTTPS 或 loopback HTTP**，仅改成 NAS 的 HTTP IP 地址不能绕过该校验。域名示例：
