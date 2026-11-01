@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+import HostPanel from './HostPanel.vue'
 
 type AuthStatus = { initialized: boolean; authenticated: boolean }
 type Source = {
@@ -204,6 +205,7 @@ onMounted(refresh)
             </article>
           </div>
         </section>
+        <HostPanel />
         <p v-if="catalogError" class="error" role="alert">{{ catalogError }}</p>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
