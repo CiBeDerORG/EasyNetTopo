@@ -12,7 +12,7 @@ import (
 )
 
 func TestHealthAndMethodRestriction(t *testing.T) {
-	handler := testHandler(t,t.TempDir())
+	handler := testHandler(t, t.TempDir())
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	w := httptest.NewRecorder()
 	handler.ServeHTTP(w, req)
@@ -43,7 +43,7 @@ func TestBuiltFrontendAndFallback(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<h1>EasyNetTopo</h1>"), 0600); err != nil {
 		t.Fatal(err)
 	}
-	handler := testHandler(t,dir)
+	handler := testHandler(t, dir)
 	for _, path := range []string{"/", "/hosts"} {
 		res := httptest.NewRecorder()
 		handler.ServeHTTP(res, httptest.NewRequest(http.MethodGet, path, nil))
@@ -54,7 +54,7 @@ func TestBuiltFrontendAndFallback(t *testing.T) {
 }
 
 func TestFrontendMissingDoesNotDisableHealth(t *testing.T) {
-	handler := testHandler(t,t.TempDir())
+	handler := testHandler(t, t.TempDir())
 	web := httptest.NewRecorder()
 	handler.ServeHTTP(web, httptest.NewRequest(http.MethodGet, "/", nil))
 	if web.Code != http.StatusServiceUnavailable {
@@ -68,9 +68,11 @@ func TestFrontendMissingDoesNotDisableHealth(t *testing.T) {
 }
 
 func testHandler(t *testing.T, dir string) http.Handler {
- t.Helper()
- db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
- if err != nil { t.Fatal(err) }
- t.Cleanup(func(){_ = db.Close()})
- return NewHandler(dir, db)
+	t.Helper()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+	return NewHandler(dir, db)
 }
