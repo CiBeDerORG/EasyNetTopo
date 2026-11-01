@@ -1,0 +1,44 @@
+name: Real EasyHostAgent Cross-Repository Integration
+
+on:
+  push:
+    paths:
+      - 'internal/hosts/**'
+      - 'internal/storage/**'
+      - '.github/workflows/real-agent-integration.yml'
+  pull_request:
+    paths:
+      - 'internal/hosts/**'
+      - 'internal/storage/**'
+      - '.github/workflows/real-agent-integration.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  real-agent:
+    name: Actual Agent HTTPS handshake / pairing / read-only APIs
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Checkout EasyNetTopo
+        uses: actions/checkout@v4
+      - name: Checkout reviewed EasyHostAgent protocol revision
+        uses: actions/checkout@v4
+        with:
+          repository: CiBeDerORG/EasyHostAgent
+          ref: baf58fe9be53c379f33fb5042009d8a5c6d14303
+          path: integration-agent
+          persist-credentials: false
+      - name: Install Go toolchain
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Build real Agent from fixed reviewed revision
+        working-directory: integration-agent
+        run: |
+          CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/easyhostagent-integration" ./cmd/easyhostagent
+      - name: Test actual Agent identity, one-time pairing, host and inventory
+        env:
+          EASYNETTOPO_TEST_AGENT_BINARY: ${{ runner.temp }}/easyhostagent-integration
+        run: go test -race -count=1 -timeout=90s -v -run '^TestRealAgentInterop$' ./internal/hosts
