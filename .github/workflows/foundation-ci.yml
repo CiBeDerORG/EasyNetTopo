@@ -35,7 +35,7 @@ jobs:
       - name: Format Agent TLS client for source verification
         run: |
           gofmt -w internal/hosts/client.go internal/hosts/client_test.go
-          python3 -c 'import json; from pathlib import Path; ps=[Path("internal/hosts/client.go"),Path("internal/hosts/client_test.go")]; [print("ENT_EXPORT_JSON="+json.dumps({"path":str(p),"content":p.read_text(encoding="utf-8")},ensure_ascii=True)) for p in ps]'
+          python3 -c 'import base64; from pathlib import Path; ps=[Path("internal/hosts/client.go"),Path("internal/hosts/client_test.go")]; [print("ENT_EXPORT_BASE64="+str(p)+"|"+base64.b64encode(p.read_bytes()).decode("ascii")) for p in ps]'
       - name: Check gofmt
         run: test -z "$(gofmt -l cmd internal)"
       - name: Vet and test
