@@ -6,7 +6,14 @@
 
 1. EasyHostAgent 在受管主机上作为独立进程启动。主机必须有一个直接可达的 TCP 地址，通常为 `IP:7014`。默认端口可能与 Deploy 的 Webtop 7014 冲突，实际应检查后配置，不自动改变已有端口。
 2. EasyNetTopo 管理员登录，输入主机名称和目标 `IP:port` 创建主机记录；此步骤**不连接 Agent、不建立信任**。
-3. 在目标主机**本机可信终端**查看 Agent 的固定 `agent_id` 和 TLS SPKI SHA-256 公钥指纹，使用 Agent 的本地配对命令生成一次性配对码。不能只根据 HTTP `/v1/identity` 自报内容判断是否可信。
+3. 在目标主机**本机可信终端**查看 Agent 的固定 `agent_id` 和 TLS SPKI SHA-256 公钥指纹，并生成一次性配对码。已安装官方 Agent CLI 时可执行：
+
+   ```bash
+   sudo /usr/local/bin/easyhostagent -identity
+   sudo /usr/local/bin/easyhostagent -pairing-code
+   ```
+
+   若 Agent 安装路径不同，使用实际安装的可执行文件位置。第二条会展示 UUID、指纹、128-bit 一次性配对码和到期时间；配对码有效期约 10 分钟，最多允许 5 次错误尝试。不能只根据 HTTP `/v1/identity` 自报内容判断是否可信。
 4. 回到 EasyNetTopo 页面，输入核对过的 Agent UUID、64 位小写十六进制指纹、32 位小写十六进制配对码。浏览器将其送往本机控制端；**不会直接访问 Agent**。
 5. Go 后端仅连接输入的 IP:port，经 TLS 握手检验服务证书公钥指纹及 `EasyHostAgent {agent_id}` 身份后，检查 `/v1/identity` JSON 的版本、UUID 和指纹；随后通过 `POST /v1/pairings` 交换控制端安装 UUID、主机 UUID、一次性码。
 6. 配对返回的 Access Token 仅留在 Go 后端，使用 OS 私有目录下的 32 字节本机密钥通过 AES-GCM 密封保存于 SQLite；接口只返回主机非敏感记录。再次配对成功后 Agent 旧控制端的授权立即失效。
