@@ -8,11 +8,18 @@ import (
 	"strings"
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 // NewHandler 建立最小 HTTP 路由，业务写操作将在完成认证后单独开放。
 func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service) http.Handler {
+	var catalogSvc *catalog.Service
+	if len(providers) > 0 { catalogSvc = providers[0] }
+	return NewHandlerWithHosts(webDir, db, catalogSvc, nil)
+}
+
+func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.Service, hostSvc *hosts.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -30,9 +37,11 @@ func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service)
 	})
 
 	authRoutes(mux, db)
-	if len(providers) != 0 && providers[0] != nil {
-		catalogRoutes(mux, db, providers[0])
+	if catalogSvc != nil {
+		catalogRoutes(mux, db, catalogSvc)
 	}
+
+	if hostSvc != nil { hostRoutes(mux, db, hostSvc) }
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。
 	mux.Handle("/api/", http.NotFoundHandler())
