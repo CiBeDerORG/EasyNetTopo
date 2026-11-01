@@ -13,6 +13,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/httpapi"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 	"golang.org/x/term"
@@ -77,7 +78,9 @@ func run() error {
 	if webDir == "" {
 		webDir = "web/dist"
 	}
-	server := &http.Server{Addr: listen, Handler: httpapi.NewHandler(webDir, db), ReadHeaderTimeout: 5 * time.Second}
+	catalogService, err := catalog.NewService(context.Background(), db)
+	if err != nil { return fmt.Errorf("初始化应用商店失败: %w", err) }
+	server := &http.Server{Addr: listen, Handler: httpapi.NewHandler(webDir, db, catalogService), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	go func() {
