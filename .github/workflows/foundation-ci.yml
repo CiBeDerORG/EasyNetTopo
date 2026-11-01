@@ -32,20 +32,11 @@ jobs:
         run: |
           go mod tidy
           gofmt -w cmd internal
+          python3 -c 'import json; from pathlib import Path; ps=[Path("go.mod"),Path("go.sum"),*sorted(Path("cmd").rglob("*.go")),*sorted(Path("internal").rglob("*.go"))]; [print("ENT_EXPORT_JSON="+json.dumps({"path":str(p),"content":p.read_text(encoding="utf-8")},ensure_ascii=True)) for p in ps]'
       - name: Vet and test
         run: |
           go vet ./...
           go test -race ./...
-      - name: Print generated Go sources and checksum for review branch
-        if: success()
-        run: |
-          python3 - <<\'PY\'
-          import json
-          from pathlib import Path
-          paths = [Path("go.mod"), Path("go.sum"), *sorted(Path("cmd").rglob("*.go")), *sorted(Path("internal").rglob("*.go"))]
-          for p in paths:
-              print("ENT_EXPORT_JSON=" + json.dumps({"path": str(p), "content": p.read_text(encoding="utf-8")}, ensure_ascii=True))
-          PY
       - name: Compile Linux AMD64 and ARM64
         run: |
           mkdir -p bin
@@ -63,16 +54,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies (bootstrap stage)
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
       - name: Typecheck and build
         run: npm run build
-      - name: Print npm lockfile for review branch
-        if: success()
-        run: |
-          python3 - <<\'PY\'
-          import json
-          from pathlib import Path
-          p = Path("package-lock.json")
-          print("ENT_EXPORT_JSON=" + json.dumps({"path": "web/package-lock.json", "content": p.read_text(encoding="utf-8")}, ensure_ascii=True))
-          PY
