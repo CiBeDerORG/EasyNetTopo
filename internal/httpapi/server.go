@@ -20,9 +20,9 @@ func NewHandler(webDir string) http.Handler {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
 		_ = json.NewEncoder(w).Encode(struct {
-			Status string `json:"status"`
+			Status  string `json:"status"`
 			Service string `json:"service"`
-			Version int `json:"api_version"`
+			Version int    `json:"api_version"`
 		}{Status: "ok", Service: "easynettopo", Version: 1})
 	})
 
