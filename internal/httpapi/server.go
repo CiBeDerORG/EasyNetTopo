@@ -15,7 +15,9 @@ import (
 // NewHandler 建立最小 HTTP 路由，业务写操作将在完成认证后单独开放。
 func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service) http.Handler {
 	var catalogSvc *catalog.Service
-	if len(providers) > 0 { catalogSvc = providers[0] }
+	if len(providers) > 0 {
+		catalogSvc = providers[0]
+	}
 	return NewHandlerWithHosts(webDir, db, catalogSvc, nil)
 }
 
@@ -41,7 +43,9 @@ func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.S
 		catalogRoutes(mux, db, catalogSvc)
 	}
 
-	if hostSvc != nil { hostRoutes(mux, db, hostSvc) }
+	if hostSvc != nil {
+		hostRoutes(mux, db, hostSvc)
+	}
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。
 	mux.Handle("/api/", http.NotFoundHandler())

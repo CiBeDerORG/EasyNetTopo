@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/httpapi"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/httpapi"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 	"golang.org/x/term"
 )
@@ -84,7 +84,9 @@ func run() error {
 		return fmt.Errorf("初始化应用商店失败: %w", err)
 	}
 	hostService, err := hosts.NewService(context.Background(), db)
-	if err != nil { return fmt.Errorf("初始化主机管理失败: %w", err) }
+	if err != nil {
+		return fmt.Errorf("初始化主机管理失败: %w", err)
+	}
 	server := &http.Server{Addr: listen, Handler: httpapi.NewHandlerWithHosts(webDir, db, catalogService, hostService), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
