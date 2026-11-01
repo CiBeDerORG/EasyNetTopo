@@ -1,31 +1,31 @@
 # EasyNetTopo
 
-EasyNetTopo 是一个独立的统一设备与服务管理平台，**不以安装 EasyTier 为启动前提**。
+**EasyNetTopo 是独立的通用集成管理平台**，不与 EasyTier、Sub2API 或其他具体业务绑定。它提供统一的 Git 应用源、主机连接、受管资源、应用生命周期和任务管理；各业务系统独立安装并通过适配器按需集成。
 
-## 当前产品方向
+> **当前状态**：本仓库仍处于需求/架构设计阶段，没有可运行的前端、后端、安装流程与 CI。以下是设计目标，**不是已实现的功能清单**；工作时以对应分支真实代码为准。
 
-1. 用户先部署 EasyNetTopo，打开 Web 管理后台。
-2. **优先建设应用商店与本机应用生命周期管理**：通过应用商店安装和管理 **官方原版 EasyTier**，无需用户手工安装 EasyTier。
-3. 上述基础能力完成后，再研究 EasyTier 的配置服务器 / 管理 API 等集成方式，逐步提供网络节点和网络信息管理。
-4. 后续按需接入 EasyHostAgent（主机与应用管理）、EasyADB（ADB 设备与自动化），这些能力均为可选扩展。
+## 已确认的 V1.0 方向
 
-以上是产品方向和开发顺序，**不是已实现的功能清单**。**截至 2026-11-01 查询 GitHub `main`**，仅有 `README.md` 和 `AGENTS.md`，尚无实际应用代码、依赖配置、构建/测试及 CI。当前没有已确认的前后端语言或框架，不能从产品规划推断开发技术栈；以后执行任务时以所选分支最新内容为准。
+1. 技术栈：**Go 后端 + Vue 3 / TypeScript / Vite 前端 + SQLite**；模块化单体，开发期前后端独立，生产可用 Go 单进程提供 API 和前端静态资源。
+2. 应用商店：Git 仓库作为应用源。第一个来源是 [Deploy](https://github.com/CiBeDerORG/deploy)；首个真实示例为 `sub2api/app.yaml`，不要求补齐其他应用目录。私有 Git 访问只由控制端完成，Agent 不持有 GitHub 凭据。
+3. 主机执行：通过直接可达的 **IP:port + 带指纹验证的 HTTPS** 连接 [EasyHostAgent](https://github.com/CiBeDerORG/EasyHostAgent)。一台 Agent 任一时刻只有一个有效控制中心；成功重新配对后旧授权立即失效。
+4. 首个业务闭环：从 Git 刷新 Sub2API → 选择主机 → 安全配对 → 配置参数 → 固定版本包下发 → 受控安装 → 验证三个 Compose 服务健康 → 查看任务与日志 → 更新/卸载默认保留数据。
+5. 扩展机制：**应用安装与专属业务集成分离**。未来 EasyTier 独立安装，再通过单独适配器接入组网管理；EasyNetTopo 不要求 EasyTier 预装，也不承担组网连接和 VPN 数据通路。
+6. 不实现任意 Shell、动态插件市场、心跳、离线任务队列、自动回滚或复杂微服务。
 
-## 研发知识中心
+## 当前评审规格
 
-项目背景、已确认的产品取舍和长期上下文统一存放在独立的私有知识仓库 [DevKnowledge](https://github.com/CiBeDerORG/DevKnowledge)：
+- [V1.0 需求范围与验收](docs/requirements/v1-platform-scope.md)
+- [Go 模块化单体与集成适配器设计](docs/architecture/v1-modular-integration.md)
+- [EasyNetTopo / EasyHostAgent / Deploy 的 M0 协议清单](docs/architecture/m0-cross-repo-contracts.md)
 
-- [EasyNetTopo 知识入口（INDEX.md）](https://github.com/CiBeDerORG/DevKnowledge/blob/main/02-%E9%A1%B9%E7%9B%AE/EasyNetTopo/INDEX.md)
-- [跨项目 AI 开发共同约定](https://github.com/CiBeDerORG/DevKnowledge/blob/main/01-%E5%B7%A5%E7%A8%8B%E8%A7%84%E8%8C%83/AI%E5%BC%80%E5%8F%91%E8%A7%84%E8%8C%83.md)（已合并至知识库 `main`）
+这些文档是实施规格和待验证约束。**现有 Agent OpenAPI 中 bundle/tasks 接口仍需实现；官方脚本可信执行与第三方 Compose 安全边界是开发前的技术阻塞项。**
 
-知识仓库与代码仓库分别维护，不使用 Git Submodule、符号链接或自动复制知识文件；访问私有知识库需要相应的 GitHub 权限。知识库的新变更在 PR 审核并合并后才会进入其 main 分支。
+## 工程和知识管理
 
-## 项目初始化与任务管理
+实际业务代码、正式需求和技术设计属于本仓库；任务、PR、CI 的状态以 GitHub 为权威。通用 AI 协作规范与长期项目背景位于独立私有仓库 [DevKnowledge](https://github.com/CiBeDerORG/DevKnowledge)，按当前任务严格准入读取，不能假定网页端或本地 SSH 自动具有权限。
 
-新项目初始化时先根据真实业务、部署环境和资源完成技术选型，再由用户授权建立**最小可运行闭环**；只按当前采用的技术加载相应编码规则，不因为计划做 Web 就默认 React、Vue、某一后端或微服务。已确认的正式需求/技术设计存本仓库实际需要的 `docs/` 位置，动态工作项使用 GitHub Issues/PR/CI，不为尚不存在的任务创建空文档。
+- [项目开发入口 AGENTS.md](AGENTS.md)
+- [EasyNetTopo 知识入口（私有仓库）](https://github.com/CiBeDerORG/DevKnowledge/blob/main/02-%E9%A1%B9%E7%9B%AE/EasyNetTopo/INDEX.md)
 
-当前知识库中**不存在** EasyNetTopo 的 `MEMORY.md`；不要猜测其内容或自动建立空记忆。DevKnowledge 的正式工程规范已合并至 `main`；后续新增但未合并的规范 PR 仍只作评审参考，不当作已生效规范。
-
-## AI Agent 入口
-
-在本仓库开展研发前阅读 [AGENTS.md](AGENTS.md)，仅在需要项目长期背景时读取 DevKnowledge 的实际 [INDEX](https://github.com/CiBeDerORG/DevKnowledge/blob/main/02-%E9%A1%B9%E7%9B%AE/EasyNetTopo/INDEX.md)。不递归读取所有规则；源码、部署和执行规则以本仓库所选分支真实文件为准。
+本仓库不使用知识仓库 Submodule、符号链接或全量复制。未实际批准的代码初始化与部署不能以设计文档替代授权；不创建无用占位文件。
