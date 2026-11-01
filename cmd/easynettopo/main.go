@@ -79,7 +79,9 @@ func run() error {
 		webDir = "web/dist"
 	}
 	catalogService, err := catalog.NewService(context.Background(), db)
-	if err != nil { return fmt.Errorf("初始化应用商店失败: %w", err) }
+	if err != nil {
+		return fmt.Errorf("初始化应用商店失败: %w", err)
+	}
 	server := &http.Server{Addr: listen, Handler: httpapi.NewHandler(webDir, db, catalogService), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()

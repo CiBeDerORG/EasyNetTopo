@@ -30,7 +30,9 @@ func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service)
 	})
 
 	authRoutes(mux, db)
-	if len(providers) != 0 && providers[0] != nil { catalogRoutes(mux, db, providers[0]) }
+	if len(providers) != 0 && providers[0] != nil {
+		catalogRoutes(mux, db, providers[0])
+	}
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。
 	mux.Handle("/api/", http.NotFoundHandler())
