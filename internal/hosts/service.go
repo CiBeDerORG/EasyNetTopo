@@ -5,11 +5,12 @@ import (
  "encoding/json"
  "errors"
  "strings"
+ "sync"
 
  "github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-type Service struct{db *storage.Store; hosts *storage.HostStore}
+type Service struct{db *storage.Store; hosts *storage.HostStore; pairingMu sync.Mutex}
 func NewService(ctx context.Context,db *storage.Store)(*Service,error){
  store,err:=storage.NewHostStore(ctx,db);if err!=nil{return nil,err}
  return &Service{db:db,hosts:store},nil
@@ -22,6 +23,8 @@ func(s *Service) Register(ctx context.Context,name,endpoint string)(storage.Host
 }
 func(s *Service) List(ctx context.Context)([]storage.Host,error){return s.hosts.List(ctx)}
 func(s *Service) Pair(ctx context.Context,id,agentID,pin,code string)(storage.Host,error){
+ s.pairingMu.Lock()
+ defer s.pairingMu.Unlock()
  h,err:=s.hosts.Get(ctx,id);if err!=nil{return storage.Host{},err}
  if err:=ValidateIdentity(agentID,pin);err!=nil{return storage.Host{},err}
  if !codeRE.MatchString(code){return storage.Host{},errors.New("配对码格式必须为 32 位十六进制")}
