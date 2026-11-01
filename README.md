@@ -16,7 +16,7 @@ EasyNetTopo 是一个独立的统一设备与服务管理平台，**不以安装
 项目背景、已确认的产品取舍和长期上下文统一存放在独立的私有知识仓库 [DevKnowledge](https://github.com/CiBeDerORG/DevKnowledge)：
 
 - [EasyNetTopo 知识入口（INDEX.md）](https://github.com/CiBeDerORG/DevKnowledge/blob/main/02-%E9%A1%B9%E7%9B%AE/EasyNetTopo/INDEX.md)
-- [跨项目 AI 开发共同约定](https://github.com/CiBeDerORG/DevKnowledge/blob/main/01-%E5%B7%A5%E7%A8%8B%E8%A7%84%E8%8C%83/AI%E5%BC%80%E5%8F%91%E8%A7%84%E8%8C%83.md)（以正式合并后的版本为准）
+- [跨项目 AI 开发共同约定](https://github.com/CiBeDerORG/DevKnowledge/blob/main/01-%E5%B7%A5%E7%A8%8B%E8%A7%84%E8%8C%83/AI%E5%BC%80%E5%8F%91%E8%A7%84%E8%8C%83.md)（已合并至知识库 `main`）
 
 知识仓库与代码仓库分别维护，不使用 Git Submodule、符号链接或自动复制知识文件；访问私有知识库需要相应的 GitHub 权限。知识库的新变更在 PR 审核并合并后才会进入其 main 分支。
 
