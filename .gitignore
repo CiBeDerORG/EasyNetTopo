@@ -1,0 +1,15 @@
+# Go build output
+/bin/
+/dist/
+
+# Frontend build/dependencies
+/web/node_modules/
+/web/dist/
+
+# Runtime configuration and secrets
+/data/
+*.db
+*.db-shm
+*.db-wal
+.env
+.secrets

@@ -1,0 +1,57 @@
+name: EasyNetTopo Foundation CI
+
+on:
+  push:
+    paths:
+      - 'go.mod'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'web/**'
+      - '.github/workflows/foundation-ci.yml'
+  pull_request:
+    paths:
+      - 'go.mod'
+      - 'cmd/**'
+      - 'internal/**'
+      - 'web/**'
+      - '.github/workflows/foundation-ci.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - name: Check Go format
+        run: test -z "$(gofmt -l cmd internal)"
+      - name: Vet and test
+        run: |
+          go vet ./...
+          go test -race ./...
+      - name: Compile Linux AMD64 and ARM64
+        run: |
+          mkdir -p bin
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -o bin/easynettopo-linux-amd64 ./cmd/easynettopo
+          CGO_ENABLED=0 GOOS=linux GOARCH=arm64 go build -trimpath -o bin/easynettopo-linux-arm64 ./cmd/easynettopo
+
+  frontend:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Install dependencies (bootstrap stage)
+        run: npm install --no-audit --no-fund
+      - name: Typecheck and build
+        run: npm run build
