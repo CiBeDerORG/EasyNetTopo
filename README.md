@@ -2,7 +2,7 @@
 
 **EasyNetTopo 是独立的通用集成管理平台**，不与 EasyTier、Sub2API 或其他具体业务绑定。它提供统一的 Git 应用源、主机连接、受管资源、应用生命周期和任务管理；各业务系统独立安装并通过适配器按需集成。
 
-> **当前状态**：本仓库仍处于需求/架构设计阶段，没有可运行的前端、后端、安装流程与 CI。以下是设计目标，**不是已实现的功能清单**；工作时以对应分支真实代码为准。
+> **现状核对（2026-11-02，main）**：已有 Go `cmd/internal`、Vue `web/`、应用源/主机/Bundle 相关源码与 GitHub Actions 工作流；这仅证明代码和自动化入口存在，**不是 Sub2API 实际安装或 FnOS 联调已通过**。以下仍以已确认的产品方向为准；执行时必须检查目标分支最新源码与测试。
 
 ## 已确认的 V1.0 方向
 
@@ -15,7 +15,8 @@
 
 ## 当前评审规格
 
-- [V1.0 需求范围与验收](docs/requirements/v1-platform-scope.md)
+- [R001 · V1.0 汇总/分级需求与验收](docs/requirements/v1-platform-scope.md)
+- [T001 · 分级任务与历史 M0～M4 映射](docs/requirements/tasks.md)
 - [Go 模块化单体与集成适配器设计](docs/architecture/v1-modular-integration.md)
 - [EasyNetTopo / EasyHostAgent / Deploy 的 M0 协议清单](docs/architecture/m0-cross-repo-contracts.md)
 
@@ -23,7 +24,7 @@
 
 ## 工程和知识管理
 
-实际业务代码、正式需求和技术设计属于本仓库；任务、PR、CI 的状态以 GitHub 为权威。通用 AI 协作规范与长期项目背景位于独立私有仓库 [DevKnowledge](https://github.com/CiBeDerORG/DevKnowledge)，按当前任务严格准入读取，不能假定网页端或本地 SSH 自动具有权限。
+实际业务代码、正式需求与技术设计属于本仓库；正式 R/T 需求与任务状态以项目 Markdown 文件为权威（`docs/requirements/`），PR、Git、CI 仅在实际存在时提供佐证，不依赖 Issues/Projects。通用 AI 协作规范与长期项目背景位于独立私有仓库 [DevKnowledge](https://github.com/CiBeDerORG/DevKnowledge)，按当前任务严格准入读取，不能假定网页端或本地 SSH 自动具有权限。
 
 - [项目开发入口 AGENTS.md](AGENTS.md)
 - [EasyNetTopo 知识入口（私有仓库）](https://github.com/CiBeDerORG/DevKnowledge/blob/main/02-%E9%A1%B9%E7%9B%AE/EasyNetTopo/INDEX.md)
