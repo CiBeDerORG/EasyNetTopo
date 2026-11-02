@@ -160,7 +160,7 @@ onMounted(refresh)
           <div class="heading">
             <div>
               <h2>Git 应用源</h2>
-              <p class="muted">私有仓库使用控制端本机已授权的 SSH 身份；不会转交给 Agent。</p>
+              <p class="muted">支持 SSH、HTTPS、HTTP Git 地址。HTTP 明文来源须由服务端管理员显式授权，禁止在 URL 中填写账号或密码。</p>
             </div>
             <button type="button" class="secondary" @click="loadCatalog">刷新列表</button>
           </div>
@@ -168,7 +168,8 @@ onMounted(refresh)
             <label for="source-name">名称</label>
             <input id="source-name" v-model="sourceName" maxlength="80" required />
             <label for="source-url">Git 地址</label>
-            <input id="source-url" v-model="remoteURL" spellcheck="false" required />
+            <input id="source-url" v-model="remoteURL" spellcheck="false" autocomplete="off" aria-describedby="git-source-help" required />
+            <small id="git-source-help" class="muted">示例：https://github.com/owner/repo.git · http://gitea.example.org:3000/owner/repo.git（HTTP 需后端开启）</small>
             <label for="source-branch">分支</label>
             <input id="source-branch" v-model="branch" required />
             <button type="submit" :disabled="saving">{{ saving ? '添加中…' : '添加来源' }}</button>
