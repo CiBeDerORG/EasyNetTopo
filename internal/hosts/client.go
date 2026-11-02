@@ -1,0 +1,243 @@
+package hosts
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+)
+
+var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
+var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
+var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
+
+func ValidateEndpoint(value string) error {
+	if len(value) > 100 || strings.TrimSpace(value) != value {
+		return errors.New("主机地址必须为 IP:port")
+	}
+	host, port, err := net.SplitHostPort(value)
+	if err != nil {
+		return errors.New("主机地址必须使用 IP:port")
+	}
+	ip := net.ParseIP(host)
+	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+		return errors.New("仅允许直接可达的合法 IPv4/IPv6，禁止主机名及链路本地地址")
+	}
+	n, err := strconv.Atoi(port)
+	if err != nil || n < 1 || n > 65535 {
+		return errors.New("端口不合法")
+	}
+	return nil
+}
+func ValidateIdentity(agentID, pin string) error {
+	if !uuidRE.MatchString(agentID) || !hashRE.MatchString(pin) {
+		return errors.New("请填写本地 Agent 终端显示的 UUID 和 SHA-256 公钥指纹")
+	}
+	return nil
+}
+
+// pinnedClient 不采用系统 CA 或不受信任的 identity JSON 建立信任，
+// 而是在 TLS 握手时匹配用户从可信 Agent 终端核对的 SubjectPublicKeyInfo。
+func pinnedClient(agentID, pin string) (*http.Client, error) {
+	if err := ValidateIdentity(agentID, pin); err != nil {
+		return nil, err
+	}
+	want, err := hex.DecodeString(pin)
+	if err != nil {
+		return nil, err
+	}
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS12,
+		InsecureSkipVerify: true, // 配合下面的强制 SPKI/Agent 身份核验，绝不无条件跳过校验。
+		VerifyConnection: func(cs tls.ConnectionState) error {
+			if len(cs.PeerCertificates) != 1 {
+				return errors.New("Agent TLS 证书链不符合契约")
+			}
+			leaf := cs.PeerCertificates[0]
+			now := time.Now()
+			if now.Before(leaf.NotBefore) || !now.Before(leaf.NotAfter) {
+				return errors.New("Agent TLS 证书已失效")
+			}
+			if leaf.Subject.CommonName != "EasyHostAgent "+agentID {
+				return errors.New("Agent TLS 身份不匹配")
+			}
+			key, err := x509.MarshalPKIXPublicKey(leaf.PublicKey)
+			if err != nil {
+				return err
+			}
+			digest := sha256.Sum256(key)
+			if subtle.ConstantTimeCompare(want, digest[:]) != 1 {
+				return errors.New("Agent TLS 公钥指纹不匹配")
+			}
+			return nil
+		},
+	}
+	transport := &http.Transport{Proxy: nil, TLSClientConfig: tlsConfig, MaxIdleConns: 2, IdleConnTimeout: 10 * time.Second,
+		DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext}
+	return &http.Client{Transport: transport, Timeout: 10 * time.Second, CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse }}, nil
+}
+
+type Identity struct {
+	AgentID         string `json:"agent_id"`
+	SPKISHA256      string `json:"tls_spki_sha256"`
+	ProtocolVersion int    `json:"protocol_version"`
+	Hostname        string `json:"hostname"`
+	Platform        string `json:"platform"`
+	Arch            string `json:"arch"`
+	Version         string `json:"version"`
+}
+type PairingResult struct {
+	AgentID      string `json:"agent_id"`
+	ControllerID string `json:"controller_id"`
+	DeviceID     string `json:"device_id"`
+	AccessToken  string `json:"access_token"`
+}
+type Client struct {
+	http     *http.Client
+	endpoint string
+	agentID  string
+}
+
+func NewClient(endpoint, agentID, pin string) (*Client, error) {
+	if err := ValidateEndpoint(endpoint); err != nil {
+		return nil, err
+	}
+	client, err := pinnedClient(agentID, pin)
+	if err != nil {
+		return nil, err
+	}
+	return &Client{http: client, endpoint: "https://" + endpoint, agentID: agentID}, nil
+}
+func (c *Client) request(ctx context.Context, method, path string, body any, controllerID, token string) (json.RawMessage, error) {
+	var reader io.Reader
+	if body != nil {
+		raw, err := json.Marshal(body)
+		if err != nil {
+			return nil, err
+		}
+		reader = bytes.NewReader(raw)
+	}
+	req, err := http.NewRequestWithContext(ctx, method, c.endpoint+path, reader)
+	if err != nil {
+		return nil, err
+	}
+	if body != nil {
+		req.Header.Set("Content-Type", "application/json")
+	}
+	if token != "" {
+		req.Header.Set("Authorization", "Bearer "+token)
+		req.Header.Set("X-EHA-Controller-ID", controllerID)
+		req.Header.Set("X-EHA-Agent-ID", c.agentID)
+	}
+	res, err := c.http.Do(req)
+	if err != nil {
+		return nil, fmt.Errorf("无法安全连接 Agent: %w", err)
+	}
+	defer res.Body.Close()
+	if got := res.Header.Get("X-EHA-Agent-ID"); got != c.agentID {
+		return nil, errors.New("响应 Agent ID 不匹配")
+	}
+	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		return nil, fmt.Errorf("Agent 返回 HTTP %d", res.StatusCode)
+	}
+	raw, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > 2*1024*1024 {
+		return nil, errors.New("Agent 响应超过上限")
+	}
+	if !json.Valid(raw) {
+		return nil, errors.New("Agent JSON 响应不合法")
+	}
+	return raw, nil
+}
+func (c *Client) Identity(ctx context.Context) (Identity, error) {
+	raw, err := c.request(ctx, http.MethodGet, "/v1/identity", nil, "", "")
+	if err != nil {
+		return Identity{}, err
+	}
+	var x Identity
+	if err := json.Unmarshal(raw, &x); err != nil {
+		return x, err
+	}
+	if x.AgentID != c.agentID || x.ProtocolVersion != 1 {
+		return x, errors.New("Agent 身份或协议版本不一致")
+	}
+	return x, nil
+}
+func (c *Client) Pair(ctx context.Context, controllerID, hostID, code string) (PairingResult, error) {
+	if !uuidRE.MatchString(controllerID) || !uuidRE.MatchString(hostID) || !codeRE.MatchString(code) {
+		return PairingResult{}, errors.New("配对参数不合法")
+	}
+	raw, err := c.request(ctx, http.MethodPost, "/v1/pairings", map[string]string{
+		"controller_id": controllerID, "device_id": hostID, "pairing_code": code,
+	}, "", "")
+	if err != nil {
+		return PairingResult{}, err
+	}
+	var x PairingResult
+	if err := json.Unmarshal(raw, &x); err != nil {
+		return x, err
+	}
+	if x.AgentID != c.agentID || x.ControllerID != controllerID || x.DeviceID != hostID || !tokenRE.MatchString(x.AccessToken) {
+		return PairingResult{}, errors.New("Agent 配对响应身份不合法")
+	}
+	return x, nil
+}
+func (c *Client) Host(ctx context.Context, controllerID, token string) (json.RawMessage, error) {
+	return c.request(ctx, http.MethodGet, "/v1/host", nil, controllerID, token)
+}
+func (c *Client) Inventory(ctx context.Context, controllerID, token string) (json.RawMessage, error) {
+	return c.request(ctx, http.MethodGet, "/v1/docker/inventory", nil, controllerID, token)
+}
+
+// IdentityAndPair 在握手验证通过后仍检查 Agent 自报的 SPKI，与用户输入保持一致。
+func IdentityAndPair(ctx context.Context, endpoint, controllerID, hostID, agentID, pin, code string) (string, error) {
+	client, err := NewClient(endpoint, agentID, pin)
+	if err != nil {
+		return "", err
+	}
+	identity, err := client.Identity(ctx)
+	if err != nil {
+		return "", err
+	}
+	if identity.SPKISHA256 != pin {
+		return "", errors.New("TLS 公钥与 Agent 身份响应的指纹不一致")
+	}
+	result, err := client.Pair(ctx, controllerID, hostID, code)
+	if err != nil {
+		return "", err
+	}
+	return result.AccessToken, nil
+}
+
+func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kind string) (json.RawMessage, error) {
+	client, err := NewClient(h.Endpoint, h.AgentID, h.SPKISHA256)
+	if err != nil {
+		return nil, err
+	}
+	if kind == "host" {
+		return client.Host(ctx, controllerID, token)
+	}
+	if kind == "docker" {
+		return client.Inventory(ctx, controllerID, token)
+	}
+	return nil, errors.New("未知 Agent 查询类型")
+}
