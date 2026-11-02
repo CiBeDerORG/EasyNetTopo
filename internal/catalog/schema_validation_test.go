@@ -23,7 +23,7 @@ func TestDeployV1SchemaRejectsInvalidManifest(t *testing.T) {
 		{"非法版本", bytes.Replace(good, []byte("schema_version: 1"), []byte("schema_version: 2"), 1)},
 		{"多余字段", append(append([]byte(nil), good...), []byte("\nunknown_root: true\n")...)},
 		{"非法权限", bytes.Replace(good, []byte("mode: \"0755\""), []byte("mode: \"0777\""), 1)},
-		{"不合法端口", bytes.Replace(good, []byte("default: 7010"), []byte("default: 70000"), 1)},
+		{"非法端口下界声明", bytes.Replace(good, []byte("minimum: 1"), []byte("minimum: 0"), 1)},
 		{"重复键", append(append([]byte(nil), good...), []byte("\nid: malicious\n")...)},
 		{"多 YAML 文档", append(append([]byte(nil), good...), []byte("\n---\nid: malicious\n")...)},
 		{"YAML Alias", []byte("id: &id sub2api\nname: *id\n")},
