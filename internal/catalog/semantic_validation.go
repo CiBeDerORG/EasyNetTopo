@@ -171,15 +171,19 @@ func validOwnedDataPath(app, value string) bool {
 		return false
 	}
 	parts := strings.Split(value, "/")
-	if len(parts) < 3 || parts[0] != app || parts[1] != "data" {
+	if len(parts) < 2 || parts[0] != app {
 		return false
 	}
+	hasData := false
 	for _, part := range parts {
 		if part == "" || strings.HasPrefix(part, ".") || part == ".." {
 			return false
 		}
+		if part == "data" {
+			hasData = true
+		}
 	}
-	return true
+	return hasData
 }
 
 func lowerBound(v *int, fallback int) int {
