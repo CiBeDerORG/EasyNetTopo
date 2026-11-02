@@ -98,6 +98,9 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 	if err != nil {
 		return packagebuilder.Artifact{}, errors.New("固定版本 Manifest 不可读取")
 	}
+	if err := ValidateManifestSchemaV1(manifestRaw); err != nil {
+		return packagebuilder.Artifact{}, fmt.Errorf("固定版本 Manifest 未通过完整 Deploy v1 JSON Schema 校验: %w", err)
+	}
 	manifest, actualDigest, err := previewManifest(applicationID, manifestRaw, repository.objects)
 	if err != nil || actualDigest != digest {
 		return packagebuilder.Artifact{}, errors.New("Manifest 与已索引快照不一致")

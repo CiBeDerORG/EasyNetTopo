@@ -1,6 +1,6 @@
 # M3-03A：固定 Git Commit 的 ZIP v1 候选部署包
 
-> 当前状态：仅支持控制端内部的 **候选包构建**。此产物没有通过 Deploy 完整 Schema + 语义校验，也没有发布方签名或 Agent 主机本地批准。**禁止据此启用安装按钮、执行脚本或 Compose。**
+> 当前状态：仅支持控制端内部的 **候选包构建**。候选包现在必须通过固定的 Deploy v1 JSON Schema（Draft 2020-12）结构校验，**但尚未完成 Deploy 跨文件语义校验**，也没有发布方签名或 Agent 主机本地批准。**禁止据此启用安装按钮、执行脚本或 Compose。**
 
 ## 1. 构建输入与不可变性
 
@@ -25,14 +25,20 @@
 
 `SHA-256(ZIP)` 为上传字节完整性标识；它既不是 `Git Commit`，也不是可信发布身份。
 
-## 3. 待通过的独立准入
+## 3. Deploy Schema v1 校验门禁
 
-1. 与 Deploy `schema/app-manifest-v1.schema.json` 及 `tools/validate_app_manifest.py` 完成完整 Schema + 语义一致性测试，包括 Compose、健康状态、配置/端口和数据保留。当前 `previewManifest` 只做商店预览检查，**不可替代**。
+- `internal/catalog/schema/app-manifest-v1.schema.json` 源于 Deploy main 的正式 Schema，已固定进控制端代码，第三方 Git 来源不能提供或修改验证规则。
+- `ValidateManifestSchemaV1` 使用 Go JSON Schema Draft 2020-12 引擎；在候选包构建前拒绝缺失字段、未知字段、非法类型、越界端口、权限错误，并拒绝 YAML 重复键、Alias、合并键及多文档内容。
+- 这项校验**只保证 Schema 结构一致**，并不替代 Deploy Python 验证器中的跨文件逻辑，例如 Compose 服务/健康检查、端口变量、共享 `.env.example`/`.secrets.example`、脚本依赖和数据路径归属；这些属于随后独立的语义准入门禁。
+
+## 4. 待通过的独立准入
+
+1. 对齐 Deploy `tools/validate_app_manifest.py` 的**完整跨文件语义校验**，包括 Compose、健康状态、配置/端口、共享模板、脚本依赖和数据保留；已落地的 JSON Schema 不能单独作为发布许可。
 2. 明确 Git 来源授权、签名发布流程、受信任公钥/主机本地批准，以及发布元信息签名的规范化字节。不能由 `source_id`、Manifest 自称官方或用户操作直接授权 Shell。
 3. 衔接经过审核的构建结果与 `hosts.Client.HasBundle` / `UploadBundle`，核验 Agent 回执；**不得**未经完整校验上传第三方可执行资源并进入任务路径。
 4. Agent `POST /v1/tasks` 持久化及最小权限执行门禁、冲突检查、数据保留、安全日志与实际 fnOS/Linux/Sub2API 安装验证，属于后续独立任务。
 
-## 4. 测试
+## 5. 测试
 
 - ZIP 字节确定性、归档时间戳、Manifest 与资源 SHA-256、Unix 权限。
 - 非法来源/Commit/Manifest、路径穿越、敏感目录、重复/大小写碰撞、非法权限、文件尺寸限制。
