@@ -47,4 +47,12 @@
 - 用真实本地 Git Commit + 裸仓库固定引用，从 SQLite 目录快照构建；修改工作区不影响候选包，删除固定引用必须拒绝构建。
 - 用合成 Sub2API Compose、Shell 和示例模板验证健康检查、端口、密钥生成声明、共享脚本依赖、用户数据挂载和保留策略；恶意/不一致输入须拒绝。
 
+## 6. Agent 认证缓存接线（仍不可执行）
+
+- `internal/deploysync.EnsureCandidateCached(ctx, builder, cache, host_id, source_id, app_id)` 先从固定 Git Commit 构建通过 Schema + 语义校验的 ZIP，校验返回的字节数/SHA-256 后才调用 Host 缓存服务。
+- `hosts.Service.CacheBundle` 先读取 SQLite 中已配对的 Host 和加密保存的 Agent Token，用固定 SPKI 的 TLS 客户端发起带有 `controller_id` 的认证 HEAD；缓存未命中才 PUT 原始 ZIP，核对回执的 `agent_id`、摘要、字节数，并在 PUT 后再次 HEAD 确认可读。
+- 当认证失效、Host 尚未配对、TLS 身份不匹配、上传/回执/二次校验失败时，一律失败关闭；不把未知结果写成已安装、已发布或成功部署。
+- Agent 不持有远端 Git 凭据，不从 HTTP/HTTPS/SSH 直接下载部署仓库。当前接线**仅作为内部 Go 调用**；未增加浏览器上传入口和安装接口，禁止上传任意用户提供的 ZIP。
+- 本步骤不写 Docker、不解压包、不执行 Shell。下一步必须独立实现发布方签名或 Agent 本机批准，再进入持久化任务与真实安装验收。
+
 本阶段不修改 Deploy 或 EasyHostAgent，不引入 SSH 密钥，不执行任何安装命令。
