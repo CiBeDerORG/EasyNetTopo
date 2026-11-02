@@ -60,7 +60,7 @@ func TestDeployV1SchemaDoesNotAcceptMinimalPreview(t *testing.T) {
 		"  required_services: [sub2api]",
 		"data:",
 		"  default_retain: true",
-	}, "\n")+"\n")
+	}, "\n") + "\n")
 	if err := ValidateManifestSchemaV1(minimal); err == nil {
 		t.Fatal("只读预览需要的最小字段不能直接当发布 Manifest")
 	}
