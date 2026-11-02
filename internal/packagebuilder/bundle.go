@@ -51,6 +51,8 @@ type Resource struct {
 
 // Artifact 只供服务端内部流程使用，不得视为可执行授权。
 type Artifact struct {
+	Revision  string
+	Manifest  []byte
 	ZIP       []byte
 	SHA256    string
 	SizeBytes int64
@@ -208,5 +210,5 @@ func Build(id Identity, manifest []byte, resources []Resource) (Artifact, error)
 		return Artifact{}, errors.New("ZIP 原始字节超出 Agent 64 MiB 限制")
 	}
 	digest := sha256.Sum256(output.Bytes())
-	return Artifact{ZIP: output.Bytes(), SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(output.Len())}, nil
+	return Artifact{Revision: id.GitRevision, Manifest: manifest, ZIP: output.Bytes(), SHA256: hex.EncodeToString(digest[:]), SizeBytes: int64(output.Len())}, nil
 }

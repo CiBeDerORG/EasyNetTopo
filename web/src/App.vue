@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
 import HostPanel from './HostPanel.vue'
+import MarketPanel from './MarketPanel.vue'
 
 type AuthStatus = { initialized: boolean; authenticated: boolean }
 type Source = {
@@ -26,6 +27,7 @@ const remoteURL = ref('git@github.com:CiBeDerORG/deploy.git')
 const branch = ref('main')
 const busySource = ref('')
 const saving = ref(false)
+const hostVersion = ref(0)
 
 async function fetchJSON<T>(url: string): Promise<T> {
   const response = await fetch(url, { credentials: 'same-origin', cache: 'no-store' })
@@ -121,9 +123,6 @@ async function syncSource(source: Source) {
     busySource.value = ''
   }
 }
-function sourceNameFor(id: string): string {
-  return sources.value.find((source) => source.id === id)?.name ?? id
-}
 onMounted(refresh)
 </script>
 
@@ -180,6 +179,7 @@ onMounted(refresh)
               <div class="source-info">
                 <strong>{{ source.name }}</strong>
                 <code>{{ source.url }}</code>
+                <small class="muted">来源 ID：{{ source.id }}</small>
                 <span class="muted">分支：{{ source.branch }} · {{ source.current_revision ? '当前版本 ' + source.current_revision.slice(0, 12) : '尚未同步' }}</span>
                 <span v-if="source.last_error" class="error">{{ source.last_error }}</span>
               </div>
@@ -190,23 +190,8 @@ onMounted(refresh)
           </ul>
         </section>
 
-        <section class="panel">
-          <div class="heading">
-            <h2>应用商店</h2>
-            <span class="pill">只读预览 · 安装尚未开放</span>
-          </div>
-          <p class="muted">仅展示通过初步结构和包文件检查的应用；远程安装需完成完整 Schema、安全策略和 Agent 联调。</p>
-          <div v-if="apps.length === 0" class="empty">暂无可展示的应用，请先同步 Git 来源。</div>
-          <div v-else class="apps">
-            <article v-for="app in apps" :key="app.source_id + ':' + app.app_id" class="app">
-              <div class="heading"><h3>{{ app.name }}</h3><small>{{ app.category }}</small></div>
-              <p>{{ app.summary }}</p>
-              <p class="muted">来源：{{ sourceNameFor(app.source_id) }} · 版本：{{ app.revision.slice(0, 12) }}</p>
-              <span class="pill">未开放安装</span>
-            </article>
-          </div>
-        </section>
-        <HostPanel />
+        <MarketPanel :apps="apps" :sources="sources" :host-version="hostVersion" />
+        <HostPanel @paired="hostVersion++" />
         <p v-if="catalogError" class="error" role="alert">{{ catalogError }}</p>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>

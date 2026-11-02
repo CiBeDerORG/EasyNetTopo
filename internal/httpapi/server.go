@@ -40,11 +40,11 @@ func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.S
 
 	authRoutes(mux, db)
 	if catalogSvc != nil {
-		catalogRoutes(mux, db, catalogSvc)
+		catalogRoutes(mux, db, catalogSvc, hostSvc != nil)
 	}
 
 	if hostSvc != nil {
-		hostRoutes(mux, db, hostSvc)
+		hostRoutes(mux, db, hostSvc, catalogSvc)
 	}
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。

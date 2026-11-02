@@ -62,7 +62,7 @@ func TestBootstrapGuards(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer s.Close()
-	for _, v := range []struct{ u, p string }{{"root", "correct-horse-battery"}, {"admin", "short"}, {"admin", string(make([]byte, 73))}} {
+	for _, v := range []struct{ u, p string }{{"bad name", "correct-horse-battery"}, {"admin", "short"}, {"admin", string(make([]byte, 73))}} {
 		if s.CreateAdmin(context.Background(), v.u, v.p) == nil {
 			t.Fatal("允许错误的初始化参数")
 		}

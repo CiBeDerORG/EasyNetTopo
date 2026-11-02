@@ -41,8 +41,11 @@ func run() error {
 	}
 	defer db.Close()
 	if len(os.Args) > 1 {
+		if len(os.Args) == 4 && os.Args[1] == "admin" && os.Args[2] == "init" && os.Args[3] == "--stdin" {
+			return initAdminFromStdin(db, os.Stdin)
+		}
 		if len(os.Args) != 3 || os.Args[1] != "admin" || os.Args[2] != "init" {
-			return errors.New("支持命令：easynettopo admin init")
+			return errors.New("支持命令：easynettopo admin init [--stdin]")
 		}
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("管理员初始化需要交互式终端")

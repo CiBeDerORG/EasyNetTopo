@@ -154,6 +154,12 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 		return nil, errors.New("响应 Agent ID 不匹配")
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		if strings.HasPrefix(path, "/v1/apps/") {
+			var failure struct{ Code, Message string }
+			if json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure) == nil && (failure.Code == "app_action" || failure.Code == "app_status") {
+				return nil, &AppError{Status: res.StatusCode, Message: failure.Message}
+			}
+		}
 		return nil, fmt.Errorf("Agent 返回 HTTP %d", res.StatusCode)
 	}
 	raw, err := io.ReadAll(io.LimitReader(res.Body, 2*1024*1024+1))

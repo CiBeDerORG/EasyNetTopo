@@ -107,7 +107,7 @@ func authRoutes(mux *http.ServeMux, store *storage.Store) {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: authCookie, Value: token, Path: "/api/v1/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, Expires: expiry})
-		jsonReply(w, 200, map[string]string{"username": "admin"})
+		jsonReply(w, 200, map[string]string{"username": v.Username})
 	})
 	mux.HandleFunc("/api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

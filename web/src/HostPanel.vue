@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
+const emit = defineEmits<{ paired: [] }>()
 
 type Host = {
   id: string
@@ -87,6 +88,7 @@ async function pairHost() {
       pairing_code: pairingCode.value.trim()
     })
     pairingCode.value = ''
+    emit('paired')
     message.value = '配对成功。Agent 已将此控制端设为唯一有效控制中心。'
     await loadHosts()
   } catch {

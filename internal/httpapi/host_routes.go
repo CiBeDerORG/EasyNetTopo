@@ -10,11 +10,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
+func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, catalogSvc *catalog.Service) {
 	authorize := func(w http.ResponseWriter, r *http.Request) bool {
 		c, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), c.Value) {
@@ -99,6 +100,16 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
+		if len(parts) == 3 && parts[1] == "apps" && catalogSvc != nil {
+			if r.Method != http.MethodPost {
+				methodNotAllowed(w, "POST")
+				return
+			}
+			if mutation(w, r) {
+				appAction(w, r, parts[0], parts[2], service, catalogSvc)
+			}
+			return
+		}
 		if len(parts) != 2 || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return

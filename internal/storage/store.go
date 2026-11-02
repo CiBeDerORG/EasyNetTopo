@@ -13,11 +13,13 @@ import (
 	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
+	"regexp"
 	"time"
 )
 
 var ErrInitialized = errors.New("管理员已创建")
 var ErrCredentials = errors.New("账号或密码错误")
+var initialUsername = regexp.MustCompile("^[A-Za-z][A-Za-z0-9_.-]{2,31}$")
 
 type Store struct {
 	db           *sql.DB
@@ -82,8 +84,8 @@ func (s *Store) Initialized(ctx context.Context) (bool, error) {
 	return n > 0, err
 }
 func (s *Store) CreateAdmin(ctx context.Context, user, password string) error {
-	if user != "admin" {
-		return errors.New("首期只能创建 admin 账号")
+	if !initialUsername.MatchString(user) {
+		return errors.New("管理员账号必须由字母开头，使用 3 至 32 位字母、数字、下划线、点或连字符")
 	}
 	if len(password) < 12 || len(password) > 72 {
 		return errors.New("密码必须为 12 至 72 字节")

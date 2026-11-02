@@ -10,9 +10,10 @@ import (
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"gopkg.in/yaml.v3"
 )
 
-func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service) {
+func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service, enabled bool) {
 	requireAdmin := func(w http.ResponseWriter, r *http.Request) bool {
 		cookie, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), cookie.Value) {
@@ -122,6 +123,25 @@ func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service) 
 			http.Error(w, "无法读取应用目录", 503)
 			return
 		}
-		reply(w, 200, map[string]any{"apps": apps, "install_enabled": false})
+		reply(w, 200, map[string]any{"apps": apps, "install_enabled": enabled})
+	})
+	mux.HandleFunc("GET /api/v1/catalog/apps/{source}/{app}/config", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		pkg, err := svc.BuildCandidateBundle(r.Context(), r.PathValue("source"), r.PathValue("app"))
+		if err != nil {
+			http.Error(w, "当前应用未通过安装包校验，请检查来源清单与配置模板", 422)
+			return
+		}
+		var data struct {
+			Config  []map[string]any
+			Actions map[string]struct{ Strategy string }
+		}
+		if yaml.Unmarshal(pkg.Manifest, &data) != nil || data.Actions["uninstall"].Strategy == "" {
+			http.Error(w, "清单必须声明安装和卸载方式", 422)
+			return
+		}
+		reply(w, 200, map[string]any{"revision": pkg.Revision, "config": data.Config})
 	})
 }

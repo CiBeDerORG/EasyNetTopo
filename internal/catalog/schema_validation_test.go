@@ -19,7 +19,7 @@ func TestDeployV1SchemaRejectsInvalidManifest(t *testing.T) {
 		name string
 		data []byte
 	}{
-		{"必填属性缺失", bytes.Replace(good, []byte("schema_version: 1\n"), nil, 1)},
+		{"必填属性缺失", bytes.Replace(good, []byte("schema_version: 1"), nil, 1)},
 		{"非法版本", bytes.Replace(good, []byte("schema_version: 1"), []byte("schema_version: 2"), 1)},
 		{"多余字段", append(append([]byte(nil), good...), []byte("\nunknown_root: true\n")...)},
 		{"非法权限", bytes.Replace(good, []byte("mode: \"0755\""), []byte("mode: \"0777\""), 1)},
