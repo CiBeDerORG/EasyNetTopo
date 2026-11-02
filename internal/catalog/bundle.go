@@ -115,6 +115,18 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 			Source: item.Source, Destination: item.Destination, Mode: item.Mode, Content: blob,
 		})
 	}
+	// 模板只用于固定快照语义核对，不进入候选 ZIP，也不读取真实运行态 .env/.secrets。
+	envExample, err := repository.contents(ctx, ".env.example")
+	if err != nil {
+		return packagebuilder.Artifact{}, errors.New("固定 Git Commit 缺少共享环境变量模板")
+	}
+	secretsExample, err := repository.contents(ctx, ".secrets.example")
+	if err != nil {
+		return packagebuilder.Artifact{}, errors.New("固定 Git Commit 缺少共享密钥模板")
+	}
+	if err := ValidateManifestSemanticsV1(manifestRaw, resources, envExample, secretsExample); err != nil {
+		return packagebuilder.Artifact{}, fmt.Errorf("Manifest 未通过 Deploy v1 跨文件语义校验: %w", err)
+	}
 	return packagebuilder.Build(packagebuilder.Identity{
 		SourceID: sourceID, ApplicationID: applicationID, GitRevision: appRevision, ManifestSHA256: digest,
 	}, manifestRaw, resources)
