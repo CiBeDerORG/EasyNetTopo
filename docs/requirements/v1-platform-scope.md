@@ -1,0 +1,101 @@
+# EasyNetTopo V1.0 — 通用集成平台需求基线（评审草案）
+
+> 状态：**需求已讨论并确认总体方向；本文件是待审 PR 中的实施规格草案，不代表代码已经实现**。
+> 范围：EasyNetTopo、EasyHostAgent、Deploy 三仓库协作。首个真实闭环：Sub2API。
+> 事实来源：本仓库 README/AGENTS、EasyHostAgent 的现有 Go 代码及 OpenAPI v1、Deploy 的 sub2api/app.yaml 和部署脚本。
+> 说明：不沿用 EasyHostAgent 旧文档中“EasyTier 为控制端”的业务前提；旧文档作为历史记录保留，需在实际变更时分别调整。
+
+## 1. 产品定位与已确认决策
+
+EasyNetTopo 是**不依赖具体业务系统的统一集成管理平台**，其核心职责是身份与权限、连接、应用源、主机/资源索引、操作和任务。具体产品（EasyTier、Sub2API 等）独立安装、运行和升级，通过适配器按需接入；即使不安装这些业务系统，EasyNetTopo 也能独立启动。
+
+已确认：
+1. 后端采用 Go，前端 Vue 3 + TypeScript + Vite，持久化采用 SQLite；目标为模块化单体，生产可采用 Go 单进程提供静态站点/API。
+2. EasyHostAgent 继续为独立 Go 原生服务，EasyNetTopo 是其 **V1.0 唯一有效控制端**。一台 Agent 任一时刻只存在一个有效控制端授权；成功重新配对时旧授权立即失效，未成功前保持原授权。
+3. Agent 通过**直接可达的 IP:port + HTTPS** 管理；EasyNetTopo 不负责 VPN/组网，不以 EasyTier 为前置依赖。
+4. Deploy 是第一个 Git 应用源，允许额外 Git 源；仓库仅提供应用定义及资源，不承担常驻管理服务。
+5. 首例只验收 Deploy 中的 Sub2API，不要求补齐 Deploy 其他目录的 app.yaml。
+6. 应用安装、应用运行实例、应用业务集成连接是三个不同对象；一个系统可先被外部安装，再单独接入其业务 API。
+7. 不引入 Redis、消息队列、微服务、动态 Go 插件、Agent 心跳、自动定时同步、离线操作队列与自动回滚。
+
+## 2. V1.0 业务范围
+
+### P0：Sub2API 首个端到端闭环
+
+- 平台能够启动并提供用户认证的 Web/API；未配置任何集成时仍可运行。
+- 管理 Git 应用源：添加、授权、手动刷新（clone/fetch）、检查 Schema 与语义、原子切换“最后成功快照”；普通浏览不主动更新仓库。
+- 商店仅展示**有效且支持的** app.yaml；按 source_id + app_id 识别模板，固定 Git commit 和包摘要；删除/暂时不可用的来源不影响已安装实例。
+- 注册目标主机：用户输入直接可达的 IP:port，在主机可信终端核验 TLS SPKI 指纹及本地一次性配对码，完成单控制端授权；浏览器只访问 EasyNetTopo，不直接持有 Agent Token。
+- 查询 Agent 主机能力及 Docker inventory，包括停止中的容器和 Compose 项目；离线及 complete=false 时展示带时间戳快照，不推断资源被删除。
+- 按 Sub2API app.yaml 生成安装参数表单；预检平台/架构、Docker Compose、端口、目录、资源归属、历史数据与配对权限。
+- 只将固定 Git commit 对应的**必要文件**打包，通过 Agent 的 bundle 接口下发；配置值另外经任务接口传递；包内不得包含运行时 .env/.secrets 或数据目录。
+- Agent 先持久化再接受任务；任务具有客户端 UUID、幂等、可查状态与日志；关闭浏览器不中断任务；HTTP 响应丢失时用原 UUID 查询，不自动重复提交。
+- 安装成功必须复查 Sub2API、PostgreSQL、Redis 的真实 Compose 健康状态；任务失败保留现场与日志，不自动清理/回滚。
+- 同一主机相同 Compose project 或容器归属冲突时拒绝覆盖；正常更新保留用户密钥和持久化数据；卸载默认保留数据。
+
+### P1：基于同一基础能力扩展
+
+- Docker/Compose 启动、停止、重启、更新、卸载和按需日志的完整生命周期。
+- 第三方 Git Compose 源的受限部署能力；不得凭 manifest 声明获得 Shell、Docker Socket 或宿主机特权。
+- 用户自定义 Compose（先明确资源与安全规则，再单独验收）。
+- 官方受控原生程序安装适配器（例如未来独立 EasyTier 应用），与应用业务 API 集成分离；不把原生执行自动授权给第三方。
+- EasyTier 等专属业务适配器按需开发，不进入当前 Sub2API 关键路径。
+
+### 不属于当前范围
+
+- EasyTier 网络配置/节点/拓扑/路由功能；现阶段不将 EasyTier 的 Rust crate 嵌入 EasyNetTopo。
+- 任意系统进程、所有监听端口的通用扫描器；全量系统服务插件市场。
+- 任意 Shell 执行、远程 SSH 控制台、隐式提权、Agent 自动发现公网地址。
+- 一台 Agent 多个同时有效控制端；无授权时自动接管 Docker 资源。
+- 对其他 Deploy 应用批量补齐商店元数据。
+
+## 3. 主线用户流程
+
+1. 管理员完成 EasyNetTopo 初始化，添加官方 Deploy Git 源并手动刷新。
+2. 在商店中看到已验证的 Sub2API；选择主机或先添加主机。
+3. 在目标机器可信终端核对 Agent 指纹、生成一次性配对码；EasyNetTopo 完成配对。
+4. 用户设置 Sub2API 端口/IP 和管理员凭据；数据库/Redis/JWT/TOTP 可留空由**经批准的既有脚本**首次生成和持久化。
+5. 控制端检查安装条件，读取固定 Git 提交、生成并校验 bundle，上传给 Agent，提交 UUID 任务。
+6. Agent 准备共享配置和应用目录，执行受控安装，实际查询三个服务健康状态，持久化结果。
+7. 用户按需查看任务进度、脱敏日志、已安装应用与 Web 入口；页面重开继续查询同一任务。
+8. 更新、启停、卸载复用统一任务；卸载默认保留应用目录中的受管数据。
+
+## 4. 关键数据与权限规则
+
+- `source_id` 是 EasyNetTopo 签发的稳定来源 ID；`app_id` 来自经验证的 manifest；商店身份是 (`source_id`, `app_id`)。
+- `host_id` 是平台稳定 UUID，向现有 Agent `device_id` 字段映射；`controller_id` 是**整套 EasyNetTopo 安装**的稳定 UUID，不是用户 ID。
+- 同一物理 Agent 的 `agent_id` 必须可稳定校验；换 IP 不等于换 Agent，换 Agent 身份不得沿用旧授权。
+- 宿主机实际资源的唯一性按 (`host_id`, `runtime_kind`, `runtime_key`) 判断；不能凭两个来源名称不同而覆盖同一 Compose Project。
+- Git 凭据、Agent Bearer Token、敏感参数只能服务端保存；避免回显和日志泄露。Sub2API 首启时上游可能输出管理员凭据，原始容器日志视为敏感数据。
+- 软件根目录由 Agent 本机配置决定；不可直接迁移已存在的受管应用；Agent 与 Deploy 当前普通 Linux 默认目录不同须预检。
+- Agent 默认 7014 与 Deploy Webtop 默认 7014 冲突；新安装预检端口并允许配置，不强改已存在 Agent。
+- Agent 任务操作白名单、不信任第三方 manifest 的执行请求，相关的来源可信证明与脚本执行策略属于 M0 **安全阻塞项**，不能通过伪造 source_id 获得信任。
+
+## 5. 可测试验收条件
+
+| 编号 | 场景 | 预期 |
+|---|---|---|
+| AT-01 | 未连接任何应用 | 平台仍能启动、登录、打开设置 |
+| AT-02 | 私有 Deploy 刷新 | 只由控制端读取，列出有效 Sub2API 模板；失败保留旧快照 |
+| AT-03 | Agent 配对与重新配对 | TLS 指纹通过可信端核验，第二次配对成功撤销旧控制端授权 |
+| AT-04 | 多主机隔离 | 对 A 的安装命令不能被路由到 B，平台与 Agent 身份一致 |
+| AT-05 | Sub2API 初装 | 三个 Compose 服务均达到 manifest 声明的健康状态 |
+| AT-06 | 密码与数据保护 | 首装可生成规定密钥，更新不重置；卸载默认保留数据 |
+| AT-07 | UUID 幂等 | 同一请求重复提交不会执行两次；UUID 相同但内容不同返回冲突 |
+| AT-08 | 页面关闭/断网 | 任务仍在 Agent 继续；恢复后按相同 UUID 查询 |
+| AT-09 | Docker 查询失败 | 标记未知并保留最后快照，不误删应用记录 |
+| AT-10 | 外部容器/Compose | 可发现但不自动接管；停止状态不被当作删除 |
+| AT-11 | 端口/项目冲突 | 安装前拒绝覆盖已存在的无关资源 |
+| AT-12 | 安全负例 | 第三方仓库伪造可信源/脚本/危险 Compose 不可执行 |
+| AT-13 | 失败保留现场 | 安装失败时展示可诊断错误与任务日志，不自动回滚 |
+
+所有验收均区分“契约/自动化测试通过”和“真实 FnOS/Linux 机器验证通过”。
+
+## 6. 下一阶段阻塞事项
+
+1. **必须解决**：官方脚本型部署与第三方 Compose 的信任模型；本机 Agent 如何判定脚本可以执行（不能只信请求中 source_id）。
+2. **必须解决**：现有 Agent OpenAPI 对单一 Deploy 来源和 EasyTier device_id 的语义调整；旧 Agent 版本收到新字段会拒绝，需版本协商或明确升级顺序。
+3. **必须解决**：Sub2API 脚本依赖 `<SOFTWARE_ROOT>/deploy/.env`、`.secrets` 和共享库，Agent 不执行 `deploy.sh env` 时必须提供等价安全初始化。
+4. **待实测**：FnOS 原生安装、Docker/Compose、目录权限、TLS 指纹校验、端口占用、私有 Git 访问。
+
+核心业务取舍若改变，先更新本规格并评审，不直接凭历史 EasyTier 任务计划实施。
