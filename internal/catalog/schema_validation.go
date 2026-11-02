@@ -8,7 +8,9 @@ import (
 	"fmt"
 	"io"
 	"sync"
+	"time"
 
+	"github.com/dlclark/regexp2"
 	"github.com/santhosh-tekuri/jsonschema/v6"
 	"gopkg.in/yaml.v3"
 )
@@ -22,6 +24,25 @@ var (
 	deploySchemaErr  error
 )
 
+// Deploy v1 Schema 使用 ECMAScript 负向前瞻，Go 标准 regexp 无法支持。
+// 使用有超时的正则引擎，Schema 规则仍固定在控制端本地。
+type deployRegexp regexp2.Regexp
+
+func (r *deployRegexp) MatchString(value string) bool {
+	matched, err := (*regexp2.Regexp)(r).MatchString(value)
+	return err == nil && matched
+}
+func (r *deployRegexp) String() string { return (*regexp2.Regexp)(r).String() }
+
+func compileDeployRegexp(pattern string) (jsonschema.Regexp, error) {
+	compiled, err := regexp2.Compile(pattern, regexp2.ECMAScript)
+	if err != nil {
+		return nil, err
+	}
+	compiled.MatchTimeout = 50 * time.Millisecond
+	return (*deployRegexp)(compiled), nil
+}
+
 func compileDeploySchema() (*jsonschema.Schema, error) {
 	deploySchemaOnce.Do(func() {
 		// Schema 固定在控制端可信源码中，不允许 Git 来源自带的 Schema 替换规则。
@@ -32,6 +53,7 @@ func compileDeploySchema() (*jsonschema.Schema, error) {
 		}
 		compiler := jsonschema.NewCompiler()
 		compiler.AssertFormat()
+		compiler.UseRegexpEngine(compileDeployRegexp)
 		if err := compiler.AddResource("deploy-v1.json", document); err != nil {
 			deploySchemaErr = err
 			return
