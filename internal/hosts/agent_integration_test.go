@@ -1,7 +1,11 @@
 package hosts
 
 import (
+	"archive/zip"
+	"bytes"
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"net"
 	"os"
@@ -159,6 +163,41 @@ func TestRealAgentInterop(t *testing.T) {
 	}
 	if !strings.Contains(string(inventoryRaw), `"complete":`) {
 		t.Fatal("real Docker inventory omitted completeness flag")
+	}
+	// The reviewed M3 Agent implementation must accept a safe immutable ZIP,
+	// preserve the exact digest and reject malformed ZIP bytes. No execution.
+	var bundle bytes.Buffer
+	archive := zip.NewWriter(&bundle)
+	file, err := archive.Create("sub2api/deploy/docker-compose.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := file.Write([]byte("services: {}\\n")); err != nil {
+		t.Fatal(err)
+	}
+	if err := archive.Close(); err != nil {
+		t.Fatal(err)
+	}
+	bundleHash := sha256.Sum256(bundle.Bytes())
+	digest := hex.EncodeToString(bundleHash[:])
+	has, err := client.HasBundle(ctx, db.ControllerID(), token, digest)
+	if err != nil || has {
+		t.Fatalf("unexpected pre-upload bundle state: %v %v", has, err)
+	}
+	receipt, err := client.UploadBundle(ctx, db.ControllerID(), token, bundle.Bytes())
+	if err != nil || receipt.AlreadyExists || receipt.SHA256 != digest {
+		t.Fatalf("real Agent first bundle upload failed: %+v %v", receipt, err)
+	}
+	has, err = client.HasBundle(ctx, db.ControllerID(), token, digest)
+	if err != nil || !has {
+		t.Fatalf("real Agent could not find uploaded bundle: %v %v", has, err)
+	}
+	receipt, err = client.UploadBundle(ctx, db.ControllerID(), token, bundle.Bytes())
+	if err != nil || !receipt.AlreadyExists {
+		t.Fatalf("real Agent idempotent bundle upload failed: %+v %v", receipt, err)
+	}
+	if _, err := client.UploadBundle(ctx, db.ControllerID(), token, []byte("not a ZIP archive")); err == nil {
+		t.Fatal("real Agent accepted a non-ZIP bundle with a correct SHA-256")
 	}
 	// Real grant replacement must revoke controller A only after controller B
 	// finishes pairing; opening a new pairing window keeps old credentials.
