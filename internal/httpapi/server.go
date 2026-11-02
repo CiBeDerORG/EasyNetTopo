@@ -6,10 +6,12 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 // NewHandler 建立最小 HTTP 路由，业务写操作将在完成认证后单独开放。
-func NewHandler(webDir string) http.Handler {
+func NewHandler(webDir string, db *storage.Store) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -25,6 +27,8 @@ func NewHandler(webDir string) http.Handler {
 			Version int    `json:"api_version"`
 		}{Status: "ok", Service: "easynettopo", Version: 1})
 	})
+
+	authRoutes(mux, db)
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。
 	mux.Handle("/api/", http.NotFoundHandler())

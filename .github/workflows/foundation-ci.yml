@@ -28,7 +28,11 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version-file: go.mod
-      - name: Check Go format
+      - name: Verify Go dependency lock
+        run: |
+          go mod tidy
+          git diff --exit-code -- go.mod go.sum
+      - name: Check gofmt
         run: test -z "$(gofmt -l cmd internal)"
       - name: Vet and test
         run: |
@@ -51,7 +55,7 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
-      - name: Install dependencies (bootstrap stage)
-        run: npm install --no-audit --no-fund
+      - name: Install locked dependencies
+        run: npm ci --no-audit --no-fund
       - name: Typecheck and build
         run: npm run build
