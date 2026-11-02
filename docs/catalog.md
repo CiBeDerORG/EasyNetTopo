@@ -25,8 +25,11 @@ git@github.com:CiBeDerORG/deploy.git
 
 - 在运行 EasyNetTopo 的同一系统用户环境准备已获该仓库**读取授权**的 GitHub SSH 身份（优先只读 Deploy Key 或受约束的机器身份）。
 - SSH `known_hosts` 应通过可信渠道核验并预先配置。代码使用 `BatchMode=yes`、`StrictHostKeyChecking=yes`，不会自动信任未知主机指纹，也不会提示在 Web 输入私钥。
-- 默认 Git 域名白名单为 `github.com`。要启用其他明确可信的代码托管域名，可由运行环境管理员设置 `EASYNETTOPO_GIT_ALLOWED_HOSTS=github.com,gitlab.com`。该配置不接受浏览器自行更改。
-- 不支持把 `https://user:token@host/repo`、`file://`、`ssh://`、任意自定义 Git 协议提交给平台。暂未设计带密钥引用的 HTTPS 私有仓库授权管理。
+- 默认仅允许 `github.com`。可由运行环境管理员配置 `EASYNETTOPO_GIT_ALLOWED_HOSTS` 精确允许域名或 `host:port`；例如 `github.com,gitea.example.org:3000,192.168.10.25:3000`。端口不自动通配，内网 IP 必须明确列入白名单，特殊/回环/链路本地地址始终拒绝。
+- `https://` 及 `git@host:owner/repo.git` 维持原有支持。`http://`（明文 Git HTTP）**必须额外配置** `EASYNETTOPO_GIT_ALLOW_HTTP=true` 且显式设置 `EASYNETTOPO_GIT_ALLOWED_HOSTS`；两者任一缺失均拒绝。适合完全受控的自建 Git HTTP 服务，不建议跨不可信网络使用。
+- 示例：`http://gitea.example.org:3000/team/app.git` 或 `http://192.168.10.25:3000/team/app.git`，路径仍要求 `owner/repo[.git]`，尚不支持多级子组路径。
+- 所有 URL 均拒绝内嵌账号/密码、查询参数、片段、编码路径；Git HTTP/HTTPS 强制关闭远端重定向和凭据助手，防止跳转到未批准目标或自动发送现有凭据。请勿将私有 Git 仓库认证信息嵌入明文 HTTP URL。
+- 不支持把 `https://user:token@host/repo`、`http://user:password@host/repo`、`file://`、`ssh://` 等未授权 Git 协议提交给平台。暂未设计带密钥引用的 HTTPS 私有仓库授权管理；HTTP 也不提供自动认证。
 - **云端 GitHub 连接器与部署机器 SSH 授权是两套身份。** ChatGPT 能读取私有仓库，不意味着 NAS 上的 EasyNetTopo 自动拥有对应 Git 凭据；本仓库不托管私钥。
 
 Git 同步失败仅记录安全的通用错误，并**保留上次成功的 SQLite 商店快照**。当前刷新为用户主动发起的限时请求，不支持自动定时刷新或队列。
