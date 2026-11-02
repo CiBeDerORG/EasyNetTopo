@@ -222,6 +222,9 @@ func TestRealAgentInterop(t *testing.T) {
 	if _, err := client.Host(ctx, db.ControllerID(), token); err == nil {
 		t.Fatal("real Agent still accepted old controller after successful re-pair")
 	}
+	if _, err := service.CacheBundle(ctx, host.ID, digest, bundle.Bytes()); err == nil {
+		t.Fatal("old controller cached a bundle after replacement pairing")
+	}
 	if _, err := client.Host(ctx, secondController, newGrant.AccessToken); err != nil {
 		t.Fatal(fmt.Errorf("real Agent rejected newly paired controller: %w", err))
 	}
