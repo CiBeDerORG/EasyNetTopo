@@ -16,13 +16,13 @@ func fixture() (Identity, []byte, []Resource) {
 	manifest := []byte("schema_version: 1\nid: sub2api\n")
 	hash := sha256.Sum256(manifest)
 	return Identity{
-		SourceID: "11111111-1111-4111-8111-111111111111", ApplicationID: "sub2api",
-		GitRevision: strings.Repeat("a", 40), ManifestSHA256: hex.EncodeToString(hash[:]),
-	}, manifest, []Resource{
-		{Source: "sub2api/deploy/install.sh", Destination: "sub2api/deploy/install.sh", Mode: "0755", Content: []byte("#!/bin/sh\nexit 0\n")},
-		{Source: "lib/image-sources.sh", Destination: "deploy/lib/image-sources.sh", Mode: "0644", Content: []byte("# helper\n")},
-		{Source: "sub2api/deploy/docker-compose.yaml", Destination: "sub2api/deploy/docker-compose.yaml", Content: []byte("services: {}\n")},
-	}
+			SourceID: "11111111-1111-4111-8111-111111111111", ApplicationID: "sub2api",
+			GitRevision: strings.Repeat("a", 40), ManifestSHA256: hex.EncodeToString(hash[:]),
+		}, manifest, []Resource{
+			{Source: "sub2api/deploy/install.sh", Destination: "sub2api/deploy/install.sh", Mode: "0755", Content: []byte("#!/bin/sh\nexit 0\n")},
+			{Source: "lib/image-sources.sh", Destination: "deploy/lib/image-sources.sh", Mode: "0644", Content: []byte("# helper\n")},
+			{Source: "sub2api/deploy/docker-compose.yaml", Destination: "sub2api/deploy/docker-compose.yaml", Content: []byte("services: {}\n")},
+		}
 }
 
 func TestDeterministicBuildAndMetadata(t *testing.T) {
