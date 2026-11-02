@@ -17,6 +17,7 @@ type stubBuilder struct {
 	err      error
 	calls    int
 }
+
 func (x *stubBuilder) BuildCandidateBundle(_ context.Context, _, _ string) (packagebuilder.Artifact, error) {
 	x.calls++
 	return x.artifact, x.err
@@ -29,6 +30,7 @@ type stubCache struct {
 	digest  string
 	payload []byte
 }
+
 func (x *stubCache) CacheBundle(_ context.Context, _, digest string, contents []byte) (hosts.BundleReceipt, error) {
 	x.calls++
 	x.digest = digest
@@ -65,7 +67,10 @@ func TestEnsureCandidateCachedFailsClosed(t *testing.T) {
 		{"构建失败不触发 Agent", func(b *stubBuilder, _ *stubCache) { b.err = errors.New("invalid manifest") }, 0},
 		{"大小声明不一致", func(b *stubBuilder, _ *stubCache) { b.artifact.SizeBytes++ }, 0},
 		{"摘要不一致", func(b *stubBuilder, _ *stubCache) { b.artifact.SHA256 = strings.Repeat("0", 64) }, 0},
-		{"空候选包", func(b *stubBuilder, _ *stubCache) { b.artifact.ZIP = nil; b.artifact.SizeBytes = 0 }, 0},
+		{"空候选包", func(b *stubBuilder, _ *stubCache) {
+			b.artifact.ZIP = nil
+			b.artifact.SizeBytes = 0
+		}, 0},
 		{"Agent 上传失败", func(_ *stubBuilder, c *stubCache) { c.err = errors.New("not paired") }, 1},
 		{"Agent 回执摘要不一致", func(_ *stubBuilder, c *stubCache) { c.receipt.SHA256 = strings.Repeat("0", 64) }, 1},
 		{"Agent 回执长度不一致", func(_ *stubBuilder, c *stubCache) { c.receipt.SizeBytes++ }, 1},
