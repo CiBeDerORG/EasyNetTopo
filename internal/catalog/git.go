@@ -42,8 +42,12 @@ func gitCommand(ctx context.Context, limit int, args ...string) ([]byte, error) 
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Env = append(os.Environ(),
 		"GIT_TERMINAL_PROMPT=0", "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null",
-		"GIT_CONFIG_COUNT=2", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null",
+		"GIT_CONFIG_COUNT=5", "GIT_CONFIG_KEY_0=core.hooksPath", "GIT_CONFIG_VALUE_0=/dev/null",
 		"GIT_CONFIG_KEY_1=protocol.file.allow", "GIT_CONFIG_VALUE_1=never",
+		"GIT_CONFIG_KEY_2=http.followRedirects", "GIT_CONFIG_VALUE_2=false",
+		"GIT_CONFIG_KEY_3=credential.helper", "GIT_CONFIG_VALUE_3=",
+		"GIT_CONFIG_KEY_4=http.cookieFile", "GIT_CONFIG_VALUE_4=/dev/null",
+		"GIT_SSL_NO_VERIFY=0",
 		"GIT_SSH_COMMAND=ssh -F /dev/null -o BatchMode=yes -o StrictHostKeyChecking=yes -o ClearAllForwardings=yes",
 	)
 	out := &limitedOutput{limit: limit}
@@ -69,7 +73,7 @@ func refreshGit(ctx context.Context, cache, remote, branch string) (*gitReposito
 	} else if err != nil {
 		return nil, err
 	} else {
-		if _, err = gitCommand(ctx, 4096, "--git-dir="+cache, "fetch", "--no-tags", "--depth=1", "origin", "+refs/heads/"+branch+":refs/heads/"+branch); err != nil {
+		if _, err = gitCommand(ctx, 4096, "--git-dir="+cache, "fetch", "--no-tags", "--depth=1", remote, "+refs/heads/"+branch+":refs/heads/"+branch); err != nil {
 			return nil, err
 		}
 	}
