@@ -33,7 +33,9 @@ jobs:
           go mod tidy
           git diff --exit-code -- go.mod go.sum
       - name: Check gofmt
-        run: test -z "$(gofmt -l cmd internal)"
+        run: |
+          gofmt -l cmd internal | tee /tmp/unformatted-go-files
+          test ! -s /tmp/unformatted-go-files
       - name: Vet and test
         run: |
           go vet ./...
