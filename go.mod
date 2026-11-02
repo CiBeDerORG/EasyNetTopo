@@ -3,6 +3,7 @@ module github.com/CiBeDerORG/EasyNetTopo
 go 1.23.0
 
 require (
+	github.com/dlclark/regexp2 v1.11.0
 	github.com/santhosh-tekuri/jsonschema/v6 v6.0.2
 	golang.org/x/crypto v0.31.0
 	golang.org/x/term v0.27.0
