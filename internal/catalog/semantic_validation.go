@@ -166,6 +166,22 @@ func hasTemplateKey(raw []byte, key string) bool {
 	return false
 }
 
+func validOwnedDataPath(app, value string) bool {
+	if len(value) == 0 || len(value) > 256 || !safeFile.MatchString(value) || path.Clean(value) != value {
+		return false
+	}
+	parts := strings.Split(value, "/")
+	if len(parts) < 3 || parts[0] != app || parts[1] != "data" {
+		return false
+	}
+	for _, part := range parts {
+		if part == "" || strings.HasPrefix(part, ".") || part == ".." {
+			return false
+		}
+	}
+	return true
+}
+
 func lowerBound(v *int, fallback int) int {
 	if v == nil {
 		return fallback
@@ -429,7 +445,7 @@ func ValidateManifestSemanticsV1(raw []byte, resources []packagebuilder.Resource
 		}
 	}
 	for _, item := range m.Data.Paths {
-		if !safePath(item) || !strings.HasPrefix(item, m.ID+"/") || !strings.Contains("/"+item+"/", "/data/") {
+		if !validOwnedDataPath(m.ID, item) {
 			return errors.New("用户数据路径必须位于应用的 data 目录")
 		}
 		if !mountPaths[item] {
