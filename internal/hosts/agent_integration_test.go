@@ -196,6 +196,14 @@ func TestRealAgentInterop(t *testing.T) {
 	if err != nil || !receipt.AlreadyExists {
 		t.Fatalf("real Agent idempotent bundle upload failed: %+v %v", receipt, err)
 	}
+	// 控制端服务层须使用已有配对凭据、固定 TLS 公钥并复核缓存状态。
+	cached, err := service.CacheBundle(ctx, host.ID, digest, bundle.Bytes())
+	if err != nil || !cached.AlreadyExists || cached.AgentID != agentID || cached.SHA256 != digest {
+		t.Fatalf("paired host candidate cache failed: %+v %v", cached, err)
+	}
+	if _, err := service.CacheBundle(ctx, host.ID, strings.Repeat("0", 64), bundle.Bytes()); err == nil {
+		t.Fatal("paired host accepted mismatched local candidate digest")
+	}
 	if _, err := client.UploadBundle(ctx, db.ControllerID(), token, []byte("not a ZIP archive")); err == nil {
 		t.Fatal("real Agent accepted a non-ZIP bundle with a correct SHA-256")
 	}
@@ -213,6 +221,9 @@ func TestRealAgentInterop(t *testing.T) {
 	}
 	if _, err := client.Host(ctx, db.ControllerID(), token); err == nil {
 		t.Fatal("real Agent still accepted old controller after successful re-pair")
+	}
+	if _, err := service.CacheBundle(ctx, host.ID, digest, bundle.Bytes()); err == nil {
+		t.Fatal("old controller cached a bundle after replacement pairing")
 	}
 	if _, err := client.Host(ctx, secondController, newGrant.AccessToken); err != nil {
 		t.Fatal(fmt.Errorf("real Agent rejected newly paired controller: %w", err))
