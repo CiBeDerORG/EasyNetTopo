@@ -19,7 +19,7 @@
 
 - **2026-11-02 已核实 GitHub `main`**：项目存在 Go `go.mod`、`cmd/`、`internal/`，Vue `web/` 与两份 Actions 工作流，相关基础代码/测试已存在。**不能据此推定 Sub2API 真实远程安装、生产部署或 FnOS 验收已通过**。开发前重新核实目标分支与最新版本。
 - **目标技术选型与部分工程已落地**：后端 Go、前端 Vue 3/TypeScript/Vite、SQLite 与模块化单体的目标已确认，实际依赖和实现以当前 `go.mod` / `web/package.json` / 源码为准；已存在代码不等于完整业务验收。
-- **正式项目资料**优先本仓库已存在的 `docs/requirements/` 和 `docs/architecture/`：现行 R001 需求在 `docs/requirements/v1-platform-scope.md`，T001 分级任务在 `docs/requirements/tasks.md`；**任务状态以 Markdown 为权威**，Git/PR/Actions 只是代码与验证证据。不得再创建另一套需求或任务状态。
+- **正式项目资料**使用仓库现有 `docs/requirements/` 和 `docs/architecture/`：现行 R001 汇总及各级需求在 `docs/requirements/v1-platform-scope.md`，T001 及子任务、状态、父级汇总在 `docs/requirements/tasks.md`。**仅录入已确认的 EasyNetTopo 业务需求**；历史其它系统需求/任务不得导入。任务状态以 Markdown 为权威，Git/PR/Actions 只是代码与验证证据，不创建第二套状态。
 - 框架专项须在初始化真实依赖与入口后，按实际修改范围重新判定；本轮已确认 Vue 3/Go 技术方向，但仅有方案文档时仍不得伪称框架已落地或加载不存在的专项。
 
 ## 3. 产品目标与实施界限
@@ -27,7 +27,7 @@
 1. **独立的通用集成管理平台**：平台不依赖 EasyTier、Sub2API 或其他具体业务系统，统一管理应用源、连接、主机/资源、权限及任务，业务专属 API 按需由内置适配器接入。
 2. **首个验收闭环**：EasyNetTopo 使用私有 Deploy Git 应用源的 Sub2API 模板，通过独立 EasyHostAgent 完成 IP 直连、TLS 一次性配对、远程安装、真实健康状态、日志及保留数据的管理；不要求补齐 Deploy 其他应用元数据。
 3. **单控制中心**：EasyNetTopo V1.0 是 Agent 唯一有效控制端；成功重新配对替换旧授权。Agent 是独立可选安装组件，平台无 Agent 时仍可启动。
-4. **安装与业务集成解耦**：未来 EasyTier 可以作为独立应用安装，再通过已授权 API 接入专属组网管理能力；此集成不作为 V1.0 Sub2API 首例依赖，也不要求 EasyNetTopo 自身进行组网。
+4. **安装与业务集成解耦**：当前 V1.0 只验收通用平台与 Sub2API 首个集成闭环；其他具体业务的集成需求必须另行确认、编号与评审，不提前导入本次需求任务或设为启动依赖。
 5. 正式规格见 [R001 汇总需求](docs/requirements/v1-platform-scope.md)、[T001 任务](docs/requirements/tasks.md)、[架构设计](docs/architecture/v1-modular-integration.md) 与 [M0 协议](docs/architecture/m0-cross-repo-contracts.md)；**需求确认不等于代码/设备验收**，任务状态由项目权威 Markdown 维护。
 
 ## 4. 编码与提交的常规约束
