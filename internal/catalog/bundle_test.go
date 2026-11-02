@@ -1,0 +1,111 @@
+package catalog
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"gopkg.in/yaml.v3"
+)
+
+// 测试使用真正的本地 Git Commit 和裸仓库对象，不得从工作区读取文件。
+func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := storage.Open(filepath.Join(dir, "controller", "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	service, err := NewService(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := service.Create(ctx, "Deploy", "https://github.com/CiBeDerORG/deploy.git", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	workdir := filepath.Join(dir, "work")
+	if err := os.MkdirAll(workdir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", append([]string{"-C", workdir}, args...)...)
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		output, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v failed: %v: %s", args, err, output)
+		}
+		return strings.TrimSpace(string(output))
+	}
+	git("init", "-q")
+	git("config", "user.name", "Catalog Test")
+	git("config", "user.email", "test@example.invalid")
+	manifestRaw, err := os.ReadFile("testdata/sub2api.app.yaml")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var m appManifest
+	if err := yaml.Unmarshal(manifestRaw, &m); err != nil {
+		t.Fatal(err)
+	}
+	write := func(name string, data []byte) {
+		t.Helper()
+		full := filepath.Join(workdir, filepath.FromSlash(name))
+		if err := os.MkdirAll(filepath.Dir(full), 0700); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(full, data, 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	write("sub2api/app.yaml", manifestRaw)
+	for _, item := range m.Package.Files {
+		write(item.Source, []byte("stable contents for "+item.Source))
+	}
+	git("add", ".")
+	git("commit", "-qm", "测试：固定候选部署资源")
+	revision := git("rev-parse", "HEAD")
+	cache := filepath.Join(service.cacheDir, source.ID+".git")
+	cmd := exec.Command("git", "clone", "--bare", "-q", workdir, cache)
+	if output, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("clone: %v %s", err, output)
+	}
+	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "refs/easynettopo/catalog/"+revision, revision); err != nil {
+		t.Fatal(err)
+	}
+	hash := sha256.Sum256(manifestRaw)
+	if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, []storage.CatalogApp{{
+		SourceID: source.ID, AppID: "sub2api", Name: "Sub2API", Summary: "Service",
+		Category: "developer", Revision: revision, ManifestSHA256: hex.EncodeToString(hash[:]),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	first, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 修改当前工作目录不会改变已固定的 Git 对象。
+	write(m.Package.Files[0].Source, []byte("uncommitted and untrusted replacement"))
+	second, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api")
+	if err != nil || !bytes.Equal(first.ZIP, second.ZIP) || first.SHA256 != second.SHA256 {
+		t.Fatalf("未提交的工作区文件影响已锁定的包: %v", err)
+	}
+	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "-d", "refs/easynettopo/catalog/"+revision); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api"); err == nil {
+		t.Fatal("未固定的 Git Commit 被用于构建")
+	}
+	if _, err := service.BuildCandidateBundle(ctx, "../not-a-source-id", "sub2api"); err == nil {
+		t.Fatal("非法来源 ID 被接受")
+	}
+}
