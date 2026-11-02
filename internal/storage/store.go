@@ -22,6 +22,7 @@ var ErrCredentials = errors.New("账号或密码错误")
 type Store struct {
 	db           *sql.DB
 	controllerID string
+	path         string
 }
 
 func Open(path string) (*Store, error) {
@@ -70,7 +71,7 @@ func Open(path string) (*Store, error) {
 	if err = db.QueryRow("SELECT value FROM settings WHERE key='controller_id'").Scan(&id); err != nil {
 		return fail(err)
 	}
-	return &Store{db: db, controllerID: id}, nil
+	return &Store{db: db, controllerID: id, path: path}, nil
 }
 
 func (s *Store) Close() error         { return s.db.Close() }
