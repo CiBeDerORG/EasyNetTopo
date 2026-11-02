@@ -30,6 +30,7 @@ type appManifest struct {
 		Files []struct {
 			Source      string `yaml:"source"`
 			Destination string `yaml:"destination"`
+			Mode        string `yaml:"mode"`
 		} `yaml:"files"`
 	} `yaml:"package"`
 	Verification struct {
