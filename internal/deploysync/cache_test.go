@@ -49,7 +49,7 @@ func TestEnsureCandidateCachedOnlyTransportsVerifiedBytes(t *testing.T) {
 	builder := &stubBuilder{artifact: a}
 	cache := &stubCache{receipt: hosts.BundleReceipt{
 		AgentID: "11111111-1111-4111-8111-111111111111",
-		SHA256: a.SHA256, SizeBytes: a.SizeBytes,
+		SHA256:  a.SHA256, SizeBytes: a.SizeBytes,
 	}}
 	result, err := EnsureCandidateCached(context.Background(), builder, cache, "host", "source", "sub2api")
 	if err != nil || result.AgentID != cache.receipt.AgentID || result.SHA256 != a.SHA256 ||
