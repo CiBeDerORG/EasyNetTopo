@@ -12,7 +12,6 @@ import (
 	"testing"
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
-	"gopkg.in/yaml.v3"
 )
 
 // 测试使用真正的本地 Git Commit 和裸仓库对象，不得从工作区读取文件。
@@ -49,14 +48,7 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 	git("init", "-q")
 	git("config", "user.name", "Catalog Test")
 	git("config", "user.email", "test@example.invalid")
-	manifestRaw, err := os.ReadFile("testdata/sub2api.app.yaml")
-	if err != nil {
-		t.Fatal(err)
-	}
-	var m appManifest
-	if err := yaml.Unmarshal(manifestRaw, &m); err != nil {
-		t.Fatal(err)
-	}
+	manifestRaw, resources, envExample, secretsExample := syntheticDeployFixture(t)
 	write := func(name string, data []byte) {
 		t.Helper()
 		full := filepath.Join(workdir, filepath.FromSlash(name))
@@ -68,9 +60,11 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 		}
 	}
 	write("sub2api/app.yaml", manifestRaw)
-	for _, item := range m.Package.Files {
-		write(item.Source, []byte("stable contents for "+item.Source))
+	for _, resource := range resources {
+		write(resource.Source, resource.Content)
 	}
+	write(".env.example", envExample)
+	write(".secrets.example", secretsExample)
 	git("add", ".")
 	git("commit", "-qm", "测试：固定候选部署资源")
 	revision := git("rev-parse", "HEAD")
@@ -94,7 +88,7 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 		t.Fatal(err)
 	}
 	// 修改当前工作目录不会改变已固定的 Git 对象。
-	write(m.Package.Files[0].Source, []byte("uncommitted and untrusted replacement"))
+	write(resources[0].Source, []byte("uncommitted and untrusted replacement"))
 	second, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api")
 	if err != nil || !bytes.Equal(first.ZIP, second.ZIP) || first.SHA256 != second.SHA256 {
 		t.Fatalf("未提交的工作区文件影响已锁定的包: %v", err)
