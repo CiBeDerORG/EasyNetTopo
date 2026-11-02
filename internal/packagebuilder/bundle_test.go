@@ -102,7 +102,9 @@ func TestRejectInvalidMetadataAndUnsafeFiles(t *testing.T) {
 		{"共享库映射错误", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[1].Destination = "sub2api/deploy/lib.sh" }},
 		{"非法权限", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Mode = "0777" }},
 		{"重复目标", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Destination = (*r)[2].Destination }},
-		{"忽略大小写重复", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Destination = "sub2api/deploy/DOCKER-COMPOSE.yaml" }},
+		{"忽略大小写重复", func(_ *Identity, _ *[]byte, r *[]Resource) {
+			(*r)[0].Destination = "sub2api/deploy/DOCKER-COMPOSE.yaml"
+		}},
 		{"重复源文件", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Source = (*r)[2].Source }},
 		{"覆盖清单", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Destination = "sub2api/app.yaml" }},
 		{"文件目录碰撞", func(_ *Identity, _ *[]byte, r *[]Resource) { (*r)[0].Destination = "sub2api/deploy" }},
