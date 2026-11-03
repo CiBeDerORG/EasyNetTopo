@@ -167,55 +167,6 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			}
 			return
 		}
-		if len(parts) == 1 && len(parts[0]) == 36 {
-			// 主机的编辑/删除只修改本地控制端记录，不向 Agent 发送应用或卸载操作。
-			switch r.Method {
-			case http.MethodPatch:
-				if !mutation(w, r) {
-					return
-				}
-				var req struct {
-					Name     string `json:"name"`
-					Endpoint string `json:"endpoint"`
-				}
-				if !decode(w, r, &req) {
-					return
-				}
-				h, err := service.Update(r.Context(), parts[0], req.Name, req.Endpoint)
-				if errors.Is(err, storage.ErrHostNotFound) {
-					http.NotFound(w, r)
-					return
-				}
-				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
-					http.Error(w, "主机名称或地址不合法", http.StatusBadRequest)
-					return
-				}
-				if err != nil {
-					http.Error(w, "更新主机失败", http.StatusServiceUnavailable)
-					return
-				}
-				jsonReply(w, http.StatusOK, h)
-			case http.MethodDelete:
-				if !mutation(w, r) {
-					return
-				}
-				err := service.Delete(r.Context(), parts[0])
-				if errors.Is(err, storage.ErrHostNotFound) {
-					http.NotFound(w, r)
-					return
-				}
-				if err != nil {
-					http.Error(w, "删除主机失败", http.StatusServiceUnavailable)
-					return
-				}
-				slog.Info("已删除本地主机登记", "host_id", parts[0])
-				w.Header().Set("Cache-Control", "no-store")
-				w.WriteHeader(http.StatusNoContent)
-			default:
-				methodNotAllowed(w, "PATCH, DELETE")
-			}
-			return
-		}
 		if len(parts) != 2 || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return
