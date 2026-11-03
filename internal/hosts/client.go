@@ -143,7 +143,7 @@ func NewClient(endpoint, agentID, pin string) (*Client, error) {
 		client = &http.Client{
 			Transport: &http.Transport{Proxy: nil, MaxIdleConns: 2, IdleConnTimeout: 10 * time.Second,
 				DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext},
-			Timeout: 10 * time.Second,
+			Timeout:       10 * time.Second,
 			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
 		}
 	} else {
