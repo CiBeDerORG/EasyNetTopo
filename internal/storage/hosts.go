@@ -145,6 +145,23 @@ func (s *HostStore) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
+// Delete removes only EasyNetTopo's local host record and sealed credential.
+// It does not contact EasyHostAgent, revoke remote grants, or alter applications.
+func (s *HostStore) Delete(ctx context.Context, id string) error {
+	result, err := s.store.db.ExecContext(ctx, "DELETE FROM hosts WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected == 0 {
+		return ErrHostNotFound
+	}
+	return nil
+}
+
 func (s *HostStore) AssertAgentNotBoundElsewhere(ctx context.Context, hostID, agentID string) error {
 	var count int
 	err := s.store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM hosts WHERE agent_id=? AND id<>?", agentID, hostID).Scan(&count)
