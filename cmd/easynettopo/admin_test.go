@@ -16,7 +16,7 @@ func TestAdminFromStdinCustomUserAndOneTimeOnly(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	user, password := "operator_01", "Complex-Secure-$Pass&123"
+	user, password := "中文 用户 @特殊账号", strings.Repeat("超长 密码 #$!", 50)
 	if err := initAdminFromStdin(db, strings.NewReader(user+"\n"+password+"\n")); err != nil {
 		t.Fatal(err)
 	}
@@ -36,15 +36,13 @@ func TestAdminFromStdinCustomUserAndOneTimeOnly(t *testing.T) {
 
 func TestAdminFromStdinInvalidInputsDoNotInitialize(t *testing.T) {
 	for _, tc := range []string{
-		"admin\nshort\n",
-		"a\nVery-Long-Secure-Password\n",
-		"spaces user\nVery-Long-Secure-Password\n",
+
 		"admin\nPassword-With-CR\r\n",
 		"admin\nValid-Password-123\nextra",
 		"admin\nValid-Password-123",
 		"admin\nValid-Password-123\n\n",
 		"admin\nValid-Password-123\x00\n",
-		strings.Repeat("A", 300),
+		strings.Repeat("A", 1<<20+1),
 	} {
 		db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
 		if err != nil {
@@ -57,6 +55,22 @@ func TestAdminFromStdinInvalidInputsDoNotInitialize(t *testing.T) {
 		if err != nil || ready {
 			t.Fatalf("失败后数据库应保持未初始化: %v %v", ready, err)
 		}
+		_ = db.Close()
+	}
+}
+
+func TestAdminFromStdinAllowsShortAndLongCredentials(t *testing.T) {
+	cases := []struct{ user, pass string }{
+		{"1", "1"},
+		{strings.Repeat("用", 150), strings.Repeat("密", 500)},
+		{"包含空格 和标点@!", "空格&$# 中文!?"},
+	}
+	for _, tc := range cases {
+		db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+		if err != nil { t.Fatal(err) }
+		input := tc.user + "\n" + tc.pass + "\n"
+		if err := initAdminFromStdin(db, strings.NewReader(input)); err != nil { t.Fatal(err) }
+		if err := db.Verify(context.Background(), tc.user, tc.pass); err != nil { t.Fatal(err) }
 		_ = db.Close()
 	}
 }
