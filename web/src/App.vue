@@ -23,9 +23,10 @@ const controllerID = ref('')
 const sources = ref<Source[]>([])
 const apps = ref<CatalogApp[]>([])
 const sourceName = ref('Deploy')
-const remoteURL = ref('git@github.com:CiBeDerORG/deploy.git')
+const remoteURL = ref('https://github.com/CiBeDerORG/deploy.git')
 const branch = ref('main')
 const busySource = ref('')
+const deletingSource = ref('')
 const saving = ref(false)
 const hostVersion = ref(0)
 
@@ -107,6 +108,25 @@ async function addSource() {
     saving.value = false
   }
 }
+async function deleteSource(source: Source) {
+  const confirmed = window.confirm(
+    `确认删除来源“${source.name}”（${source.branch}）？\n此来源的应用商店条目将被移除，但不会卸载已安装应用。`
+  )
+  if (!confirmed) return
+  deletingSource.value = source.id
+  catalogError.value = ''
+  try {
+    const response = await fetch('/api/v1/catalog/sources/' + encodeURIComponent(source.id), {
+      method: 'DELETE', credentials: 'same-origin', headers: { 'X-ENT-Request': '1' }
+    })
+    if (!response.ok) throw new Error(response.status === 404 ? '来源不存在，请刷新列表' : '删除来源失败')
+    await loadCatalog()
+  } catch (err) {
+    catalogError.value = err instanceof Error ? err.message : '删除来源失败'
+  } finally {
+    deletingSource.value = ''
+  }
+}
 async function syncSource(source: Source) {
   busySource.value = source.id
   catalogError.value = ''
@@ -167,8 +187,10 @@ onMounted(refresh)
             <label for="source-name">名称</label>
             <input id="source-name" v-model="sourceName" maxlength="80" required />
             <label for="source-url">Git 地址</label>
-            <input id="source-url" v-model="remoteURL" spellcheck="false" autocomplete="off" aria-describedby="git-source-help" required />
-            <small id="git-source-help" class="muted">示例：https://github.com/owner/repo.git · http://gitea.example.org:3000/owner/repo.git（HTTP 需后端开启）</small>
+            <div class="source-url-field">
+              <input id="source-url" v-model="remoteURL" spellcheck="false" autocomplete="off" aria-describedby="git-source-help" required />
+              <small id="git-source-help" class="muted">公开仓库推荐 HTTPS：https://github.com/owner/repo.git；私有仓库可使用已授权的 SSH。明文 HTTP 需后端开启。</small>
+            </div>
             <label for="source-branch">分支</label>
             <input id="source-branch" v-model="branch" required />
             <button type="submit" :disabled="saving">{{ saving ? '添加中…' : '添加来源' }}</button>
@@ -183,9 +205,14 @@ onMounted(refresh)
                 <span class="muted">分支：{{ source.branch }} · {{ source.current_revision ? '当前版本 ' + source.current_revision.slice(0, 12) : '尚未同步' }}</span>
                 <span v-if="source.last_error" class="error">{{ source.last_error }}</span>
               </div>
-              <button type="button" :disabled="!!busySource" @click="syncSource(source)">
-                {{ busySource === source.id ? '同步中…' : '手动同步' }}
-              </button>
+              <div class="source-actions">
+                <button type="button" :disabled="!!busySource || !!deletingSource" @click="syncSource(source)">
+                  {{ busySource === source.id ? '同步中…' : '手动同步' }}
+                </button>
+                <button type="button" class="danger" :disabled="!!busySource || !!deletingSource" @click="deleteSource(source)">
+                  {{ deletingSource === source.id ? '删除中…' : '删除' }}
+                </button>
+              </div>
             </li>
           </ul>
         </section>
@@ -214,6 +241,8 @@ button{background:#176a9b;color:white;border:0;border-radius:8px;padding:10px 16
 button:disabled{opacity:.55;cursor:not-allowed}.secondary{color:#176a9b;background:#e9f3f9}
 .source-form{display:grid;grid-template-columns:75px minmax(0,1fr);gap:10px 12px;align-items:center;max-width:780px;margin-top:20px}
 .source-form button{grid-column:2;justify-self:start}
+.source-url-field{min-width:0}.source-url-field small{display:block;margin-top:5px;line-height:1.5;overflow-wrap:anywhere}
+.source-actions{display:flex;gap:8px;flex-wrap:wrap}.source-actions .danger{background:#fff1f2;color:#b42318;border:1px solid #fda4af}
 .sources{padding:0;margin:24px 0 0;list-style:none}
 .sources li{display:flex;justify-content:space-between;gap:15px;align-items:center;border-top:1px solid #edf0f3;padding:16px 0;flex-wrap:wrap}
 .source-info{display:flex;flex-direction:column;gap:5px;min-width:0;max-width:100%}
