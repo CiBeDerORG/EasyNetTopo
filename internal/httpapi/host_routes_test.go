@@ -92,6 +92,17 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	if got := req("PATCH", editPath, payload, true, true); got.Code != 200 || !strings.Contains(got.Body.String(), "新 fnOS") {
 		t.Fatal("编辑主机失败", got.Code, got.Body.String())
 	}
+	// Metadata API must reject identity or pairing data. Only /pair may explicitly change credentials.
+	if got := req("PATCH", editPath,
+		`{"name":"覆盖尝试","endpoint":"http://127.0.0.1:7018","agent_id":"11111111-1111-4111-8111-111111111111"}`,
+		true, true); got.Code != 400 {
+		t.Fatal("主机资料接口允许修改 Agent 身份", got.Code)
+	}
+	if got := req("PATCH", editPath,
+		`{"name":"覆盖尝试","endpoint":"http://127.0.0.1:7018","access_token":"not-allowed"}`,
+		true, true); got.Code != 400 {
+		t.Fatal("主机资料接口允许写入配对 Token", got.Code)
+	}
 	if got := req("DELETE", editPath, "", false, true); got.Code != 401 {
 		t.Fatal("未登录不应删除主机", got.Code)
 	}
