@@ -23,15 +23,43 @@ func NewService(ctx context.Context, db *storage.Store) (*Service, error) {
 	}
 	return &Service{db: db, hosts: store}, nil
 }
-func (s *Service) Register(ctx context.Context, name, endpoint string) (storage.Host, error) {
+func validateHostMetadata(name, endpoint string) (string, error) {
 	name = strings.TrimSpace(name)
 	if len(name) == 0 || len(name) > 100 || strings.ContainsAny(name, "\r\n\x00") {
-		return storage.Host{}, errors.New("主机名称不合法")
+		return "", errors.New("主机名称不合法")
 	}
 	if err := ValidateEndpoint(endpoint); err != nil {
+		return "", err
+	}
+	return name, nil
+}
+
+func (s *Service) Register(ctx context.Context, name, endpoint string) (storage.Host, error) {
+	name, err := validateHostMetadata(name, endpoint)
+	if err != nil {
 		return storage.Host{}, err
 	}
 	return s.hosts.Create(ctx, name, endpoint)
+}
+
+// Update only edits local display name and endpoint; credentials remain byte-for-byte unchanged.
+// A change of Agent identity must use an explicit pairing operation.
+func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storage.Host, error) {
+	name, err := validateHostMetadata(name, endpoint)
+	if err != nil {
+		return storage.Host{}, err
+	}
+	s.pairingMu.Lock()
+	defer s.pairingMu.Unlock()
+	return s.hosts.UpdateMetadata(ctx, id, name, endpoint)
+}
+
+// Delete only removes a local registration; it does not remove Docker resources
+// or revoke Agent grants remotely. Never turn this into a cascade deletion.
+func (s *Service) Delete(ctx context.Context, id string) error {
+	s.pairingMu.Lock()
+	defer s.pairingMu.Unlock()
+	return s.hosts.Delete(ctx, id)
 }
 func (s *Service) List(ctx context.Context) ([]storage.Host, error) { return s.hosts.List(ctx) }
 func (s *Service) Pair(ctx context.Context, id, agentID, pin, code string) (storage.Host, error) {
