@@ -114,3 +114,64 @@ func TestDeletePairedHostOnlyRemovesLocalRecord(t *testing.T) {
 		t.Fatal("剩余主机应仍可编辑", err)
 	}
 }
+
+func TestUpdatePairedHostPreservesCredentials(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "data", "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hosts, err := NewHostStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := hosts.Create(ctx, "fnOS", "http://127.0.0.1:7018")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID := "11111111-1111-4111-8111-111111111111"
+	pin := strings.Repeat("a", 64)
+	token := strings.Repeat("b", 64)
+	if err := hosts.SavePairing(ctx, h, agentID, pin, token); err != nil {
+		t.Fatal(err)
+	}
+	before, err := hosts.Get(ctx, h.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var sealedBefore []byte
+	if err := db.db.QueryRowContext(ctx, "SELECT token_sealed FROM hosts WHERE id=?", h.ID).Scan(&sealedBefore); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct {
+		name, endpoint string
+	}{
+		{"fnOS", "http://127.0.0.1:7018"}, // Same values are an idempotent edit.
+		{"家用 fnOS", "http://127.0.0.2:7018"}, // Metadata change must not re-pair.
+	} {
+		updated, err := hosts.UpdateMetadata(ctx, h.ID, tc.name, tc.endpoint)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if updated.ID != before.ID || updated.Name != tc.name || updated.Endpoint != tc.endpoint ||
+			updated.AgentID != before.AgentID || updated.SPKISHA256 != before.SPKISHA256 ||
+			updated.PairedAt != before.PairedAt {
+			t.Fatalf("编辑修改了配对记录或未更新名称/地址：before=%+v updated=%+v", before, updated)
+		}
+		actualToken, err := hosts.Credentials(ctx, updated)
+		if err != nil || actualToken != token {
+			t.Fatalf("编辑导致已有 Token 丢失或重置: %v", err)
+		}
+		var sealedAfter []byte
+		if err := db.db.QueryRowContext(ctx, "SELECT token_sealed FROM hosts WHERE id=?", h.ID).Scan(&sealedAfter); err != nil {
+			t.Fatal(err)
+		}
+		if !bytes.Equal(sealedBefore, sealedAfter) {
+			t.Fatal("编辑不得重新加密或修改已保存的 Token")
+		}
+	}
+	if _, err := hosts.UpdateMetadata(ctx, "00000000-0000-4000-8000-000000000000", "missing", "http://127.0.0.1:7018"); !errors.Is(err, ErrHostNotFound) {
+		t.Fatalf("不存在的主机不应被自动创建: %v", err)
+	}
+}
