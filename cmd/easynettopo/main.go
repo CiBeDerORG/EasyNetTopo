@@ -118,5 +118,10 @@ func checkLocalBind(addr string) error {
 	if host == "localhost" || (ip != nil && ip.IsLoopback()) {
 		return nil
 	}
-	return errors.New("仅支持环回监听，请通过受保护的 HTTPS 反向代理访问")
+	// 单容器部署必须监听容器网络接口；仅显式授权 IPv4 通配地址。
+	// Docker Compose 仍将宿主机入口限定为 127.0.0.1，避免直接暴露管理界面。
+	if host == "0.0.0.0" && os.Getenv("EASYNETTOPO_ALLOW_CONTAINER_BIND") == "true" {
+		return nil
+	}
+	return errors.New("仅支持环回监听；容器内部监听 0.0.0.0 需显式设置 EASYNETTOPO_ALLOW_CONTAINER_BIND=true")
 }
