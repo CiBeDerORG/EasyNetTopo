@@ -34,6 +34,25 @@ async function copyGrant(app: AppRef) {
     copyStatus.value = '复制失败，请手动选中授权项复制。'
   }
 }
+function isRequestedDeployApp(app: AppRef) {
+  return app.app_id === 'sub2api' || app.app_id === 'portainer'
+}
+function grantCommand(app: AppRef) {
+  const apps = props.apps.filter(item => item.source_id === app.source_id &&
+    isRequestedDeployApp(item)).map(item => item.app_id)
+  const selected = apps.length ? Array.from(new Set(apps)).sort() : [app.app_id]
+  return 'cd /vol3/1000/software/deploy && sudo bash deploy.sh easyhostagent grant ' +
+    props.controllerId + ' ' + app.source_id + ' ' + selected.join(' ')
+}
+async function copyGrantCommand(app: AppRef) {
+  if (!props.controllerId || !isRequestedDeployApp(app)) return
+  try {
+    await navigator.clipboard.writeText(grantCommand(app))
+    copyStatus.value = '授权命令已复制。请在 fnOS 可信终端执行，不会下载二进制或重装 Agent。'
+  } catch {
+    copyStatus.value = '复制失败，请手动复制下方命令。'
+  }
+}
 const pending = ref<{ host: string; key: string; action: AppAction; app: string; errors: number } | null>(null)
 let toastSerial = 0
 let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -281,7 +300,13 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
           <code class="grant-value">{{ authorizationValue(app) }}</code>
           <button type="button" :disabled="!controllerId" @click="copyGrant(app)">复制授权项</button>
           <p v-if="copyStatus" role="status">{{copyStatus}}</p>
-          <p>保存后在 fnOS 执行 <code>sudo bash deploy.sh easyhostagent update</code> 使授权进入 Agent 原生配置，然后返回这里点击「刷新状态」。</p>
+          <template v-if="isRequestedDeployApp(app)">
+            <p>也可使用本机专用授权命令，一次性授权此 Git 来源下的 Sub2API 和 Portainer（若两者属于同一来源）。先更新 fnOS 的 Deploy 仓库及新版 Agent，再在可信终端执行：</p>
+            <code class="grant-value">{{ grantCommand(app) }}</code>
+            <button type="button" :disabled="!controllerId" @click="copyGrantCommand(app)">复制本机授权命令</button>
+            <p>此命令会保留已有授权、同步 Agent 原生配置并重启服务，不会下载程序或接管外部容器。原来源的宽授权不会被自动删除。</p>
+          </template>
+          <p v-else>保存后在 fnOS 执行 <code>sudo bash deploy.sh easyhostagent update</code> 使授权进入 Agent 原生配置，然后返回这里点击「刷新状态」。</p>
         </div>
       </div>
       <form v-if="form && key(form.app)===key(app)" @submit.prevent="submit(app,'install')">
