@@ -218,7 +218,7 @@ onMounted(refresh)
         </section>
 
         <MarketPanel :apps="apps" :sources="sources" :host-version="hostVersion" />
-        <HostPanel @paired="hostVersion++" />
+        <HostPanel @paired="hostVersion++" @changed="hostVersion++" />
         <p v-if="catalogError" class="error" role="alert">{{ catalogError }}</p>
       </template>
       <p v-if="error" class="error" role="alert">{{ error }}</p>
