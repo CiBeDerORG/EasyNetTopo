@@ -3,6 +3,7 @@ package storage
 import (
 	"bytes"
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -66,5 +67,50 @@ func TestHostTokenEncryptedAcrossRestart(t *testing.T) {
 	}
 	if err := hosts.AssertAgentNotBoundElsewhere(ctx, "another-host", agentID); err == nil {
 		t.Fatal("没有拒绝同一个 Agent 绑定第二台主机")
+	}
+}
+
+func TestDeletePairedHostOnlyRemovesLocalRecord(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "data", "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hosts, err := NewHostStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, err := hosts.Create(ctx, "删除目标", "http://127.0.0.1:7018")
+	if err != nil {
+		t.Fatal(err)
+	}
+	other, err := hosts.Create(ctx, "保留目标", "http://127.0.0.1:7019")
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID := "11111111-1111-4111-8111-111111111111"
+	pin := strings.Repeat("a", 64)
+	token := strings.Repeat("b", 64)
+	if err := hosts.SavePairing(ctx, first, agentID, pin, token); err != nil {
+		t.Fatal(err)
+	}
+	if err := hosts.Delete(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := hosts.Get(ctx, first.ID); !errors.Is(err, ErrHostNotFound) {
+		t.Fatal("本地登记和密封凭据应随主机一起删除", err)
+	}
+	if _, err := hosts.Get(ctx, other.ID); err != nil {
+		t.Fatal("删除不能影响其他主机", err)
+	}
+	if err := hosts.AssertAgentNotBoundElsewhere(ctx, other.ID, agentID); err != nil {
+		t.Fatal("已删除的主机不应继续占用控制端 Agent 唯一绑定", err)
+	}
+	if err := hosts.Delete(ctx, first.ID); !errors.Is(err, ErrHostNotFound) {
+		t.Fatal("重复删除应返回主机不存在", err)
+	}
+	if updated, err := hosts.UpdateMetadata(ctx, other.ID, "新名称", "http://127.0.0.1:7020"); err != nil || updated.Name != "新名称" {
+		t.Fatal("剩余主机应仍可编辑", err)
 	}
 }
