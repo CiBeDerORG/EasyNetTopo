@@ -110,6 +110,7 @@ func (s *HostStore) Get(ctx context.Context, id string) (Host, error) {
 	}
 	return h, err
 }
+
 // UpdateMetadata only changes the user-editable fields. It never rewrites
 // the pinned identity, sealed token or original pairing timestamp.
 func (s *HostStore) UpdateMetadata(ctx context.Context, id, name, endpoint string) (Host, error) {
