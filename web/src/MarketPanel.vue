@@ -4,9 +4,9 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 type AppRef = {source_id: string; app_id: string}
 type App = AppRef & {name: string; summary: string; revision: string}
 type Host = {id: string; name: string; agent_id?: string}
-type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; state: string; action?: string; result?: string; message?: string}
+type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; blocked_reason?: string; state: string; action?: string; result?: string; message?: string}
 type Field = {key: string; type: string; label: string; description?: string; required: boolean; editable?: boolean; default?: string | boolean | number; minimum?: number; maximum?: number}
-const props = defineProps<{apps: App[]; sources: {id: string; name: string}[]; hostVersion: number}>()
+const props = defineProps<{apps: App[]; sources: {id: string; name: string}[]; hostVersion: number; controllerId: string}>()
 const hosts = ref<Host[]>([])
 const host = ref('')
 const rows = ref<Record<string,Status>>({})
@@ -19,6 +19,20 @@ type AppAction = 'install' | 'update' | 'uninstall'
 type Toast = { id: number; kind: 'success' | 'error' | 'info' | 'warning'; text: string }
 const toast = ref<Toast | null>(null)
 const uninstallTarget = ref<App | null>(null)
+const showGrantHelp = ref('')
+const copyStatus = ref('')
+function authorizationValue(sourceId: string) {
+  return props.controllerId + '/' + sourceId
+}
+async function copyGrant(sourceId: string) {
+  if (!props.controllerId) return
+  try {
+    await navigator.clipboard.writeText(authorizationValue(sourceId))
+    copyStatus.value = '授权项已复制。请追加到 fnOS 的 EASYHOSTAGENT_APP_GRANTS，保留原有授权。'
+  } catch {
+    copyStatus.value = '复制失败，请手动选中授权项复制。'
+  }
+}
 const pending = ref<{ host: string; key: string; action: AppAction; app: string; errors: number } | null>(null)
 let toastSerial = 0
 let toastTimer: ReturnType<typeof setTimeout> | undefined
@@ -168,7 +182,40 @@ function canUninstall(a:App) {
   const row=rows.value[key(a)]
   return !!row?.allowed && !!row.managed && !row.external && row.state!=='unknown'
 }
-watch(host,()=>{form.value=null; uninstallTarget.value=null; rows.value={};error.value='';statusError.value='';void refresh()})
+function isExternal(a: App) {
+  return !!rows.value[key(a)]?.external
+}
+function isManaged(a: App) {
+  return !!rows.value[key(a)]?.managed
+}
+function blockReason(a: App) {
+  const row = rows.value[key(a)]
+  if (!row) return '尚未获取应用状态，点击刷新状态后再操作。'
+  if (row.external || row.blocked_reason === 'external_project') {
+    return '同名 Docker 项目由其他部署管理。为保护已有应用和数据，不能直接覆盖或卸载；需要先进行明确的受控接管。'
+  }
+  if (row.blocked_reason === 'source_conflict') {
+    return '此应用已有其他 Git 来源的安装记录，不能用当前来源覆盖。'
+  }
+  if (!row.allowed) {
+    return '当前控制端尚未获得此 Git 应用源的 Agent 操作授权。请先在 fnOS 上授权，再刷新状态。'
+  }
+  if (row.state === 'unknown') return '无法确认 Docker 状态，暂时禁止安装、更新或卸载。'
+  if (row.state === 'missing') return '已有受管安装记录，但服务容器缺失；可以重新安装。'
+  return ''
+}
+function grantRequired(a: App) {
+  const row = rows.value[key(a)]
+  return !!row && !row.external &&
+    (row.blocked_reason === 'grant_required' ||
+      (!row.allowed && !row.blocked_reason))
+}
+function showInstallAction(a: App) {
+  const row = rows.value[key(a)]
+  return !row || (!row.managed && !row.external) || row.state === 'missing'
+}
+
+watch(host,()=>{form.value=null; uninstallTarget.value=null; showGrantHelp.value=''; copyStatus.value=''; rows.value={};error.value='';statusError.value='';void refresh()})
 watch(()=>props.apps,()=>{form.value=null;void refresh()})
 watch(()=>props.hostVersion,loadHosts)
 onMounted(loadHosts)
@@ -197,8 +244,19 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
       <small>{{sources.find(s=>s.id===app.source_id)?.name || app.source_id}} · {{app.revision.slice(0,12) || '本机保留版本'}}</small>
       <p v-if="host" role="status">服务状态 · {{states[rows[key(app)]?.state] || '未知'}}
         <span v-if="rows[key(app)]?.result"><br/>最近{{actionNames[rows[key(app)].action as AppAction] || '操作'}} · {{results[rows[key(app)].result!]}} {{rows[key(app)].message}}</span></p>
-      <p v-if="rows[key(app)]?.external"><small>同名项目由主机上的其他部署管理。</small></p>
-      <p v-else-if="rows[key(app)] && !rows[key(app)].allowed"><small>此来源在该主机上不可操作，请核对主机授权和应用归属。</small></p>
+      <p v-if="blockReason(app)" class="restriction"><small>{{blockReason(app)}}</small></p>
+      <div v-if="grantRequired(app)" class="grant-tools">
+        <button type="button" class="secondary" @click="showGrantHelp = showGrantHelp === app.source_id ? '' : app.source_id">
+          {{ showGrantHelp === app.source_id ? '收起授权说明' : '查看授权方法' }}
+        </button>
+        <div v-if="showGrantHelp === app.source_id" class="grant-help">
+          <p>在安装 EasyHostAgent 的 fnOS 主机上，编辑 <code>/vol3/1000/software/deploy/.env</code>，将下面的授权项追加到 <code>EASYHOSTAGENT_APP_GRANTS</code>。如果已经有其他授权，用英文逗号分隔，<strong>不要覆盖旧值</strong>。</p>
+          <code class="grant-value">{{ authorizationValue(app.source_id) }}</code>
+          <button type="button" :disabled="!controllerId" @click="copyGrant(app.source_id)">复制授权项</button>
+          <p v-if="copyStatus" role="status">{{copyStatus}}</p>
+          <p>保存后在 fnOS 执行 <code>sudo bash deploy.sh easyhostagent update</code> 使授权进入 Agent 原生配置，然后返回这里点击「刷新状态」。</p>
+        </div>
+      </div>
       <form v-if="form && key(form.app)===key(app)" @submit.prevent="submit(app,'install')">
         <label v-for="f in form.fields" :key="f.key">{{f.label}} <small>{{f.required?'必填':'选填'}}</small>
           <select v-if="f.type==='boolean'" v-model="form.values[f.key]">
@@ -211,9 +269,15 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
         <button :disabled="active">确认安装</button><button type="button" :disabled="busy" @click="form=null">取消</button>
       </form>
       <template v-else>
-        <button v-if="catalogKeys.has(key(app)) && canInstall(app)" :disabled="active" @click="configure(app)">安装</button>
-        <button v-if="catalogKeys.has(key(app)) && rows[key(app)]?.managed" :disabled="active || !canUpdate(app)" @click="submit(app,'update')">更新</button>
-        <button v-if="rows[key(app)]?.managed" :disabled="active || !canUninstall(app)" class="uninstall" @click="askUninstall(app)">卸载</button>
+        <button v-if="catalogKeys.has(key(app)) && showInstallAction(app)"
+          type="button" :disabled="active || !canInstall(app)" :title="canInstall(app) ? '执行安装脚本' : blockReason(app)"
+          @click="configure(app)">{{rows[key(app)]?.state === 'missing' ? '重新安装' : '安装'}}</button>
+        <template v-if="isManaged(app) || isExternal(app)">
+          <button v-if="catalogKeys.has(key(app))" type="button" :disabled="active || !canUpdate(app)"
+            :title="canUpdate(app) ? '执行更新脚本' : blockReason(app)" @click="submit(app,'update')">更新</button>
+          <button type="button" :disabled="active || !canUninstall(app)" class="uninstall"
+            :title="canUninstall(app) ? '执行卸载脚本' : blockReason(app)" @click="askUninstall(app)">卸载</button>
+        </template>
       </template>
     </article>
   </div>
@@ -248,5 +312,11 @@ input,select{border:1px solid #becbda;min-width:0;box-sizing:border-box}.error{c
 .toast-error{background:#fff1f1;border-color:#b83d43}
 .toast-warning{background:#fff7e8;border-color:#b67d27}
 .toast-close{background:transparent;color:inherit;margin:0;padding:0 5px;font-size:21px}
+.restriction{margin:10px 0;color:#5c6575}
+.grant-tools{border-top:1px solid #e4eaf1;margin-top:12px;padding-top:8px}
+.grant-help{padding:10px 0;font-size:13px;line-height:1.6;overflow-wrap:anywhere}
+.grant-help p{margin:6px 0}
+.grant-value{display:block;white-space:normal;overflow-wrap:anywhere;padding:8px 10px;border:1px solid #dce4ed;background:#f6f8fa;border-radius:5px}
+.grant-tools .secondary{background:#e9f3f9;color:#155478}
 
 </style>
