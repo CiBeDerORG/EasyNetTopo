@@ -43,14 +43,14 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			return
 		}
 		body = req
-	case "install":
+	case "install", "update":
 		var req struct {
 			marketRef
 			Revision string            `json:"revision"`
 			Config   map[string]string `json:"config"`
 		}
-		if !decode(&req) {
-			http.Error(w, "无效的安装参数", 400)
+		if !decode(&req) || name == "update" && len(req.Config) != 0 {
+			http.Error(w, "无效的安装或更新参数", 400)
 			return
 		}
 		pkg, err := source.BuildCandidateBundle(ctx, req.Source, req.App)
@@ -66,7 +66,10 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			http.Error(w, "安装包未送达，请检查主机配对和 Agent 版本", 502)
 			return
 		}
-		body = map[string]any{"source_id": req.Source, "app_id": req.App, "bundle_sha256": pkg.SHA256, "config": req.Config}
+		body = map[string]any{"source_id": req.Source, "app_id": req.App, "bundle_sha256": pkg.SHA256}
+		if name == "install" {
+			body.(map[string]any)["config"] = req.Config
+		}
 	default:
 		http.NotFound(w, r)
 		return
