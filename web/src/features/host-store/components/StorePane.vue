@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { Box, CircleCheck, Download, TrendCharts } from '@element-plus/icons-vue'
 import AppCard from './AppCard.vue'
+import NativeAgentCard from './NativeAgentCard.vue'
 import { appKey, getAppPermissions } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AppAction } from '../types'
@@ -33,9 +34,9 @@ defineEmits<{
 }>()
 
 const statusByKey = computed(() => Object.fromEntries(props.rows.map(row => [appKey(row), row])))
-const installedCount = computed(() => props.rows.filter(row => row.managed || row.external).length)
-const runningCount = computed(() => props.rows.filter(row => row.state === 'running').length)
-const availableCount = computed(() => props.apps.filter(app => !!app.revision).length)
+const installedCount = computed(() => props.rows.filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
+const runningCount = computed(() => props.rows.filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
+const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
 const agentState = computed(() => {
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
   if (props.snapshotLoading) return { label: '检测中', type: 'warning' as const }
@@ -43,6 +44,11 @@ const agentState = computed(() => {
   if (props.snapshot) return { label: '已连接', type: 'success' as const }
   return { label: '已配对', type: 'info' as const }
 })
+const showNativeAgent = computed(() =>
+  props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
+  props.filter === 'available' && !props.snapshot ||
+  props.filter === 'update' && !!props.snapshot
+)
 const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
   const permissions = getAppPermissions(app, row)
@@ -58,12 +64,12 @@ function authorizationValue(app: CatalogApp) {
   return props.controllerId + '/' + app.source_id + '/' + app.app_id
 }
 function grantCommand(app: CatalogApp) {
-  if (app.app_id !== 'sub2api' && app.app_id !== 'portainer') return ''
+  if (!['sub2api', 'portainer', 'mihomo', 'opencode'].includes(app.app_id)) return ''
   const root = props.snapshot?.software_root
   if (!root || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').includes('..')) return ''
   const ids = props.apps
     .filter(item => item.source_id === app.source_id &&
-      (item.app_id === 'sub2api' || item.app_id === 'portainer'))
+      ['sub2api', 'portainer', 'mihomo', 'opencode'].includes(item.app_id))
     .map(item => item.app_id)
   const selected = Array.from(new Set(ids)).sort()
   return 'cd ' + root.replace(/\/$/, '') + '/deploy && sudo bash deploy.sh easyhostagent grant ' +
@@ -104,7 +110,7 @@ function grantCommand(app: CatalogApp) {
         <div class="metric">
           <div class="metric-caption"><el-icon><TrendCharts /></el-icon>运行中</div>
           <div class="metric-num green">{{ String(runningCount).padStart(2, '0') }}</div>
-          <div class="metric-foot">Docker 应用运行状态</div>
+          <div class="metric-foot">Docker 与原生应用运行状态</div>
         </div>
         <div class="metric">
           <div class="metric-caption"><el-icon><Box /></el-icon>可用应用</div>
@@ -144,7 +150,15 @@ function grantCommand(app: CatalogApp) {
       <div v-if="loading && rows.length === 0" class="market-loading">
         <el-skeleton :rows="4" animated />
       </div>
-      <div v-else-if="visibleApps.length" class="market-grid">
+      <div v-else-if="visibleApps.length || showNativeAgent" class="market-grid">
+        <NativeAgentCard
+          v-if="showNativeAgent"
+          :software-root="snapshot?.software_root"
+          :connected="!!snapshot"
+          :paired="!!host.agent_id"
+          :checking="snapshotLoading"
+          :connection-error="!!snapshotError"
+        />
         <AppCard
           v-for="app in visibleApps"
           :key="appKey(app)"
