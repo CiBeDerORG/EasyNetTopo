@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -139,13 +140,22 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				return
 			}
 			if errors.Is(err, storage.ErrHostBinding) {
-				http.Error(w, "主机或 Agent 已绑定其他身份", 409)
+				slog.Warn("主机配对失败", "host_id", id, "stage", "binding", "code", "host_binding_conflict")
+				jsonReply(w, http.StatusConflict, map[string]string{
+					"code": "host_binding_conflict",
+					"stage": "binding",
+					"message": "主机或 Agent 已绑定其他身份；请核对现有绑定，不能直接覆盖",
+				})
 				return
 			}
 			if err != nil {
-				http.Error(w, "配对失败：请核对终端指纹、Agent ID、配对码和主机连接；若 Agent 已接受配对但凭据保存失败，请重新本机配对", 502)
+				diagnostic := hosts.DiagnosePairing(err)
+				// 严格只记录分类信息。绝不记录配对码、Token、指纹或 HTTP 请求正文。
+				slog.Warn("主机配对失败", "host_id", id, "stage", diagnostic.Stage, "code", diagnostic.Code, "agent_status", diagnostic.AgentStatus)
+				jsonReply(w, diagnostic.Status, diagnostic)
 				return
 			}
+			slog.Info("主机配对完成", "host_id", id, "stage", "saved")
 			jsonReply(w, 200, h)
 			return
 		}
