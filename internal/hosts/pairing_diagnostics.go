@@ -13,7 +13,9 @@ type PairingStageError struct {
 	Cause error
 }
 
-func (e *PairingStageError) Error() string { return fmt.Sprintf("主机配对阶段 %s 失败", e.Stage) }
+func (e *PairingStageError) Error() string {
+	return fmt.Sprintf("主机配对阶段 %s 失败", e.Stage)
+}
 func (e *PairingStageError) Unwrap() error { return e.Cause }
 
 // PairingHTTPError 保存 Agent 返回的有限错误码，不携带响应正文和任何密钥。
