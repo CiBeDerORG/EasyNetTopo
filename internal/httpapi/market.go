@@ -43,7 +43,7 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			return
 		}
 		body = req
-	case "install", "update", "adopt":
+	case "install", "update", "adopt", "force_update":
 		var req struct {
 			marketRef
 			Revision string            `json:"revision"`
@@ -69,6 +69,11 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 		body = map[string]any{"source_id": req.Source, "app_id": req.App, "bundle_sha256": pkg.SHA256}
 		if name == "install" {
 			body.(map[string]any)["config"] = req.Config
+		}
+		if name == "force_update" {
+			// A dedicated route, not a generic update bypass: UI and Agent
+			// both require an explicit recovery confirmation.
+			body.(map[string]any)["confirm_external"] = true
 		}
 	default:
 		http.NotFound(w, r)
