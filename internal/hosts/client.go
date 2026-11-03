@@ -190,6 +190,12 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 				Code string `json:"code"`
 			}
 			_ = json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure)
+			switch failure.Code {
+			case "invalid_pairing_code", "pairing_window_closed", "pairing_attempts_exhausted", "pairing_unavailable", "invalid_identity":
+				// 仅允许 Agent 契约中已知的错误码进入诊断链路。
+			default:
+				failure.Code = "unknown"
+			}
 			return nil, &PairingHTTPError{Status: res.StatusCode, Code: failure.Code}
 		}
 		if strings.HasPrefix(path, "/v1/apps/") {
