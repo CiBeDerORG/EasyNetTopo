@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 const authCookie = "easynettopo_session"
