@@ -16,7 +16,7 @@ func (e *AppError) Error() string { return e.Message }
 
 // AppAction 仅允许经现有主机绑定和固定 TLS 身份发送这三个应用操作。
 func (s *Service) AppAction(ctx context.Context, hostID, name string, body any) (json.RawMessage, error) {
-	if name != "status" && name != "install" && name != "update" && name != "uninstall" {
+	if name != "status" && name != "install" && name != "update" && name != "uninstall" && name != "adopt" {
 		return nil, errors.New("未知应用动作")
 	}
 	h, err := s.hosts.Get(ctx, hostID)
