@@ -27,23 +27,38 @@ var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
 
-func ValidateEndpoint(value string) error {
-	if len(value) > 100 || strings.TrimSpace(value) != value {
-		return errors.New("主机地址必须为 IP:port")
+// parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
+func parseEndpoint(value string) (string, error) {
+	if len(value) > 110 || strings.TrimSpace(value) != value {
+		return "", errors.New("主机地址必须为 IP:port 或 http(s)://IP:port")
 	}
-	host, port, err := net.SplitHostPort(value)
+	scheme, addr := "https", value
+	switch {
+	case strings.HasPrefix(value, "http://"):
+		scheme, addr = "http", strings.TrimPrefix(value, "http://")
+	case strings.HasPrefix(value, "https://"):
+		addr = strings.TrimPrefix(value, "https://")
+	case strings.Contains(value, "://"):
+		return "", errors.New("只允许 HTTP 或 HTTPS")
+	}
+	host, port, err := net.SplitHostPort(addr)
 	if err != nil {
-		return errors.New("主机地址必须使用 IP:port")
+		return "", errors.New("主机地址必须使用 IP:port")
 	}
 	ip := net.ParseIP(host)
 	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return errors.New("仅允许直接可达的合法 IPv4/IPv6，禁止主机名及链路本地地址")
+		return "", errors.New("仅允许直接可达的合法 IPv4/IPv6，禁止主机名及链路本地地址")
 	}
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return errors.New("端口不合法")
+		return "", errors.New("端口不合法")
 	}
-	return nil
+	return scheme + "://" + addr, nil
+}
+
+func ValidateEndpoint(value string) error {
+	_, err := parseEndpoint(value)
+	return err
 }
 func ValidateIdentity(agentID, pin string) error {
 	if !uuidRE.MatchString(agentID) || !hashRE.MatchString(pin) {
@@ -115,14 +130,29 @@ type Client struct {
 }
 
 func NewClient(endpoint, agentID, pin string) (*Client, error) {
-	if err := ValidateEndpoint(endpoint); err != nil {
-		return nil, err
-	}
-	client, err := pinnedClient(agentID, pin)
+	baseURL, err := parseEndpoint(endpoint)
 	if err != nil {
 		return nil, err
 	}
-	return &Client{http: client, endpoint: "https://" + endpoint, agentID: agentID}, nil
+	if err := ValidateIdentity(agentID, pin); err != nil {
+		return nil, err
+	}
+	var client *http.Client
+	if strings.HasPrefix(baseURL, "http://") {
+		// 仅显式选择 HTTP 的来源允许明文连接；禁用系统代理和跨主机重定向。
+		client = &http.Client{
+			Transport: &http.Transport{Proxy: nil, MaxIdleConns: 2, IdleConnTimeout: 10 * time.Second,
+				DialContext: (&net.Dialer{Timeout: 4 * time.Second}).DialContext},
+			Timeout: 10 * time.Second,
+			CheckRedirect: func(*http.Request, []*http.Request) error { return http.ErrUseLastResponse },
+		}
+	} else {
+		client, err = pinnedClient(agentID, pin)
+		if err != nil {
+			return nil, err
+		}
+	}
+	return &Client{http: client, endpoint: baseURL, agentID: agentID}, nil
 }
 func (c *Client) request(ctx context.Context, method, path string, body any, controllerID, token string) (json.RawMessage, error) {
 	var reader io.Reader
