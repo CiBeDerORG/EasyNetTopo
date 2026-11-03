@@ -62,6 +62,8 @@ const loginMutation = useMutation({
   },
   onError: error => ElMessage.error(errorMessage(error))
 })
+// Vue 模板对普通对象内的 Ref 不自动解包，先转换为顶层布尔响应式状态。
+const loginPending = computed(() => loginMutation.isPending.value)
 const controllerQuery = useQuery({
   queryKey: ['controller-info'],
   queryFn: getControllerInfo,
@@ -488,6 +490,7 @@ function grantCommand(app: CatalogApp) {
 }
 
 async function submitLogin() {
+  if (loginPending.value || !loginForm.username.trim() || !loginForm.password) return
   loginMutation.mutate()
 }
 async function logout() {
@@ -537,7 +540,7 @@ async function logout() {
   <main v-else-if="!authenticated" class="auth-screen">
     <section class="auth-card login-card">
       <div class="auth-brand">EasyNetTopo</div>
-      <p class="auth-kicker">NETWORK · TOPOLOGY</p>
+      <p class="auth-kicker">易网拓扑</p>
       <h1>管理员登录</h1>
       <p class="auth-description">登录后管理已配对主机与 Docker 应用。</p>
       <el-form label-position="top" @submit.prevent="submitLogin">
@@ -547,7 +550,7 @@ async function logout() {
         <el-form-item label="密码">
           <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" />
         </el-form-item>
-        <el-button class="login-button" type="primary" native-type="submit" :loading="loginMutation.isPending">
+        <el-button class="login-button" type="primary" native-type="submit" :loading="loginPending" :disabled="loginPending || !loginForm.username.trim() || !loginForm.password">
           登录控制端
         </el-button>
       </el-form>
