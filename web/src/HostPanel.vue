@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-const emit = defineEmits<{ paired: [] }>()
+const emit = defineEmits<{ paired: []; changed: [] }>()
 
 type Host = {
   id: string
@@ -32,6 +32,9 @@ const selectedID = ref('')
 const agentID = ref('')
 const fingerprint = ref('')
 const pairingCode = ref('')
+const editingID = ref('')
+const editName = ref('')
+const editEndpoint = ref('')
 const busy = ref(false)
 const error = ref('')
 const message = ref('')
@@ -57,6 +60,7 @@ async function call<T>(url: string, method = 'GET', payload?: unknown): Promise<
     }
     throw new Error('请求失败（HTTP ' + response.status + '），请检查主机状态与认证配置')
   }
+  if (response.status === 204) return undefined as T
   return (await response.json()) as T
 }
 async function loadHosts() {
@@ -78,8 +82,11 @@ async function registerHost() {
     })
     name.value = ''
     endpoint.value = ''
-    selectedID.value = host.id
-    message.value = '主机登记成功。请从 Agent 所在主机终端获取 UUID、指纹及配对码。HTTP 模式仅适合可信网络。'
+    selectHost(host.id)
+    editingID.value = host.id
+    editName.value = host.name
+    editEndpoint.value = host.endpoint
+    message.value = '主机登记成功。请在该主机展开的编辑区域输入本机终端的 UUID、指纹和一次性配对码。'
     await loadHosts()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '登记失败'
@@ -98,6 +105,7 @@ async function pairHost() {
       pairing_code: pairingCode.value.trim()
     })
     pairingCode.value = ''
+    editingID.value = ''
     emit('paired')
     message.value = '配对成功。Agent 已将此控制端设为唯一有效控制中心。'
     await loadHosts()
@@ -125,11 +133,66 @@ async function queryHost(id: string, type: 'snapshot' | 'docker') {
 }
 function selectHost(id: string) {
   selectedID.value = id
+  editingID.value = ''
   snapshot.value = null
   inventory.value = null
   agentID.value = ''
   fingerprint.value = ''
   pairingCode.value = ''
+}
+function toggleEditor(host: Host) {
+  if (editingID.value === host.id) {
+    editingID.value = ''
+    pairingCode.value = ''
+    return
+  }
+  selectHost(host.id)
+  editingID.value = host.id
+  editName.value = host.name
+  editEndpoint.value = host.endpoint
+  agentID.value = host.agent_id
+  fingerprint.value = host.spki_sha256
+}
+async function saveHost() {
+  if (!editingID.value) return
+  busy.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    await call<Host>('/api/v1/hosts/' + editingID.value, 'PATCH', {
+      name: editName.value, endpoint: editEndpoint.value.trim()
+    })
+    await loadHosts()
+    emit('changed')
+    message.value = '主机名称和连接地址已保存，原有配对凭据保留。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '保存主机失败'
+  } finally {
+    busy.value = false
+  }
+}
+async function deleteHost(host: Host) {
+  const warning = host.agent_id
+    ? '该主机已配对。删除仅移除 EasyNetTopo 本地登记和已保存的凭据，不会撤销 Agent 端授权、停止 Agent 或删除 Docker 应用。'
+    : '删除仅移除 EasyNetTopo 的主机登记，不影响 Agent 及其 Docker 应用。'
+  if (!window.confirm('确定删除主机「' + host.name + '」？\n\n' + warning)) return
+  busy.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    await call<void>('/api/v1/hosts/' + host.id, 'DELETE')
+    if (selectedID.value === host.id) {
+      selectHost('')
+    }
+    if (editingID.value === host.id) editingID.value = ''
+    await loadHosts()
+    emit('changed')
+    message.value = '主机「' + host.name + '」已从 EasyNetTopo 删除。Agent 和 Docker 应用未受影响。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '删除主机失败'
+  } finally {
+    busy.value = false
+  }
 }
 onMounted(loadHosts)
 </script>
@@ -162,25 +225,36 @@ onMounted(loadHosts)
           </div>
           <div class="actions">
             <button type="button" class="secondary" :disabled="busy" @click="selectHost(host.id)">选择</button>
+            <button type="button" class="secondary" :disabled="busy" :aria-expanded="editingID === host.id" :aria-controls="'host-edit-' + host.id" @click="toggleEditor(host)">{{ editingID === host.id ? '收起编辑' : '编辑' }}</button>
             <button v-if="host.agent_id" type="button" :disabled="busy" @click="queryHost(host.id, 'snapshot')">主机信息</button>
             <button v-if="host.agent_id" type="button" :disabled="busy" @click="queryHost(host.id, 'docker')">Docker 资源</button>
+            <button type="button" class="danger" :disabled="busy" @click="deleteHost(host)">删除</button>
           </div>
         </div>
         <small v-if="host.agent_id" class="muted">Agent UUID：{{ host.agent_id }}</small>
+        <div v-if="editingID === host.id" :id="'host-edit-' + host.id" class="edit-panel">
+          <form class="form" @submit.prevent="saveHost">
+            <h3>编辑主机信息</h3>
+            <label :for="'edit-name-' + host.id">主机名称</label>
+            <input :id="'edit-name-' + host.id" v-model="editName" maxlength="100" required />
+            <label :for="'edit-endpoint-' + host.id">Agent 地址</label>
+            <input :id="'edit-endpoint-' + host.id" v-model="editEndpoint" required />
+            <button type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存修改' }}</button>
+          </form>
+          <form class="form pair" @submit.prevent="pairHost">
+            <h3>{{ host.agent_id ? '重新配对 Agent' : '配对 Agent' }}</h3>
+            <p class="muted">从 Agent 本机终端获取 UUID、指纹和最新一次性配对码。HTTPS 会校验指纹，HTTP 不提供加密和服务器身份验证。重新配对可能撤销先前的控制端授权。</p>
+            <label :for="'agent-id-' + host.id">Agent UUID</label>
+            <input :id="'agent-id-' + host.id" v-model="agentID" placeholder="终端核对后的 UUID" autocomplete="off" required />
+            <label :for="'agent-fingerprint-' + host.id">Agent 公钥指纹（64 位十六进制）</label>
+            <input :id="'agent-fingerprint-' + host.id" v-model="fingerprint" placeholder="终端核对后的公钥指纹" autocomplete="off" spellcheck="false" required />
+            <label :for="'pair-code-' + host.id">一次性配对码</label>
+            <input :id="'pair-code-' + host.id" v-model="pairingCode" type="password" autocomplete="off" placeholder="本机生成的 32 位十六进制码" required />
+            <button type="submit" :disabled="busy">{{ busy ? '处理中…' : '安全配对' }}</button>
+          </form>
+        </div>
       </li>
     </ul>
-
-    <form v-if="selectedID" class="form pair" @submit.prevent="pairHost">
-      <h3>配对或重新配对选中的主机</h3>
-      <p class="muted">配对前从主机终端获取 UUID、指纹和一次性配对码。HTTPS 使用固定指纹验证服务器身份；HTTP 不具备传输加密或服务器身份校验，不能依赖指纹保证链路安全。重新配对会撤销旧控制端授权。</p>
-      <label for="agent-id">Agent UUID</label>
-      <input id="agent-id" v-model="agentID" placeholder="终端核对后的 UUID" autocomplete="off" required />
-      <label for="agent-fingerprint">Agent 公钥指纹（64 位十六进制）</label>
-      <input id="agent-fingerprint" v-model="fingerprint" placeholder="终端核对后的公钥指纹" autocomplete="off" spellcheck="false" required />
-      <label for="pair-code">一次性配对码</label>
-      <input id="pair-code" v-model="pairingCode" type="password" autocomplete="off" placeholder="主机本地生成的 32 位十六进制码" required />
-      <button type="submit" :disabled="busy">{{ busy ? '处理中…' : '安全配对' }}</button>
-    </form>
 
     <section v-if="snapshot" class="result">
       <h3>主机实时快照</h3>
@@ -216,6 +290,10 @@ label{font-size:13px;font-weight:600}
 input{min-width:0;padding:10px 12px;border:1px solid #c8d2df;border-radius:8px;font:inherit}
 button{background:#176a9b;color:#fff;border:0;border-radius:8px;padding:10px 13px;cursor:pointer}
 .secondary{background:#e9f3f9;color:#176a9b}
+.danger{background:#b43835;color:#fff}
+.edit-panel{margin-top:12px;padding:12px 16px;border:1px solid #d8e2ec;border-radius:10px;background:#f8fbfe}
+.edit-panel .form{max-width:100%;padding:10px 0}
+.edit-panel .form + .form{border-top:1px solid #d8e2ec;margin-top:12px;padding-top:20px}
 button:disabled{opacity:.55;cursor:not-allowed}
 .hosts{list-style:none;padding:0;margin:15px 0}
 .hosts li{padding:14px 0;border-top:1px solid #e4eaf1}
