@@ -69,7 +69,7 @@ async function registerHost() {
     name.value = ''
     endpoint.value = ''
     selectedID.value = host.id
-    message.value = '主机登记成功。请从该主机可信终端核验 Agent ID 与 TLS SPKI 指纹后再配对。'
+    message.value = '主机登记成功。请从 Agent 所在主机终端获取 UUID、指纹及配对码。HTTP 模式仅适合可信网络。'
     await loadHosts()
   } catch (err) {
     error.value = err instanceof Error ? err.message : '登记失败'
@@ -129,7 +129,7 @@ onMounted(loadHosts)
     <div class="heading">
       <div>
         <h2>主机与 EasyHostAgent</h2>
-        <p class="muted">使用 IP:port + HTTPS 直接连接。配对前必须在 Agent 所在机器可信终端核对指纹。</p>
+        <p class="muted">支持 IP:port（默认 HTTPS）或 http://IP:port（显式 HTTP）。HTTP 明文传输凭据与操作参数，只适合可信网络。</p>
       </div>
       <button type="button" class="secondary" @click="loadHosts">刷新主机</button>
     </div>
@@ -137,8 +137,8 @@ onMounted(loadHosts)
     <form class="form" @submit.prevent="registerHost">
       <label for="host-name">主机名称</label>
       <input id="host-name" v-model="name" placeholder="例如：fnOS NAS" maxlength="100" required />
-      <label for="host-address">Agent IP:端口</label>
-      <input id="host-address" v-model="endpoint" placeholder="例如：192.168.1.20:7014" required />
+      <label for="host-address">Agent 地址</label>
+      <input id="host-address" v-model="endpoint" placeholder="例如：http://192.168.1.20:7014" required />
       <button type="submit" :disabled="busy">添加主机</button>
     </form>
 
@@ -162,10 +162,10 @@ onMounted(loadHosts)
 
     <form v-if="selectedID" class="form pair" @submit.prevent="pairHost">
       <h3>配对或重新配对选中的主机</h3>
-      <p class="muted">配对前，必须从该主机本地可信终端获取 Agent UUID、TLS SPKI SHA-256 指纹与有效的一次性配对码。不要仅信任网络返回的指纹；重新配对成功会撤销 Agent 原控制端的授权。</p>
+      <p class="muted">配对前从主机终端获取 UUID、指纹和一次性配对码。HTTPS 使用固定指纹验证服务器身份；HTTP 不具备传输加密或服务器身份校验，不能依赖指纹保证链路安全。重新配对会撤销旧控制端授权。</p>
       <label for="agent-id">Agent UUID</label>
       <input id="agent-id" v-model="agentID" placeholder="终端核对后的 UUID" autocomplete="off" required />
-      <label for="agent-fingerprint">TLS SPKI SHA-256（64 位十六进制）</label>
+      <label for="agent-fingerprint">Agent 公钥指纹（64 位十六进制）</label>
       <input id="agent-fingerprint" v-model="fingerprint" placeholder="终端核对后的公钥指纹" autocomplete="off" spellcheck="false" required />
       <label for="pair-code">一次性配对码</label>
       <input id="pair-code" v-model="pairingCode" type="password" autocomplete="off" placeholder="主机本地生成的 32 位十六进制码" required />
