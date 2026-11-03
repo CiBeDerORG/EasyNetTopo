@@ -1,9 +1,10 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Activity, Box, Download, ShieldCheck } from '@element-plus/icons-vue'
+import { Box, CircleCheck, Download, TrendCharts } from '@element-plus/icons-vue'
 import AppCard from './AppCard.vue'
 import { appKey, getAppPermissions } from '../rules'
-import type { AppAction, AppFilter } from '../../../stores/ui'
+import type { AppFilter } from '../../../stores/ui'
+import type { AppAction } from '../types'
 import type { AppStatus, CatalogApp, CatalogSource, Host, HostSnapshot } from '../types'
 
 const props = defineProps<{
@@ -99,7 +100,7 @@ function grantCommand(app: CatalogApp) {
           <div class="metric-foot">目标主机当前部署</div>
         </div>
         <div class="metric">
-          <div class="metric-caption"><el-icon><Activity /></el-icon>运行中</div>
+          <div class="metric-caption"><el-icon><TrendCharts /></el-icon>运行中</div>
           <div class="metric-num green">{{ String(runningCount).padStart(2, '0') }}</div>
           <div class="metric-foot">Docker 应用运行状态</div>
         </div>
@@ -109,7 +110,7 @@ function grantCommand(app: CatalogApp) {
           <div class="metric-foot">来自已同步的应用源</div>
         </div>
         <div class="metric">
-          <div class="metric-caption"><el-icon><ShieldCheck /></el-icon>Agent 状态</div>
+          <div class="metric-caption"><el-icon><CircleCheck /></el-icon>Agent 状态</div>
           <div class="metric-num agent" :class="{ green: agentState.type === 'success' }">{{ agentState.label }}</div>
           <div class="metric-foot">{{ snapshot ? snapshot.platform + ' · ' + snapshot.arch : '通过配对身份安全连接' }}</div>
         </div>
