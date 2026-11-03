@@ -16,9 +16,11 @@ func initAdminFromStdin(db *storage.Store, input io.Reader) error {
 	if db == nil || input == nil {
 		return errors.New("初始化输入无效")
 	}
-	raw, err := io.ReadAll(io.LimitReader(input, 257))
-	if err != nil || len(raw) > 256 {
-		return errors.New("初始化凭据输入过长或读取失败")
+	// stdin 是受信任的本地部署入口，仅限制传输总量以防止无界内存分配。
+	const maxInputBytes = 1 << 20
+	raw, err := io.ReadAll(io.LimitReader(input, maxInputBytes+1))
+	if err != nil || len(raw) > maxInputBytes {
+		return errors.New("初始化凭据输入超出传输容量或读取失败")
 	}
 	lines := bytes.Split(raw, []byte{'\n'})
 	if len(lines) != 3 || len(lines[2]) != 0 || bytes.IndexByte(raw, '\r') >= 0 ||
