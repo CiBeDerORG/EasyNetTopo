@@ -42,10 +42,10 @@ func (s *Service) Pair(ctx context.Context, id, agentID, pin, code string) (stor
 		return storage.Host{}, err
 	}
 	if err := ValidateIdentity(agentID, pin); err != nil {
-		return storage.Host{}, err
+		return storage.Host{}, &PairingStageError{Stage: "input", Cause: err}
 	}
 	if !codeRE.MatchString(code) {
-		return storage.Host{}, errors.New("配对码格式必须为 32 位十六进制")
+		return storage.Host{}, &PairingStageError{Stage: "input", Cause: errors.New("配对码格式必须为 32 位十六进制")}
 	}
 	if h.AgentID != "" && (h.AgentID != agentID || h.SPKISHA256 != pin) {
 		return storage.Host{}, storage.ErrHostBinding
@@ -58,9 +58,13 @@ func (s *Service) Pair(ctx context.Context, id, agentID, pin, code string) (stor
 		return storage.Host{}, err
 	}
 	if err := s.hosts.SavePairing(ctx, h, agentID, pin, token); err != nil {
-		return storage.Host{}, errors.New("Agent 已接受配对但本地保存凭据失败，必须在主机可信终端重新生成配对码")
+		return storage.Host{}, &PairingStageError{Stage: "save", Cause: err}
 	}
-	return s.hosts.Get(ctx, id)
+	paired, err := s.hosts.Get(ctx, id)
+	if err != nil {
+		return storage.Host{}, &PairingStageError{Stage: "readback", Cause: err}
+	}
+	return paired, nil
 }
 func (s *Service) Query(ctx context.Context, id, kind string) (json.RawMessage, error) {
 	h, err := s.hosts.Get(ctx, id)
