@@ -1,12 +1,10 @@
 import type { AppPermissions, AppRef, AppStatus, CatalogApp } from './types'
 
 export const appKey = (app: AppRef) => app.source_id + '/' + app.app_id
-export const isDeployManagedApp = (app: AppRef) => ['sub2api', 'portainer', 'mihomo', 'opencode'].includes(app.app_id)
-
 export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissions {
   const managed = !!row?.managed
   const external = !!row?.external
-  const showAdopt = isDeployManagedApp(app) && external && row?.blocked_reason !== 'legacy_project_name'
+  const showAdopt = external && (row?.adoptable || row?.blocked_reason === 'legacy_scripts_missing')
   const showInstall = !row || (!managed && !external) || row.state === 'missing'
   const showUpdate = (managed || external) && !!app.revision
   const showUninstall = managed || external
@@ -18,7 +16,7 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissi
     ['running', 'stopped', 'partial'].includes(row.state)
   const canUninstall = !!row?.allowed && managed && !external && row.state !== 'unknown'
   const canAdopt = !!app.revision && !!row?.adoptable
-  const canForceUpdate = !!app.revision && isDeployManagedApp(app) &&
+  const canForceUpdate = !!app.revision &&
     !!row?.force_updatable && (managed && !!row.allowed && !external ||
       external && row.blocked_reason === 'legacy_scripts_missing')
   const grantRequired = !!row && (row.blocked_reason === 'grant_required' ||
