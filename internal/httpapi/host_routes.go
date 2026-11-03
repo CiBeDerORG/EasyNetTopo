@@ -142,8 +142,8 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			if errors.Is(err, storage.ErrHostBinding) {
 				slog.Warn("主机配对失败", "host_id", id, "stage", "binding", "code", "host_binding_conflict")
 				jsonReply(w, http.StatusConflict, map[string]string{
-					"code": "host_binding_conflict",
-					"stage": "binding",
+					"code":    "host_binding_conflict",
+					"stage":   "binding",
 					"message": "主机或 Agent 已绑定其他身份；请核对现有绑定，不能直接覆盖",
 				})
 				return
