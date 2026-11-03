@@ -50,7 +50,7 @@ func run() error {
 		if !term.IsTerminal(int(os.Stdin.Fd())) {
 			return errors.New("管理员初始化需要交互式终端")
 		}
-		fmt.Fprint(os.Stderr, "输入 admin 密码（12–72 字节）：")
+		fmt.Fprint(os.Stderr, "输入 admin 密码：")
 		pwd, err := term.ReadPassword(int(os.Stdin.Fd()))
 		fmt.Fprintln(os.Stderr)
 		if err != nil {
