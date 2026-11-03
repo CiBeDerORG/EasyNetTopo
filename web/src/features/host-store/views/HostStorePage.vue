@@ -382,7 +382,7 @@ async function handleAppAction(app: CatalogApp, action: AppAction) {
     try {
       await ElMessageBox.confirm(
         '将在主机「' + (selectedHost.value?.name || '') + '」上卸载「' + app.name +
-          '」。默认保留持久化数据，不会卸载 EasyHostAgent 本身。请确认目标主机和应用正确。',
+          '」。默认保留持久化数据。请确认目标主机和应用正确。',
         '确认卸载',
         { type: 'warning', confirmButtonText: '确认卸载', cancelButtonText: '取消' }
       )
@@ -392,7 +392,7 @@ async function handleAppAction(app: CatalogApp, action: AppAction) {
   } else if (action === 'force_update') {
     try {
       await ElMessageBox.confirm(
-        '仅适用于已核验 Compose 项目归属的 Sub2API / Portainer 原有 Deploy 部署。Agent 会使用经过校验的 Git 应用包修复缺失或不安全的标准脚本，再执行原 Deploy update.sh。\n\n不会覆盖原 Compose 文件、.env、.secrets 和持久化数据；如项目归属不符、发现符号链接或应用授权失效，Agent 仍会拒绝执行。此操作可能重新创建容器，请事先备份数据。',
+        '仅适用于已授权且归属明确的受管应用，或已核验原 Deploy 目录的旧项目。Agent 会校验固定来源应用包；已有受管项目重新执行更新脚本，缺失旧脚本时安全修复后再更新。\n\n不会主动清除 .env、.secrets 和持久化数据；如项目归属不符、路径不安全或应用授权失效，Agent 会拒绝执行。更新可能重建容器，请事先备份数据。',
         '确认强制更新',
         { type: 'warning', confirmButtonText: '确认强制更新', cancelButtonText: '取消' }
       )
