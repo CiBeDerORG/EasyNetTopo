@@ -4,11 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
+
+var ErrInvalidHostMetadata = errors.New("主机名称或连接地址不合法")
 
 type Service struct {
 	db        *storage.Store
@@ -47,7 +50,7 @@ func (s *Service) Register(ctx context.Context, name, endpoint string) (storage.
 func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storage.Host, error) {
 	name, err := validateHostMetadata(name, endpoint)
 	if err != nil {
-		return storage.Host{}, err
+		return storage.Host{}, fmt.Errorf("%w: %v", ErrInvalidHostMetadata, err)
 	}
 	s.pairingMu.Lock()
 	defer s.pairingMu.Unlock()
