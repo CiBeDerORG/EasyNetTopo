@@ -41,5 +41,4 @@ jobs:
       - name: 验证真实 Agent HTTPS/HTTP 身份、一次性配对和授权接口
         env:
           EASYNETTOPO_TEST_AGENT_BINARY: ${{ runner.temp }}/easyhostagent-integration
-        run: go test -race -count=1 -timeout=90s -v -run '^TestRealAgent(Interop|HTTPInterop) ./internal/hosts
- ./internal/hosts
+        run: go test -race -count=1 -timeout=90s -v -run '^TestRealAgent(Interop|HTTPInterop)$' ./internal/hosts
