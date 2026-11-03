@@ -123,7 +123,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 					return
 				}
 				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
-					jsonReply(w, http.StatusUnprocessableEntity, map[string]string{
+					jsonReply(w, http.StatusBadRequest, map[string]string{
 						"code": "invalid_host_metadata", "message": "主机名称或连接地址不合法，请检查名称、IP 和端口",
 					})
 					return
