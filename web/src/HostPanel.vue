@@ -46,7 +46,17 @@ async function call<T>(url: string, method = 'GET', payload?: unknown): Promise<
     method, credentials: 'same-origin', cache: 'no-store', headers,
     ...(payload === undefined ? {} : { body: JSON.stringify(payload) })
   })
-  if (!response.ok) throw new Error('请求失败（HTTP ' + response.status + '），请检查主机状态与认证配置')
+  if (!response.ok) {
+    if (url.endsWith('/pair')) {
+      const detail = (await response.json().catch(() => null)) as
+        | { code?: string; stage?: string; message?: string }
+        | null
+      if (detail && typeof detail.message === 'string' && typeof detail.code === 'string') {
+        throw new Error(detail.message + '（' + detail.code + ' / ' + (detail.stage || 'unknown') + '）')
+      }
+    }
+    throw new Error('请求失败（HTTP ' + response.status + '），请检查主机状态与认证配置')
+  }
   return (await response.json()) as T
 }
 async function loadHosts() {
@@ -91,8 +101,8 @@ async function pairHost() {
     emit('paired')
     message.value = '配对成功。Agent 已将此控制端设为唯一有效控制中心。'
     await loadHosts()
-  } catch {
-    error.value = '配对失败：请确认 Agent 终端的真实指纹、UUID、有效一次性码和主机 IP。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : '配对失败，请检查 EasyNetTopo 服务端日志'
   } finally {
     busy.value = false
   }
@@ -138,7 +148,7 @@ onMounted(loadHosts)
       <label for="host-name">主机名称</label>
       <input id="host-name" v-model="name" placeholder="例如：fnOS NAS" maxlength="100" required />
       <label for="host-address">Agent 地址</label>
-      <input id="host-address" v-model="endpoint" placeholder="例如：http://192.168.1.20:7014" required />
+      <input id="host-address" v-model="endpoint" placeholder="例如：http://192.168.1.20:7018" required />
       <button type="submit" :disabled="busy">添加主机</button>
     </form>
 
