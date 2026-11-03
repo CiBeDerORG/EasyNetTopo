@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"net"
-	"net/url"
 )
 
 // PairingStageError 标明配对失败发生的阶段；Cause 仅用于进程内诊断，不能输出到浏览器或日志。
@@ -46,6 +45,10 @@ func DiagnosePairing(err error) PairingDiagnostic {
 	if errors.As(err, &step) {
 		diagnostic.Stage = step.Stage
 		switch step.Stage {
+		case "input":
+			diagnostic.Code = "invalid_pairing_input"
+			diagnostic.Status = 422
+			diagnostic.Message = "Agent UUID、公钥指纹或配对码格式不符合要求；请核对本机终端输出"
 		case "identity":
 			diagnostic.Code = "identity_failed"
 			diagnostic.Message = "无法核对 Agent 身份；请检查主机地址、HTTP/HTTPS、UUID、公钥指纹及控制端到 Agent 的网络"
@@ -95,9 +98,8 @@ func DiagnosePairing(err error) PairingDiagnostic {
 			diagnostic.Message = "Agent 配对接口返回异常状态；请检查 Agent 服务日志"
 		}
 	}
-	var urlError *url.Error
 	var netError net.Error
-	if errors.As(err, &urlError) || errors.As(err, &netError) || errors.Is(err, context.DeadlineExceeded) {
+	if errors.As(err, &netError) || errors.Is(err, context.DeadlineExceeded) {
 		if diagnostic.Code == "identity_failed" || diagnostic.Code == "pairing_exchange_failed" {
 			diagnostic.Code = "agent_unreachable"
 			diagnostic.Message = "无法连接 Agent；请确认 EasyNetTopo 所在服务器能访问 Agent 的 IP、端口及 HTTP/HTTPS 协议"
