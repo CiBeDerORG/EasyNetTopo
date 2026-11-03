@@ -1,0 +1,55 @@
+:root {
+  color-scheme: dark;
+  --ent-bg: #060d1a;
+  --ent-side: #081322;
+  --ent-panel: #0d1b2c;
+  --ent-panel-2: #101f32;
+  --ent-elev: #14263c;
+  --ent-line: #21364d;
+  --ent-line-soft: #192d40;
+  --ent-text: #e6f1ff;
+  --ent-muted: #819cb8;
+  --ent-dim: #5f7c98;
+  --ent-cyan: #45dfec;
+  --ent-blue: #539dff;
+  --ent-green: #44dfb4;
+  --ent-amber: #ffbf73;
+  --ent-red: #ff788b;
+  --ent-violet: #9e90ff;
+  --ent-radius: 17px;
+  --ent-sidebar-width: 240px;
+  --ent-sidebar-collapsed-width: 76px;
+  --ent-host-pane-width: 304px;
+  --el-color-primary: #45bfcf;
+  --el-color-primary-light-3: #3998a8;
+  --el-color-primary-light-5: #317a8a;
+  --el-color-primary-light-7: #285b69;
+  --el-color-primary-light-8: #214b58;
+  --el-color-primary-light-9: #17323f;
+  --el-color-primary-dark-2: #6de7ef;
+  --el-bg-color: #0d1b2c;
+  --el-bg-color-page: #060d1a;
+  --el-bg-color-overlay: #13253a;
+  --el-text-color-primary: #e6f1ff;
+  --el-text-color-regular: #b1c5d9;
+  --el-text-color-secondary: #819cb8;
+  --el-text-color-placeholder: #5f7c98;
+  --el-border-color: #2a4056;
+  --el-border-color-light: #21364d;
+  --el-border-color-lighter: #192d40;
+  --el-fill-color-blank: #0d1b2c;
+  --el-fill-color: #14263c;
+  --el-fill-color-light: #14263c;
+  --el-fill-color-lighter: #101f32;
+  --el-mask-color: rgb(0 0 0 / 68%);
+  font-family: Inter, "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body, #app { width: 100%; height: 100%; min-height: 100%; margin: 0; }
+body { overflow: hidden; background: var(--ent-bg); color: var(--ent-text); font-family: inherit; font-size: 14px; }
+button, input, select, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: not-allowed; }
+:focus-visible { outline: 2px solid var(--ent-cyan); outline-offset: 2px; }
+::selection { color: #061625; background: var(--ent-cyan); }
