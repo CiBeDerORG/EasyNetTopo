@@ -1,4 +1,4 @@
-import { computed, type ComputedRef } from 'vue'
+import { computed, type ComputedRef, type Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { getApps, getDockerInventory, getHostSnapshot, getHosts, getSources, getAppStatuses } from '../api'
 import { appKey } from '../rules'
@@ -8,7 +8,7 @@ export function useHostStoreData(
   selectedHostId: ComputedRef<string>,
   authenticated: ComputedRef<boolean>,
   shouldPoll: ComputedRef<boolean>,
-  dockerOpen: ComputedRef<boolean>
+  dockerOpen: Ref<boolean>
 ) {
   const hostsQuery = useQuery({
     queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000

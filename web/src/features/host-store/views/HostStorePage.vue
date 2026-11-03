@@ -2,6 +2,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { Close } from '@element-plus/icons-vue'
 import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
 import {
@@ -32,7 +33,6 @@ import AppConfigDialog from '../components/AppConfigDialog.vue'
 import type {
   AppAction,
   AppConfig,
-  AppStatus,
   CatalogApp,
   CatalogSource,
   Host,

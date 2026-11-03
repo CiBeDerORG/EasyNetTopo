@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { reactive, watch } from 'vue'
+import { ref, watch } from 'vue'
 
 const props = defineProps<{ modelValue: boolean; saving: boolean }>()
 const emit = defineEmits<{
@@ -7,18 +7,17 @@ const emit = defineEmits<{
   submit: [payload: { name: string; endpoint: string }]
 }>()
 
-const form = reactive({ name: '', endpoint: '' })
+const form = ref({ name: '', endpoint: '' })
 
 watch(() => props.modelValue, open => {
   if (open) {
-    form.name = ''
-    form.endpoint = ''
+    form.value = { name: '', endpoint: '' }
   }
 })
 
 function submit() {
-  const name = form.name.trim()
-  const endpoint = form.endpoint.trim()
+  const name = form.value.name.trim()
+  const endpoint = form.value.endpoint.trim()
   if (!name || !endpoint) return
   emit('submit', { name, endpoint })
 }
