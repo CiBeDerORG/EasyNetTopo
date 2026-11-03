@@ -184,6 +184,14 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 		return nil, errors.New("响应 Agent ID 不匹配")
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		if path == "/v1/pairings" {
+			// Agent 错误码是固定协议字段，拒绝透传远程自由文本或包含凭据的响应。
+			var failure struct {
+				Code string `json:"code"`
+			}
+			_ = json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure)
+			return nil, &PairingHTTPError{Status: res.StatusCode, Code: failure.Code}
+		}
 		if strings.HasPrefix(path, "/v1/apps/") {
 			var failure struct{ Code, Message string }
 			if json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure) == nil && (failure.Code == "app_action" || failure.Code == "app_status") {
@@ -233,7 +241,7 @@ func (c *Client) Pair(ctx context.Context, controllerID, hostID, code string) (P
 		return x, err
 	}
 	if x.AgentID != c.agentID || x.ControllerID != controllerID || x.DeviceID != hostID || !tokenRE.MatchString(x.AccessToken) {
-		return PairingResult{}, errors.New("Agent 配对响应身份不合法")
+		return PairingResult{}, &PairingStageError{Stage: "response", Cause: errors.New("Agent 配对响应身份不合法")}
 	}
 	return x, nil
 }
@@ -248,18 +256,22 @@ func (c *Client) Inventory(ctx context.Context, controllerID, token string) (jso
 func IdentityAndPair(ctx context.Context, endpoint, controllerID, hostID, agentID, pin, code string) (string, error) {
 	client, err := NewClient(endpoint, agentID, pin)
 	if err != nil {
-		return "", err
+		return "", &PairingStageError{Stage: "identity", Cause: err}
 	}
 	identity, err := client.Identity(ctx)
 	if err != nil {
-		return "", err
+		return "", &PairingStageError{Stage: "identity", Cause: err}
 	}
 	if identity.SPKISHA256 != pin {
-		return "", errors.New("TLS 公钥与 Agent 身份响应的指纹不一致")
+		return "", &PairingStageError{Stage: "identity", Cause: errors.New("TLS 公钥与 Agent 身份响应的指纹不一致")}
 	}
 	result, err := client.Pair(ctx, controllerID, hostID, code)
 	if err != nil {
-		return "", err
+		var stage *PairingStageError
+		if errors.As(err, &stage) {
+			return "", err
+		}
+		return "", &PairingStageError{Stage: "exchange", Cause: err}
 	}
 	return result.AccessToken, nil
 }
