@@ -95,8 +95,9 @@ async function registerHost() {
   }
 }
 async function pairHost() {
-  if (!selectedID.value) return
-  const registered = hosts.value.find(host => host.id === selectedID.value)
+  const hostID = editingID.value
+  if (!hostID) return
+  const registered = hosts.value.find(host => host.id === hostID)
   if (registered && (editName.value.trim() !== registered.name ||
       editEndpoint.value.trim() !== registered.endpoint)) {
     error.value = '请先保存名称或连接地址，再进行配对。'
@@ -106,7 +107,7 @@ async function pairHost() {
   error.value = ''
   message.value = ''
   try {
-    await call<Host>('/api/v1/hosts/' + selectedID.value + '/pair', 'POST', {
+    await call<Host>('/api/v1/hosts/' + hostID + '/pair', 'POST', {
       agent_id: agentID.value.trim(), spki_sha256: fingerprint.value.trim(),
       pairing_code: pairingCode.value.trim()
     })
