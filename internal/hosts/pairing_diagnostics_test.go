@@ -27,9 +27,9 @@ func TestPairingDiagnosticsArePreciseAndSafe(t *testing.T) {
 		if result.Code != tt.expected || result.Status != tt.status || result.Stage != tt.stage || result.AgentStatus != 403 {
 			t.Fatalf("配对错误码映射不正确 %+v", result)
 		}
-		raw, err := json.Marshal(result)
-		if err != nil {
-			t.Fatal(err)
+		raw, marshalErr := json.Marshal(result)
+		if marshalErr != nil {
+			t.Fatal(marshalErr)
 		}
 		if strings.Contains(string(raw), "untrusted_secret_value") || strings.Contains(string(raw), "AgentStatus") {
 			t.Fatal("配对诊断泄露了未受信任的远端内容")
