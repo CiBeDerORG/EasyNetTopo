@@ -28,11 +28,11 @@ func (e *PairingHTTPError) Error() string {
 
 // PairingDiagnostic 映射为有限、可供 UI 显示的诊断消息；不包含 IP、密钥或远端正文。
 type PairingDiagnostic struct {
-	Status       int    `json:"-"`
-	Code         string `json:"code"`
-	Stage        string `json:"stage"`
-	Message      string `json:"message"`
-	AgentStatus  int    `json:"-"`
+	Status      int    `json:"-"`
+	Code        string `json:"code"`
+	Stage       string `json:"stage"`
+	Message     string `json:"message"`
+	AgentStatus int    `json:"-"`
 }
 
 // DiagnosePairing 只公开可信阶段和协议错误码，避免泄露配对码/Token/内部数据库错误。
