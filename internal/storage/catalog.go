@@ -83,6 +83,7 @@ func (s *Store) CatalogSourceByID(ctx context.Context, id string) (CatalogSource
 	}
 	return v, err
 }
+
 // DeleteCatalogSource 原子地删除指定来源及其商店快照，不影响其他来源和已部署的应用。
 func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
 	tx, err := s.db.BeginTx(ctx, nil)
