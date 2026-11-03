@@ -99,11 +99,17 @@ const filteredHosts = computed(() => {
 .pane-actions :deep(.el-button) { width: 34px; height: 34px; border: 1px solid #2a4056; border-radius: 10px; background: #112237; color: #acc9e1; }
 .pane-actions :deep(.el-button:hover) { border-color: #3d879b; background: #17304a; color: var(--ent-cyan); }
 .pane-actions :deep(.el-button.primary) { border-color: #77cfe9; background: linear-gradient(135deg, #48e1ea, #64a5ff); color: #022330; }
-.host-search { margin: 0 16px 15px; }
+/* ElInput 默认宽度为 100%，加上左右 margin 会越过主机列表边界。 */
+.host-search { width: calc(100% - 32px); max-width: calc(100% - 32px); margin: 0 16px 15px; }
 .host-search :deep(.el-input__wrapper) { min-height: 40px; border-radius: 10px; }
 .host-search :deep(.el-input__inner) { font-size: 12px; }
 .host-scroll { overflow: auto; min-height: 0; flex: 1; padding: 0 11px 15px; }
 .host-scroll :deep(.el-empty) { padding: 30px 0; }
+@media (max-width: 1110px) {
+  /* 窄布局时工具按钮换行，避免顶栏挤出主机侧栏。 */
+  .pane-head { flex-wrap: wrap; }
+  .pane-actions { margin-left: auto; }
+}
 @media (max-width: 630px) {
   .hosts-panel { max-height: 220px; border-right: 0; border-bottom: 1px solid var(--ent-line); }
   .pane-head { padding: 12px 16px 8px; }

@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Delete, Download, InfoFilled, Lightning, Refresh } from '@element-plus/icons-vue'
+import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp } from '../types'
 
 const props = defineProps<{
@@ -80,22 +80,30 @@ const resultLabel = computed(() => {
       <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
       <span v-if="app.revision" class="revision">版本 {{ app.revision.slice(0, 12) }}</span>
       <span v-else class="revision">本机保留记录</span>
+      <el-tooltip
+        v-if="permissions.blockReason"
+        :content="permissions.blockReason"
+        :popper-style="{ maxWidth: '300px', whiteSpace: 'normal', overflowWrap: 'anywhere' }"
+        placement="top"
+      >
+        <button
+          v-if="permissions.grantRequired"
+          type="button"
+          class="restriction-icon"
+          :aria-label="'查看未授权原因与授权方法：' + permissions.blockReason"
+          :aria-expanded="grantExpanded"
+          @click="grantExpanded = !grantExpanded"
+        >
+          <el-icon><WarningFilled /></el-icon>
+        </button>
+        <span v-else class="restriction-icon" role="img" tabindex="0" :aria-label="permissions.blockReason">
+          <el-icon><WarningFilled /></el-icon>
+        </span>
+      </el-tooltip>
     </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
-    <el-alert
-      v-if="permissions.blockReason"
-      class="restriction"
-      :title="permissions.blockReason"
-      :type="permissions.grantRequired ? 'warning' : 'info'"
-      :closable="false"
-      show-icon
-    />
-
-    <div v-if="permissions.grantRequired" class="grant-section">
-      <el-button text type="primary" @click="grantExpanded = !grantExpanded">
-        {{ grantExpanded ? '收起授权说明' : '查看授权方法' }}
-      </el-button>
-      <div v-if="grantExpanded" class="grant-help">
+    <div v-if="permissions.grantRequired && grantExpanded" class="grant-section">
+      <div class="grant-help">
         <p>在安装 EasyHostAgent 的目标主机上，将下面这条授权项追加到 EASYHOSTAGENT_APP_GRANTS。若已有其他授权，请保留原值并使用英文逗号分隔。</p>
         <code>{{ authorizationValue }}</code>
         <el-button size="small" @click="$emit('copyGrant', authorizationValue)">复制授权项</el-button>
@@ -167,8 +175,24 @@ const resultLabel = computed(() => {
 .product-desc { display: -webkit-box; overflow: hidden; min-height: 40px; max-height: 44px; margin: 12px 0; color: #87a5bf; font-size: 11px; line-height: 1.7; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
 .product-meta { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .revision { color: #617f97; font-size: 10px; }
+.restriction-icon {
+  display: inline-flex;
+  width: 22px;
+  height: 22px;
+  flex: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--ent-amber);
+  cursor: help;
+}
+button.restriction-icon { cursor: pointer; }
+.restriction-icon:hover,
+.restriction-icon:focus-visible { background: #80603430; color: #ffd496; }
 .result-label { margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
-.restriction { margin-top: 10px; }
 .grant-section { margin-top: 8px; border-top: 1px solid #243b50; padding-top: 5px; }
 .grant-help { display: grid; gap: 8px; padding: 8px 0; color: var(--ent-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
 .grant-help p { margin: 0; }
