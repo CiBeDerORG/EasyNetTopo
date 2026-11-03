@@ -470,24 +470,28 @@ function showAppInfo(app: CatalogApp) {
 async function copyText(value: string, label: string) {
   if (!value) return
   try {
+    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
     await navigator.clipboard.writeText(value)
-    ElMessage.success(label + '已复制。')
   } catch {
-    ElMessage.warning('复制失败，请手动选中内容复制。')
+    // HTTP 内网场景可能没有安全上下文，回退到传统复制方式。
+    const field = document.createElement('textarea')
+    field.value = value
+    field.style.position = 'fixed'
+    field.style.opacity = '0'
+    document.body.appendChild(field)
+    field.select()
+    const ok = document.execCommand('copy')
+    field.remove()
+    if (!ok) {
+      ElMessage.warning('复制失败，请手动选中内容复制。')
+      return
+    }
   }
+  ElMessage.success(label + '已复制。')
 }
 
 function authorizationValue(app: CatalogApp) {
   return controllerId.value + '/' + app.source_id + '/' + app.app_id
-}
-function grantCommand(app: CatalogApp) {
-  const selected = visibleApps.value
-    .filter(item => item.source_id === app.source_id &&
-      (item.app_id === 'sub2api' || item.app_id === 'portainer'))
-    .map(item => item.app_id)
-  const ids = Array.from(new Set(selected)).sort()
-  return 'cd /vol3/1000/software/deploy && sudo bash deploy.sh easyhostagent grant ' +
-    controllerId.value + ' ' + app.source_id + ' ' + (ids.length ? ids.join(' ') : app.app_id)
 }
 
 async function submitLogin() {
