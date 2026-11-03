@@ -101,6 +101,62 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
+		// Only local host metadata is editable. No Agent identity, fingerprint or
+		// sealed credentials are accepted by this endpoint.
+		if len(parts) == 1 && len(parts[0]) == 36 {
+			id := parts[0]
+			switch r.Method {
+			case http.MethodPatch:
+				if !mutation(w, r) {
+					return
+				}
+				var req struct {
+					Name     string `json:"name"`
+					Endpoint string `json:"endpoint"`
+				}
+				if !decode(w, r, &req) {
+					return
+				}
+				h, err := service.Update(r.Context(), id, req.Name, req.Endpoint)
+				if errors.Is(err, storage.ErrHostNotFound) {
+					http.NotFound(w, r)
+					return
+				}
+				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
+					jsonReply(w, http.StatusUnprocessableEntity, map[string]string{
+						"code": "invalid_host_metadata", "message": "主机名称或连接地址不合法，请检查名称、IP 和端口",
+					})
+					return
+				}
+				if err != nil {
+					http.Error(w, "主机资料保存失败", http.StatusServiceUnavailable)
+					return
+				}
+				slog.Info("主机资料已更新（配对凭据未修改）", "host_id", id)
+				jsonReply(w, http.StatusOK, h)
+				return
+			case http.MethodDelete:
+				if !mutation(w, r) {
+					return
+				}
+				err := service.Delete(r.Context(), id)
+				if errors.Is(err, storage.ErrHostNotFound) {
+					http.NotFound(w, r)
+					return
+				}
+				if err != nil {
+					http.Error(w, "主机记录删除失败", http.StatusServiceUnavailable)
+					return
+				}
+				slog.Info("本地主机记录已删除（未清理远端 Agent 或应用）", "host_id", id)
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			default:
+				methodNotAllowed(w, "PATCH, DELETE")
+				return
+			}
+		}
 		if len(parts) == 3 && parts[1] == "apps" && catalogSvc != nil {
 			if r.Method != http.MethodPost {
 				methodNotAllowed(w, "POST")
