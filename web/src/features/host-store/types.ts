@@ -78,6 +78,8 @@ export type ConfigField = {
   default?: string | boolean | number
   minimum?: number
   maximum?: number
+  min_length?: number
+  max_length?: number
 }
 export type AppConfig = { revision: string; config: ConfigField[] }
 export type AppActionResponse = { action?: string; result?: string; message?: string }

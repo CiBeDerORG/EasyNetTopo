@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { ElMessage } from 'element-plus'
+import { validateAppConfig } from '../validation'
 import type { CatalogApp, ConfigField } from '../types'
 
 const props = defineProps<{
@@ -15,9 +17,11 @@ const emit = defineEmits<{
 }>()
 
 const values = ref<Record<string, string>>({})
+const errors = ref<Record<string, string>>({})
 const editableFields = computed(() => props.fields.filter(field => field.editable !== false))
 
 function resetValues() {
+  errors.value = {}
   values.value = Object.fromEntries(editableFields.value.map(field => [
     field.key,
     String(field.default ?? '')
@@ -25,12 +29,20 @@ function resetValues() {
 }
 watch(() => props.modelValue, open => { if (open) resetValues() })
 watch(() => props.fields, () => { if (props.modelValue) resetValues() }, { deep: true })
+watch(values, () => {
+  if (Object.keys(errors.value).length > 0) {
+    errors.value = validateAppConfig(editableFields.value, values.value)
+  }
+}, { deep: true })
 
 function submit() {
-  const missing = editableFields.value.find(field =>
-    field.required && !String(values.value[field.key] ?? '').trim()
-  )
-  if (missing) return
+  if (props.saving) return
+  errors.value = validateAppConfig(editableFields.value, values.value)
+  const firstError = Object.values(errors.value)[0]
+  if (firstError) {
+    ElMessage.warning('请检查安装配置：' + firstError)
+    return
+  }
   emit('submit', { revision: props.revision, config: { ...values.value } })
 }
 </script>
@@ -41,7 +53,7 @@ function submit() {
     @update:model-value="emit('update:modelValue', $event)">
     <p class="config-intro">以下参数由应用清单定义。密钥只会提交给 EasyNetTopo 服务端，并通过已配对 Agent 发送给目标主机。</p>
     <el-form v-if="editableFields.length" label-position="top">
-      <el-form-item v-for="field in editableFields" :key="field.key" :label="field.label" :required="field.required">
+      <el-form-item v-for="field in editableFields" :key="field.key" :label="field.label" :required="field.required" :error="errors[field.key]">
         <el-select v-if="field.type === 'boolean'" v-model="values[field.key]" class="full-width">
           <el-option v-if="!field.required" label="未设置" value="" />
           <el-option label="是" value="true" />
@@ -55,11 +67,15 @@ function submit() {
           :autocomplete="field.type === 'secret' ? 'new-password' : 'off'"
           :placeholder="field.required ? '请填写' + field.label : '选填'"
         />
-        <div v-if="field.description || field.minimum !== undefined || field.maximum !== undefined" class="field-help">
+        <div v-if="field.description || field.minimum !== undefined || field.maximum !== undefined || field.min_length !== undefined || field.max_length !== undefined" class="field-help">
           {{ field.description }}
           <span v-if="field.minimum !== undefined || field.maximum !== undefined">
             {{ field.minimum !== undefined ? '最小值 ' + field.minimum : '' }}
             {{ field.maximum !== undefined ? ' 最大值 ' + field.maximum : '' }}
+          </span>
+          <span v-if="field.min_length !== undefined || field.max_length !== undefined">
+            {{ field.min_length !== undefined ? '最短 ' + field.min_length + ' 字符' : '' }}
+            {{ field.max_length !== undefined ? ' 最长 ' + field.max_length + ' 字符' : '' }}
           </span>
         </div>
       </el-form-item>
@@ -67,7 +83,7 @@ function submit() {
     <el-empty v-else description="该应用无需额外配置" :image-size="70" />
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="saving" @click="submit">确认安装</el-button>
+      <el-button type="primary" :loading="saving" :disabled="saving" @click="submit">确认安装</el-button>
     </template>
   </el-dialog>
 </template>

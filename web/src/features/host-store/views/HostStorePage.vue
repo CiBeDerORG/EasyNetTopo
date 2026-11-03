@@ -3,6 +3,7 @@ import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
+import { formatApiError } from '../../../lib/api-client'
 import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
 import {
@@ -178,7 +179,7 @@ watch(() => data.statusQuery.errorUpdatedAt.value, (updatedAt, previous) => {
 })
 
 function errorMessage(error: unknown) {
-  return error instanceof Error ? error.message : '请求失败，请稍后重试'
+  return formatApiError(error)
 }
 function actionName(action: AppAction) {
   return ({ install: '安装', update: '更新', uninstall: '卸载', adopt: '接管', force_update: '强制更新' } as Record<AppAction, string>)[action]
