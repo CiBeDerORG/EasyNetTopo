@@ -25,7 +25,7 @@ const validRoot = computed(() => {
   return root.replace(/\/$/, '')
 })
 function command(action: NativeAction): string {
-  const verb = action === 'uninstall' ? 'uninstall' : action === 'install' ? 'install' : 'update'
+  const verb = action
   const prefix = validRoot.value ? 'cd ' + validRoot.value + '/deploy && ' : ''
   return prefix + 'sudo bash deploy.sh easyhostagent ' + verb
 }
@@ -34,7 +34,7 @@ async function showCommand(action: NativeAction) {
   const note = action === 'uninstall'
     ? '卸载当前 Agent 会立即断开该主机与 EasyNetTopo 的管理连接，请在目标主机终端操作。'
     : action === 'force-update'
-      ? '当前原生 Deploy 仅提供 update；是否重新下载由 EASYHOSTAGENT_LOCAL_BINARY 和 Release 配置决定。本操作不会绕过原生安全校验。'
+      ? '原生 force-update 会忽略本地安装包路径，重新下载并校验当前 EASYHOSTAGENT_RELEASE 指定的发布资产，保留原配对、授权和数据。'
       : 'EasyHostAgent 是宿主机原生 systemd 服务；控制端不能通过自身尚未运行的 Agent 安装或安全地自卸载。请在目标主机可信终端操作。'
   try {
     await ElMessageBox.alert(note + '\n\n' + command(action), 'EasyHostAgent · ' + title, {
