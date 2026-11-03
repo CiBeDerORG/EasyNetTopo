@@ -77,4 +77,37 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	} else if !strings.Contains(got.Body.String(), "invalid_pairing_input") {
 		t.Fatal("输入校验异常没有明确错误码")
 	}
+	// 编辑和删除是需要管理员登录及同源请求标记的本地操作。
+	editPath := "/api/v1/hosts/" + id
+	payload := `{"name":"新 fnOS","endpoint":"http://127.0.0.1:7018"}`
+	if got := req("PATCH", editPath, payload, false, true); got.Code != 401 {
+		t.Fatal("未登录不应编辑主机", got.Code)
+	}
+	if got := req("PATCH", editPath, payload, true, false); got.Code != 403 {
+		t.Fatal("编辑未限制同源请求", got.Code)
+	}
+	if got := req("PATCH", editPath, `{"name":"bad","endpoint":"http://169.254.169.254:80"}`, true, true); got.Code != 400 {
+		t.Fatal("允许非法主机地址", got.Code)
+	}
+	if got := req("PATCH", editPath, payload, true, true); got.Code != 200 || !strings.Contains(got.Body.String(), "新 fnOS") {
+		t.Fatal("编辑主机失败", got.Code, got.Body.String())
+	}
+	if got := req("DELETE", editPath, "", false, true); got.Code != 401 {
+		t.Fatal("未登录不应删除主机", got.Code)
+	}
+	if got := req("DELETE", editPath, "", true, false); got.Code != 403 {
+		t.Fatal("删除未限制同源请求", got.Code)
+	}
+	if got := req("GET", editPath, "", true, false); got.Code != 405 {
+		t.Fatal("主机详情不应隐式返回或删除", got.Code)
+	}
+	if got := req("DELETE", editPath, "", true, true); got.Code != 204 || got.Body.Len() != 0 {
+		t.Fatal("删除主机失败或 204 带有响应体", got.Code, got.Body.String())
+	}
+	if got := req("GET", "/api/v1/hosts", "", true, false); got.Code != 200 || strings.Contains(got.Body.String(), "新 fnOS") {
+		t.Fatal("删除后主机列表未更新", got.Code, got.Body.String())
+	}
+	if got := req("DELETE", editPath, "", true, true); got.Code != 404 {
+		t.Fatal("重复删除应返回 404", got.Code)
+	}
 }
