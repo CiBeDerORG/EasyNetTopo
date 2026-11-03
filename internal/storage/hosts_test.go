@@ -147,8 +147,10 @@ func TestUpdatePairedHostPreservesCredentials(t *testing.T) {
 	for _, tc := range []struct {
 		name, endpoint string
 	}{
-		{"fnOS", "http://127.0.0.1:7018"}, // Same values are an idempotent edit.
-		{"家用 fnOS", "http://127.0.0.2:7018"}, // Metadata change must not re-pair.
+		// Same values are an idempotent edit.
+		{"fnOS", "http://127.0.0.1:7018"},
+		// Metadata change must not re-pair.
+		{"家用 fnOS", "http://127.0.0.2:7018"},
 	} {
 		updated, err := hosts.UpdateMetadata(ctx, h.ID, tc.name, tc.endpoint)
 		if err != nil {
