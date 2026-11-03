@@ -3,12 +3,13 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 func TestLoginGuardsAndSession(t *testing.T) {
