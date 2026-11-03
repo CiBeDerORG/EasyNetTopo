@@ -43,13 +43,13 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			return
 		}
 		body = req
-	case "install", "update":
+	case "install", "update", "adopt":
 		var req struct {
 			marketRef
 			Revision string            `json:"revision"`
 			Config   map[string]string `json:"config"`
 		}
-		if !decode(&req) || name == "update" && len(req.Config) != 0 {
+		if !decode(&req) || name != "install" && len(req.Config) != 0 {
 			http.Error(w, "无效的安装或更新参数", 400)
 			return
 		}
@@ -59,7 +59,7 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			return
 		}
 		if pkg.Revision != req.Revision {
-			http.Error(w, "来源版本已变化，请重新打开安装表单", 409)
+			http.Error(w, "来源版本已变化，请刷新应用商店并重新操作", 409)
 			return
 		}
 		if _, err = service.CacheBundle(ctx, hostID, pkg.SHA256, pkg.ZIP); err != nil {
