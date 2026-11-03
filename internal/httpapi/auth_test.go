@@ -91,3 +91,23 @@ func TestLoginGuardsAndSession(t *testing.T) {
 	}
 	res.Body.Close()
 }
+
+func TestLoginAcceptsLongAndUnicodeCredentials(t *testing.T) {
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	user := strings.Repeat("用户@ ", 50)
+	password := strings.Repeat("很长的密码! ", 90)
+	if err := db.CreateAdmin(context.Background(), user, password); err != nil { t.Fatal(err) }
+	server := httptest.NewServer(NewHandler(t.TempDir(), db))
+	defer server.Close()
+	body, err := json.Marshal(map[string]string{"username": user, "password": password})
+	if err != nil { t.Fatal(err) }
+	req, err := http.NewRequest(http.MethodPost, server.URL+"/api/v1/auth/login", strings.NewReader(string(body)))
+	if err != nil { t.Fatal(err) }
+	req.Header.Set("X-ENT-Request", "1")
+	res, err := server.Client().Do(req)
+	if err != nil { t.Fatal(err) }
+	defer res.Body.Close()
+	if res.StatusCode != http.StatusOK { t.Fatalf("长账号与长密码不能登录: HTTP %d", res.StatusCode) }
+}
