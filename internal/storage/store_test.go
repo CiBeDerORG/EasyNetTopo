@@ -5,9 +5,9 @@ import (
 	"errors"
 	"path/filepath"
 	"strings"
+	"testing"
 
 	"golang.org/x/crypto/bcrypt"
-	"testing"
 )
 
 func TestAdminSessionAndControllerIdentityPersist(t *testing.T) {
@@ -72,11 +72,17 @@ func TestAdminCredentialsNoCustomLimits(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			s, err := Open(filepath.Join(t.TempDir(), "app.db"))
-			if err != nil { t.Fatal(err) }
+			if err != nil {
+				t.Fatal(err)
+			}
 			defer s.Close()
 			ctx := context.Background()
-			if err := s.CreateAdmin(ctx, tc.user, tc.password); err != nil { t.Fatal(err) }
-			if err := s.Verify(ctx, tc.user, tc.password); err != nil { t.Fatalf("原样密码无法登录: %v", err) }
+			if err := s.CreateAdmin(ctx, tc.user, tc.password); err != nil {
+				t.Fatal(err)
+			}
+			if err := s.Verify(ctx, tc.user, tc.password); err != nil {
+				t.Fatalf("原样密码无法登录: %v", err)
+			}
 			if err := s.Verify(ctx, tc.user, tc.password+"错误后缀"); !errors.Is(err, ErrCredentials) {
 				t.Fatalf("密码后缀改变仍通过验证: %v", err)
 			}
@@ -86,11 +92,15 @@ func TestAdminCredentialsNoCustomLimits(t *testing.T) {
 
 func TestLegacyBcryptPasswordCanStillLogin(t *testing.T) {
 	s, err := Open(filepath.Join(t.TempDir(), "app.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer s.Close()
 	password := "legacy-password"
 	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := s.db.Exec("INSERT INTO administrators(id,username,password_hash) VALUES(1,?,?)", "旧账户", string(hash)); err != nil {
 		t.Fatal(err)
 	}
