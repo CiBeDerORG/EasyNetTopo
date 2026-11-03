@@ -20,6 +20,7 @@ import (
 
 var ErrInitialized = errors.New("管理员已创建")
 var ErrCredentials = errors.New("账号或密码错误")
+
 const passwordHashPrefix = "sha256-bcrypt:"
 
 type Store struct {
