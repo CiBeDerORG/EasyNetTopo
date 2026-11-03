@@ -49,6 +49,18 @@ func (s *Service) Apps(ctx context.Context) ([]storage.CatalogApp, error) {
 	return s.store.CatalogApps(ctx)
 }
 
+// Delete 删除一个 Git 来源及其应用索引，不会向 Agent 发送卸载指令。
+func (s *Service) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.store.DeleteCatalogSource(ctx, id); err != nil {
+		return err
+	}
+	// 缓存仅属于该来源；即使磁盘清理失败，数据库删除也已经提交。
+	_ = os.RemoveAll(filepath.Join(s.cacheDir, id+".git"))
+	return nil
+}
+
 func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
