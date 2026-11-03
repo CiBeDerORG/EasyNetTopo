@@ -6,7 +6,7 @@ export const isDeployManagedApp = (app: AppRef) => ['sub2api', 'portainer', 'mih
 export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissions {
   const managed = !!row?.managed
   const external = !!row?.external
-  const showAdopt = isDeployManagedApp(app) && external
+  const showAdopt = isDeployManagedApp(app) && external && row?.blocked_reason !== 'legacy_project_name'
   const showInstall = !row || (!managed && !external) || row.state === 'missing'
   const showUpdate = (managed || external) && !!app.revision
   const showUninstall = managed || external
@@ -30,6 +30,7 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissi
   else if (row.blocked_reason === 'source_conflict') blockReason = '此应用已有其他 Git 来源的安装记录，不能用当前来源覆盖。'
   else if (row.blocked_reason === 'adoption_required') blockReason = '检测到原 Deploy 脚本安装的外部项目。请先确认接管，之后即可通过原 Deploy 脚本更新或卸载。'
   else if (row.blocked_reason === 'legacy_scripts_missing') blockReason = '已核实原 Deploy 项目归属，但原始脚本缺失或不安全。可确认强制更新，从经过校验的 Git 应用包补齐标准脚本，保留原数据与配置。'
+  else if (row.blocked_reason === 'legacy_project_name') blockReason = '已识别旧版 OpenCode 正在运行，但其 Compose 项目名为 deploy。为避免新旧容器冲突，仅关联运行状态；需先从目标主机安全迁移项目名后才能接管。'
   else if (row.blocked_reason === 'legacy_identity_mismatch') blockReason = '该项目的 Compose 工作目录与接管记录不一致，已禁用管理操作。'
   else if (external || row.blocked_reason === 'external_project') blockReason = '同名项目不属于受支持的 Deploy 目录，无法安全接管或卸载。'
   else if (!row.allowed) blockReason = '当前控制端未获得此应用的 Agent 授权，请先在目标主机授权。'
