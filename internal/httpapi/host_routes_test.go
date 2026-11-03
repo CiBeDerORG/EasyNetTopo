@@ -72,7 +72,9 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	if got := req("GET", "/api/v1/hosts/"+id+"/snapshot", "", true, false); got.Code != 502 {
 		t.Fatal("未配对主机不应查询成功", got.Code)
 	}
-	if got := req("POST", "/api/v1/hosts/"+id+"/pair", `{"agent_id":"bad","spki_sha256":"wrong","pairing_code":"bad"}`, true, true); got.Code != 502 {
+	if got := req("POST", "/api/v1/hosts/"+id+"/pair", `{"agent_id":"bad","spki_sha256":"wrong","pairing_code":"bad"}`, true, true); got.Code != 422 {
 		t.Fatal("无效指纹参数未拒绝", got.Code)
+	} else if !strings.Contains(got.Body.String(), "invalid_pairing_input") {
+		t.Fatal("输入校验异常没有明确错误码")
 	}
 }
