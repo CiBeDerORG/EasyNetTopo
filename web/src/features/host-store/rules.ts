@@ -4,7 +4,7 @@ export const appKey = (app: AppRef) => app.source_id + '/' + app.app_id
 export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissions {
   const managed = !!row?.managed
   const external = !!row?.external
-  const showAdopt = external && (row?.adoptable || row?.blocked_reason === 'legacy_scripts_missing')
+  const showAdopt = false // 原有 Deploy 应用完成身份核验后自动关联
   const showInstall = !row || (!managed && !external) || row.state === 'missing'
   const showUpdate = (managed || external) && !!app.revision
   const showUninstall = managed || external
@@ -15,23 +15,22 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissi
   const canUpdate = !!row?.allowed && managed && !external && !!app.revision &&
     ['running', 'stopped', 'partial'].includes(row.state)
   const canUninstall = !!row?.allowed && managed && !external && row.state !== 'unknown'
-  const canAdopt = !!app.revision && !!row?.adoptable
+  const canAdopt = false
   const canForceUpdate = !!app.revision &&
     !!row?.force_updatable && (managed && !!row.allowed && !external ||
       external && row.blocked_reason === 'legacy_scripts_missing')
-  const grantRequired = !!row && (row.blocked_reason === 'grant_required' ||
-    (!row.allowed && !external && !row.blocked_reason))
+  const grantRequired = false
 
   let blockReason = ''
   if (!row) blockReason = '正在获取目标主机的应用状态。'
-  else if (row.blocked_reason === 'grant_required') blockReason = '未授权操作此应用。请在目标主机授予对应的 Agent 应用权限。'
+  else if (row.blocked_reason === 'grant_required') blockReason = '目标主机 Agent 版本过旧，请先更新 Agent。'
   else if (row.blocked_reason === 'source_conflict') blockReason = '此应用已有其他 Git 来源的安装记录，不能用当前来源覆盖。'
-  else if (row.blocked_reason === 'adoption_required') blockReason = '检测到原 Deploy 脚本安装的外部项目。请先确认接管，之后即可通过原 Deploy 脚本更新或卸载。'
+  else if (row.blocked_reason === 'adoption_required') blockReason = '检测到原 Deploy 部署，正在自动核验并关联。关联完成后可直接更新、强制更新或卸载。'
   else if (row.blocked_reason === 'legacy_scripts_missing') blockReason = '已核实原 Deploy 项目归属，但原始脚本缺失或不安全。可确认强制更新，从经过校验的 Git 应用包补齐标准脚本，保留原数据与配置。'
   else if (row.blocked_reason === 'legacy_project_name') blockReason = '已识别旧版 OpenCode 正在运行，但其 Compose 项目名为 deploy。为避免新旧容器冲突，仅关联运行状态；需先从目标主机安全迁移项目名后才能接管。'
   else if (row.blocked_reason === 'legacy_identity_mismatch') blockReason = '该项目的 Compose 工作目录与接管记录不一致，已禁用管理操作。'
   else if (external || row.blocked_reason === 'external_project') blockReason = '同名项目不属于受支持的 Deploy 目录，无法安全接管或卸载。'
-  else if (!row.allowed) blockReason = '当前控制端未获得此应用的 Agent 授权，请先在目标主机授权。'
+  else if (!row.allowed) blockReason = '应用身份或来源校验未通过，禁止执行远程操作。'
   else if (row.state === 'unknown') blockReason = '无法确认 Docker 状态，暂时禁止安装、更新或卸载。'
   else if (row.state === 'missing') blockReason = '已有受管安装记录，但服务容器缺失；可以重新安装。'
 

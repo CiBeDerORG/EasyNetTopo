@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp } from '../types'
 
@@ -9,19 +9,14 @@ const props = defineProps<{
   sourceName: string
   permissions: AppPermissions
   busy: boolean
-  authorizationValue: string
-  grantCommand: string
 }>()
 
 defineEmits<{
   configure: []
   action: [action: AppAction]
   info: []
-  copyGrant: [value: string]
-  copyCommand: [value: string]
 }>()
 
-const grantExpanded = ref(false)
 const logoText = computed(() => {
   if (props.app.app_id === 'sub2api') return 'S2'
   if (props.app.app_id === 'portainer') return 'P'
@@ -86,42 +81,16 @@ const resultLabel = computed(() => {
         :popper-style="{ maxWidth: '300px', whiteSpace: 'normal', overflowWrap: 'anywhere' }"
         placement="top"
       >
-        <button
-          v-if="permissions.grantRequired"
-          type="button"
-          class="restriction-icon"
-          :aria-label="'查看未授权原因与授权方法：' + permissions.blockReason"
-          :aria-expanded="grantExpanded"
-          @click="grantExpanded = !grantExpanded"
-        >
-          <el-icon><WarningFilled /></el-icon>
-        </button>
-        <span v-else class="restriction-icon" role="img" tabindex="0" :aria-label="permissions.blockReason">
+        <span class="restriction-icon" role="img" tabindex="0" :aria-label="permissions.blockReason">
           <el-icon><WarningFilled /></el-icon>
         </span>
       </el-tooltip>
     </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
-    <div v-if="permissions.grantRequired && grantExpanded" class="grant-section">
-      <div class="grant-help">
-        <p>在安装 EasyHostAgent 的目标主机上，将下面这条授权项追加到 EASYHOSTAGENT_APP_GRANTS。若已有其他授权，请保留原值并使用英文逗号分隔。</p>
-        <code>{{ authorizationValue }}</code>
-        <el-button size="small" @click="$emit('copyGrant', authorizationValue)">复制授权项</el-button>
-        <template v-if="grantCommand">
-          <p>也可在目标主机可信终端执行下面的专用授权命令。命令会保留已有授权，不会下载程序或重装 Agent。</p>
-          <code>{{ grantCommand }}</code>
-          <el-button size="small" @click="$emit('copyCommand', grantCommand)">复制授权命令</el-button>
-        </template>
-      </div>
-    </div>
-
     <div class="product-bottom">
       <div class="app-actions">
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || !permissions.canInstall" @click="$emit('configure')">
           <el-icon><Download /></el-icon>{{ status?.state === 'missing' ? '重新安装' : '安装' }}
-        </el-button>
-        <el-button v-if="permissions.showAdopt" size="small" :disabled="busy || !permissions.canAdopt" @click="$emit('action', 'adopt')">
-          接管原有部署
         </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">
           <el-icon><Lightning /></el-icon>强制更新
@@ -193,10 +162,6 @@ button.restriction-icon { cursor: pointer; }
 .restriction-icon:hover,
 .restriction-icon:focus-visible { background: #80603430; color: #ffd496; }
 .result-label { margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
-.grant-section { margin-top: 8px; border-top: 1px solid #243b50; padding-top: 5px; }
-.grant-help { display: grid; gap: 8px; padding: 8px 0; color: var(--ent-muted); font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
-.grant-help p { margin: 0; }
-.grant-help code { display: block; padding: 8px 10px; border: 1px solid #29445c; border-radius: 7px; background: #0a1729; color: #a6dafa; white-space: normal; overflow-wrap: anywhere; }
 .product-bottom { margin-top: auto; border-top: 1px solid #243b50; padding-top: 12px; }
 .app-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
 .app-actions :deep(.el-button) { margin: 0; }

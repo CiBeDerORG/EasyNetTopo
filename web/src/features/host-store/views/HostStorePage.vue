@@ -136,6 +136,44 @@ const configApp = computed(() => configState.value?.app || null)
 const configRevision = computed(() => configState.value?.config.revision || '')
 const configFields = computed(() => configState.value?.config.config || [])
 
+// 仅自动关联来自可信固定 Git 清单、且 Compose 路径和脚本通过 Agent 核验的原有部署。
+const autoLinkAttempts = new Set<string>()
+const autoLinking = ref(false)
+watch(() => data.statusQuery.data.value, async rows => {
+  const host = selectedHost.value
+  if (!rows?.length || !host?.agent_id || autoLinking.value || pendingAction.value || actionBusyKey.value) return
+  const apps = new Map(data.catalogApps.value.map(app => [appKey(app), app]))
+  const candidates = rows.filter(row => row.external && row.adoptable &&
+    row.blocked_reason === 'adoption_required')
+  if (!candidates.length) return
+  autoLinking.value = true
+  let updated = false
+  try {
+    for (const row of candidates) {
+      if (selectedHostId.value !== host.id) break
+      const app = apps.get(appKey(row))
+      if (!app?.revision) continue
+      const key = host.id + ':' + appKey(app) + ':' + app.revision
+      if (autoLinkAttempts.has(key)) continue
+      autoLinkAttempts.add(key)
+      try {
+        await executeAppAction(host.id, 'adopt', {
+          source_id: app.source_id, app_id: app.app_id, revision: app.revision
+        })
+        updated = true
+      } catch (error) {
+        if (selectedHostId.value === host.id) {
+          ElMessage.warning(app.name + ' 自动关联失败：' + errorMessage(error))
+        }
+      }
+    }
+  } finally {
+    autoLinking.value = false
+    if (updated && selectedHostId.value === host.id) await data.statusQuery.refetch()
+  }
+}, { immediate: true })
+
+
 watch(hosts, items => {
   if (!items.some(host => host.id === ui.selectedHostId)) {
     ui.selectHost(items[0]?.id || '')
@@ -197,6 +235,7 @@ function stateName(state: string) {
 }
 
 async function refreshAll() {
+  autoLinkAttempts.clear()
   const tasks: Promise<unknown>[] = [data.hostsQuery.refetch()]
   if (selectedHost.value?.agent_id) {
     tasks.push(data.snapshotQuery.refetch(), data.statusQuery.refetch())
@@ -269,7 +308,7 @@ async function pairHost(payload: { agent_id: string; spki_sha256: string; pairin
     await queryClient.invalidateQueries({ queryKey: ['host-snapshot', host.id] })
     await queryClient.invalidateQueries({ queryKey: ['host-app-status', host.id] })
     editorOpen.value = false
-    ElMessage.success('Agent 配对成功。')
+    ElMessage.success('Agent 配对成功，可信来源中的应用无需单独授权。')
   } catch (error) {
     ElMessage.error('配对失败：' + errorMessage(error))
   } finally {
@@ -392,23 +431,14 @@ async function handleAppAction(app: CatalogApp, action: AppAction) {
   } else if (action === 'force_update') {
     try {
       await ElMessageBox.confirm(
-        '仅适用于已授权且归属明确的受管应用，或已核验原 Deploy 目录的旧项目。Agent 会校验固定来源应用包；已有受管项目重新执行更新脚本，缺失旧脚本时安全修复后再更新。\n\n不会主动清除 .env、.secrets 和持久化数据；如项目归属不符、路径不安全或应用授权失效，Agent 会拒绝执行。更新可能重建容器，请事先备份数据。',
+        '仅适用于归属明确的受管应用，或已核验原 Deploy 目录的旧项目。Agent 会校验固定来源应用包；已有受管项目重新执行更新脚本，缺失旧脚本时安全修复后再更新。\n\n不会主动清除 .env、.secrets 和持久化数据；如项目归属不符、路径不安全或主机配对失效，Agent 会拒绝执行。更新可能重建容器，请事先备份数据。',
         '确认强制更新',
         { type: 'warning', confirmButtonText: '确认强制更新', cancelButtonText: '取消' }
       )
     } catch {
       return
     }
-  } else if (action === 'adopt') {
-    try {
-      await ElMessageBox.confirm(
-        '接管只会在 Agent 中建立管理记录，不会重新安装、覆盖现有配置或密钥，也不会移动 Docker 数据目录。Agent 会再次核对 Compose 项目、原始工作目录和脚本。',
-        '确认接管原有部署',
-        { type: 'warning', confirmButtonText: '确认接管', cancelButtonText: '取消' }
-      )
-    } catch {
-      return
-    }
+
   }
   await runAppAction(app, action)
 }
@@ -465,33 +495,6 @@ function showAppInfo(app: CatalogApp) {
     '清单摘要：' + (app.manifest_sha256 || '无')
   ].join('\n')
   ElMessageBox.alert(content, '应用信息', { confirmButtonText: '关闭', type: 'info' })
-}
-
-async function copyText(value: string, label: string) {
-  if (!value) return
-  try {
-    if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
-    await navigator.clipboard.writeText(value)
-  } catch {
-    // HTTP 内网场景可能没有安全上下文，回退到传统复制方式。
-    const field = document.createElement('textarea')
-    field.value = value
-    field.style.position = 'fixed'
-    field.style.opacity = '0'
-    document.body.appendChild(field)
-    field.select()
-    const ok = document.execCommand('copy')
-    field.remove()
-    if (!ok) {
-      ElMessage.warning('复制失败，请手动选中内容复制。')
-      return
-    }
-  }
-  ElMessage.success(label + '已复制。')
-}
-
-function authorizationValue(app: CatalogApp) {
-  return controllerId.value + '/' + app.source_id + '/' + app.app_id
 }
 
 async function submitLogin() {
@@ -605,15 +608,12 @@ async function logout() {
           :loading="marketLoading"
           :status-error="statusError"
           :filter="ui.appFilter"
-          :controller-id="controllerId"
           :busy-key="actionBusyKey"
           :pending-key="pendingKey"
           @filter-change="ui.appFilter = $event"
           @configure="openInstallConfig"
           @action="handleAppAction"
           @info="showAppInfo"
-          @copy-grant="copyText($event, '授权项')"
-          @copy-command="copyText($event, '授权命令')"
         />
       </div>
     </main>

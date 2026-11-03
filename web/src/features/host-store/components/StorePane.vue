@@ -19,7 +19,6 @@ const props = defineProps<{
   loading: boolean
   statusError: string
   filter: AppFilter
-  controllerId: string
   busyKey: string
   pendingKey: string
 }>()
@@ -29,8 +28,6 @@ defineEmits<{
   configure: [app: CatalogApp]
   action: [app: CatalogApp, action: AppAction]
   info: [app: CatalogApp]
-  'copy-grant': [value: string]
-  'copy-command': [value: string]
 }>()
 
 const statusByKey = computed(() => Object.fromEntries(props.rows.map(row => [appKey(row), row])))
@@ -60,18 +57,7 @@ const visibleApps = computed(() => props.apps.filter(app => {
 function sourceName(id: string) {
   return props.sources.find(source => source.id === id)?.name || id
 }
-function authorizationValue(app: CatalogApp) {
-  return props.controllerId + '/' + app.source_id + '/' + app.app_id
-}
-function grantCommand(app: CatalogApp) {
-  if (!app.revision || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(app.app_id)) return ''
-  const root = props.snapshot?.software_root
-  if (!root || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').includes('..')) return ''
-  // 最小授权：只授予当前应用，不自动为同来源的其他应用扩大权限。
-  return 'cd ' + root.replace(/\/$/, '') + '/deploy && sudo bash deploy.sh easyhostagent grant ' +
-    props.controllerId + ' ' + app.source_id + ' ' + app.app_id
 
-}
 </script>
 
 <template>
@@ -164,19 +150,15 @@ function grantCommand(app: CatalogApp) {
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)])"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app)"
-          :authorization-value="authorizationValue(app)"
-          :grant-command="grantCommand(app)"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
-          @copy-grant="$emit('copy-grant', $event)"
-          @copy-command="$emit('copy-command', $event)"
         />
       </div>
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
 
       <p class="side-note">
-        <strong>安全提示：</strong>Docker 应用操作由目标 EasyHostAgent 按授权清单执行；原生 Agent 自身仅提供终端命令。状态未知、身份不匹配或未授权时不会开放远程操作。
+        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 自身仅提供终端命令；状态未知或身份不匹配时禁止远程操作。
       </p>
     </div>
   </section>
