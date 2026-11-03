@@ -42,10 +42,27 @@ async function showCommand(action: NativeAction) {
       dangerouslyUseHTMLString: false,
       type: action === 'uninstall' ? 'warning' : 'info'
     })
-    await navigator.clipboard.writeText(command(action))
+    const text = command(action)
+    try {
+      if (!navigator.clipboard?.writeText) throw new Error('Clipboard API unavailable')
+      await navigator.clipboard.writeText(text)
+    } catch {
+      const field = document.createElement('textarea')
+      field.value = text
+      field.style.position = 'fixed'
+      field.style.opacity = '0'
+      document.body.appendChild(field)
+      field.select()
+      const copied = document.execCommand('copy')
+      field.remove()
+      if (!copied) {
+        ElMessage.warning('复制失败，请手动选择弹窗中的命令复制。')
+        return
+      }
+    }
     ElMessage.success('命令已复制，请在目标主机可信终端执行。')
   } catch {
-    // 用户关闭弹窗或浏览器阻止剪贴板时不标记为执行成功。
+    // 取消弹窗不会触发安装、卸载或更新。
   }
 }
 </script>
