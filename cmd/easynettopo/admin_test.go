@@ -36,7 +36,6 @@ func TestAdminFromStdinCustomUserAndOneTimeOnly(t *testing.T) {
 
 func TestAdminFromStdinInvalidInputsDoNotInitialize(t *testing.T) {
 	for _, tc := range []string{
-
 		"admin\nPassword-With-CR\r\n",
 		"admin\nValid-Password-123\nextra",
 		"admin\nValid-Password-123",
@@ -67,10 +66,16 @@ func TestAdminFromStdinAllowsShortAndLongCredentials(t *testing.T) {
 	}
 	for _, tc := range cases {
 		db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
-		if err != nil { t.Fatal(err) }
+		if err != nil {
+			t.Fatal(err)
+		}
 		input := tc.user + "\n" + tc.pass + "\n"
-		if err := initAdminFromStdin(db, strings.NewReader(input)); err != nil { t.Fatal(err) }
-		if err := db.Verify(context.Background(), tc.user, tc.pass); err != nil { t.Fatal(err) }
+		if err := initAdminFromStdin(db, strings.NewReader(input)); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Verify(context.Background(), tc.user, tc.pass); err != nil {
+			t.Fatal(err)
+		}
 		_ = db.Close()
 	}
 }
