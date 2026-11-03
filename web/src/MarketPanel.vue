@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 type AppRef = {source_id: string; app_id: string}
 type App = AppRef & {name: string; summary: string; revision: string}
 type Host = {id: string; name: string; agent_id?: string}
-type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; adoptable?: boolean; mode?: string; blocked_reason?: string; state: string; action?: string; result?: string; message?: string}
+type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; adoptable?: boolean; force_updatable?: boolean; mode?: string; blocked_reason?: string; state: string; action?: string; result?: string; message?: string}
 type Field = {key: string; type: string; label: string; description?: string; required: boolean; editable?: boolean; default?: string | boolean | number; minimum?: number; maximum?: number}
 const props = defineProps<{apps: App[]; sources: {id: string; name: string}[]; hostVersion: number; controllerId: string}>()
 const hosts = ref<Host[]>([])
@@ -15,11 +15,12 @@ const loading = ref(false)
 const error = ref('')
 const statusError = ref('')
 const form = ref<{app: App; revision: string; fields: Field[]; values: Record<string,string>} | null>(null)
-type AppAction = 'install' | 'update' | 'uninstall' | 'adopt'
+type AppAction = 'install' | 'update' | 'uninstall' | 'adopt' | 'force_update'
 type Toast = { id: number; kind: 'success' | 'error' | 'info' | 'warning'; text: string }
 const toast = ref<Toast | null>(null)
 const uninstallTarget = ref<App | null>(null)
 const adoptTarget = ref<App | null>(null)
+const forceTarget = ref<App | null>(null)
 const showGrantHelp = ref('')
 const copyStatus = ref('')
 function authorizationValue(app: AppRef) {
@@ -108,7 +109,8 @@ async function refresh(){
     const job = pending.value
     if (job && job.host === id) {
       const row = next[job.key]
-      if (row && row.action === job.action && row.result && row.result !== 'running') {
+      if (row && row.action === (job.action === 'force_update' ? 'update' : job.action) &&
+        row.result && row.result !== 'running') {
         pending.value = null
         if (row.result === 'failed') {
           notify('error', job.app + ' ' + actionNames[job.action] + '失败：' + (row.message || '请检查 Agent 运行状态'))
@@ -147,7 +149,7 @@ async function configure(app: App){
     form.value={app,revision:data.revision,fields,values}
   } catch(e){error.value=message(e)} finally {busy.value=false}
 }
-const actionNames: Record<AppAction,string> = {install:'安装', update:'更新', uninstall:'卸载', adopt:'接管'}
+const actionNames: Record<AppAction,string> = {install:'安装', update:'更新', uninstall:'卸载', adopt:'接管', force_update:'强制更新'}
 async function submit(app: App, action: AppAction) {
   const id=host.value, install=form.value
   if (!id || active.value) return
@@ -155,15 +157,17 @@ async function submit(app: App, action: AppAction) {
   if (action==='update' && !canUpdate(app)) return
   if (action==='uninstall' && !canUninstall(app)) return
   if (action==='adopt' && !canAdopt(app)) return
+  if (action==='force_update' && !canForceUpdate(app)) return
   busy.value=true
   error.value=''
   try {
     const payload=action==='install' && install
       ? {...refFor(app),revision:install.revision,config:install.values}
-      : action==='update' || action==='adopt' ? {...refFor(app),revision:app.revision} : refFor(app)
+      : action==='update' || action==='adopt' || action==='force_update' ? {...refFor(app),revision:app.revision} : refFor(app)
     const accepted=await call<{action?: string;result?: string;message?: string}>(endpoint(id,action),payload)
     uninstallTarget.value=null
     adoptTarget.value=null
+    forceTarget.value=null
     if (id !== host.value) return
     form.value=null
     if (accepted.result === 'running') {
@@ -188,6 +192,12 @@ function askAdopt(app: App) {
 }
 async function confirmAdopt() {
   if (adoptTarget.value) await submit(adoptTarget.value,'adopt')
+}
+function askForceUpdate(app: App) {
+  if (!active.value && canForceUpdate(app)) forceTarget.value = app
+}
+async function confirmForceUpdate() {
+  if (forceTarget.value) await submit(forceTarget.value,'force_update')
 }
 function askUninstall(app: App) {
   if (!active.value && canUninstall(app)) uninstallTarget.value=app
@@ -216,6 +226,11 @@ function isExternal(a: App) {
 function canAdopt(a: App) {
   return !!a.revision && !!rows.value[key(a)]?.adoptable
 }
+function canForceUpdate(a: App) {
+  const row = rows.value[key(a)]
+  return !!a.revision && isRequestedDeployApp(a) &&
+    !!row?.force_updatable && row.blocked_reason === 'legacy_scripts_missing'
+}
 function showAdoptAction(a: App) {
   return (a.app_id === 'sub2api' || a.app_id === 'portainer') &&
     !!rows.value[key(a)]?.external
@@ -236,7 +251,7 @@ function blockReason(a: App) {
     return '检测到原 Deploy 脚本安装的外部项目。请先确认接管，之后即可通过原 Deploy 脚本更新或卸载。'
   }
   if (row.blocked_reason === 'legacy_scripts_missing') {
-    return '项目归属符合原 Deploy，但原始脚本缺失或不安全。请先在 fnOS 更新 Deploy 仓库和业务脚本。'
+    return '已核实原 Deploy 项目归属，但原始脚本缺失或不安全。可确认「强制更新」，从经过校验的 Git 应用包补齐标准脚本后更新，保留原数据与配置。'
   }
   if (row.blocked_reason === 'legacy_identity_mismatch') {
     return '该项目的 Compose 工作目录与接管记录不一致，已禁用管理操作。'
@@ -261,7 +276,7 @@ function showInstallAction(a: App) {
   return !row || (!row.managed && !row.external) || row.state === 'missing'
 }
 
-watch(host,()=>{form.value=null; uninstallTarget.value=null; adoptTarget.value=null; showGrantHelp.value=''; copyStatus.value=''; rows.value={};error.value='';statusError.value='';void refresh()})
+watch(host,()=>{form.value=null; uninstallTarget.value=null; adoptTarget.value=null; forceTarget.value=null; showGrantHelp.value=''; copyStatus.value=''; rows.value={};error.value='';statusError.value='';void refresh()})
 watch(()=>props.apps,()=>{form.value=null;void refresh()})
 watch(()=>props.hostVersion,loadHosts)
 onMounted(loadHosts)
@@ -326,6 +341,9 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
           @click="configure(app)">{{rows[key(app)]?.state === 'missing' ? '重新安装' : '安装'}}</button>
         <button v-if="catalogKeys.has(key(app)) && showAdoptAction(app)" type="button"
           :disabled="active || !canAdopt(app)" :title="blockReason(app)" @click="askAdopt(app)">接管原有 Deploy 部署</button>
+        <button v-if="catalogKeys.has(key(app)) && showAdoptAction(app) && rows[key(app)]?.blocked_reason === 'legacy_scripts_missing'"
+          type="button" class="force-update" :disabled="active || !canForceUpdate(app)"
+          :title="blockReason(app)" @click="askForceUpdate(app)">强制更新</button>
         <template v-if="isManaged(app) || isExternal(app)">
           <button v-if="catalogKeys.has(key(app))" type="button" :disabled="active || !canUpdate(app)"
             :title="canUpdate(app) ? '执行更新脚本' : blockReason(app)" @click="submit(app,'update')">更新</button>
@@ -343,6 +361,19 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
       <div class="confirm-actions">
         <button type="button" :disabled="busy" @click="adoptTarget=null">取消</button>
         <button type="button" :disabled="active" @click="confirmAdopt">确认接管</button>
+      </div>
+    </section>
+  </div>
+  <div v-if="forceTarget" class="dialog-backdrop" @click.self="forceTarget=null">
+    <section class="confirm-dialog" role="dialog" aria-modal="true"
+      aria-labelledby="app-force-title" aria-describedby="app-force-detail">
+      <h3 id="app-force-title">确认强制更新「{{forceTarget.name}}」？</h3>
+      <p id="app-force-detail">仅适用于已核验 Compose 项目归属的 Sub2API / Portainer 原有 Deploy 部署。Agent 会用经过校验的 Git 应用包修复缺失或不安全的标准脚本，并执行原 Deploy update.sh。该操作可能重新创建容器，请事先备份数据。</p>
+      <p>不覆盖原 Compose 文件、.env、.secrets 和持久化数据；如项目归属不符、发现符号链接或应用授权失效，将拒绝执行。</p>
+      <p><strong>目标主机：</strong>{{hosts.find(h=>h.id===host)?.name}} · <strong>应用：</strong>{{forceTarget.app_id}}</p>
+      <div class="confirm-actions">
+        <button type="button" :disabled="busy" @click="forceTarget=null">取消</button>
+        <button type="button" class="force-update" :disabled="active" @click="confirmForceUpdate">确认强制更新</button>
       </div>
     </section>
   </div>
@@ -368,6 +399,7 @@ button,select,input{font:inherit;border-radius:6px;padding:7px 10px}button{curso
 button:disabled{opacity:.5;cursor:default}small{color:#586a7e}form label{display:grid;gap:4px;margin:10px 0}
 input,select{border:1px solid #becbda;min-width:0;box-sizing:border-box}.error{color:#a32831}
 .uninstall{background:#a42d36;color:white}
+.force-update{background:#a65814;color:white}
 .dialog-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:#14263d9c;padding:20px}
 .confirm-dialog{background:#fff;padding:24px;max-width:470px;width:100%;box-shadow:0 15px 45px #0003;border-radius:12px}
 .confirm-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
