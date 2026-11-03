@@ -41,11 +41,10 @@ defineEmits<{ toggle: [] }>()
       </svg>
       <div class="brand-names">
         <div class="brand-name">EasyNetTopo</div>
-        <div class="brand-tagline">NETWORK · TOPOLOGY</div>
+        <div class="brand-tagline">易网拓扑</div>
       </div>
     </div>
 
-    <div class="nav-caption">WORKSPACE</div>
     <nav class="sidebar-menu">
       <el-tooltip content="主机商店" placement="right" :disabled="!collapsed">
         <button class="nav-item" type="button" aria-current="page">
@@ -55,10 +54,6 @@ defineEmits<{ toggle: [] }>()
       </el-tooltip>
     </nav>
 
-    <div class="sidebar-bottom">
-      <span class="pulse"></span>
-      <span>控制端已连接</span>
-    </div>
   </aside>
 </template>
 
@@ -120,7 +115,6 @@ defineEmits<{ toggle: [] }>()
 .collapse-toggle:hover { background: #143450; }
 .collapse-toggle .el-icon { transition: transform .25s; }
 .is-collapsed .collapse-toggle .el-icon { transform: rotate(180deg); }
-.nav-caption { margin: 25px 11px 12px; color: #587996; font-size: 10px; letter-spacing: 2px; }
 .sidebar-menu { display: flex; flex-direction: column; gap: 8px; }
 .nav-item {
   display: flex;
@@ -138,7 +132,6 @@ defineEmits<{ toggle: [] }>()
 }
 .nav-item .el-icon { color: #62e1f1; font-size: 21px; }
 .nav-item span { overflow: hidden; font-size: 13px; font-weight: 680; white-space: nowrap; }
-.sidebar-bottom {
   display: flex;
   align-items: center;
   gap: 9px;
@@ -147,21 +140,17 @@ defineEmits<{ toggle: [] }>()
   border-top: 1px solid #192b40;
   color: #5f809b;
 }
-.pulse { width: 7px; height: 7px; flex: none; border-radius: 50%; background: var(--ent-green); box-shadow: 0 0 10px #44dfb466; }
-.sidebar-bottom span:last-child { font-size: 11px; white-space: nowrap; }
 .is-collapsed .brand { justify-content: center; padding-inline: 0; }
 .is-collapsed .brand-names,
-.is-collapsed .nav-caption,
+,
 .is-collapsed .nav-item span,
-.is-collapsed .sidebar-bottom span:last-child { display: none; }
+ { display: none; }
 .is-collapsed .nav-item { justify-content: center; padding: 0; }
-.is-collapsed .sidebar-bottom { justify-content: center; }
 @media (max-width: 830px) {
   .sidebar { padding: 18px 10px; }
   .collapse-toggle { display: none; }
   .brand { justify-content: center; padding-inline: 0; }
-  .brand-names, .nav-caption, .nav-item span, .sidebar-bottom span:last-child { display: none; }
+  .brand-names, , .nav-item span,  { display: none; }
   .nav-item { justify-content: center; padding: 0; }
-  .sidebar-bottom { justify-content: center; }
 }
 </style>

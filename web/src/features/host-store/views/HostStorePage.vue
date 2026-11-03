@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, reactive, ref, watch } from 'vue'
+import { computed, nextTick, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
@@ -205,8 +205,10 @@ function openEditor(host: Host) {
   editorHost.value = host
   editorOpen.value = true
 }
-function openDocker(host: Host) {
+async function openDocker(host: Host) {
   ui.selectHost(host.id)
+  // 先让切换主机的清理逻辑完成，避免旧主机状态将新打开的抽屉立即关闭。
+  await nextTick()
   dockerOpen.value = true
 }
 
@@ -545,7 +547,7 @@ async function logout() {
         <el-form-item label="密码">
           <el-input v-model="loginForm.password" type="password" show-password autocomplete="current-password" />
         </el-form-item>
-        <el-button class="login-button" type="primary" native-type="submit" :loading="loginMutation.isPending.value">
+        <el-button class="login-button" type="primary" native-type="submit" :loading="loginMutation.isPending">
           登录控制端
         </el-button>
       </el-form>

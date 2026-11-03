@@ -59,12 +59,14 @@ function authorizationValue(app: CatalogApp) {
 }
 function grantCommand(app: CatalogApp) {
   if (app.app_id !== 'sub2api' && app.app_id !== 'portainer') return ''
+  const root = props.snapshot?.software_root
+  if (!root || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').includes('..')) return ''
   const ids = props.apps
     .filter(item => item.source_id === app.source_id &&
       (item.app_id === 'sub2api' || item.app_id === 'portainer'))
     .map(item => item.app_id)
   const selected = Array.from(new Set(ids)).sort()
-  return 'cd /vol3/1000/software/deploy && sudo bash deploy.sh easyhostagent grant ' +
+  return 'cd ' + root.replace(/\/$/, '') + '/deploy && sudo bash deploy.sh easyhostagent grant ' +
     props.controllerId + ' ' + app.source_id + ' ' + (selected.length ? selected.join(' ') : app.app_id)
 }
 </script>
