@@ -148,12 +148,12 @@ func TestEndToEndPinnedPairAndPrivateToken(t *testing.T) {
 }
 
 func TestEndpointAndFingerprintValidation(t *testing.T) {
-	for _, addr := range []string{"192.168.1.3:7014", "127.0.0.1:7014", "[::1]:7014"} {
+	for _, addr := range []string{"192.168.1.3:7014", "127.0.0.1:7014", "[::1]:7014", "http://127.0.0.1:7014", "https://192.168.1.3:7014"} {
 		if err := ValidateEndpoint(addr); err != nil {
 			t.Fatal("合法地址错误", addr, err)
 		}
 	}
-	for _, addr := range []string{"169.254.169.254:80", "0.0.0.0:7014", "localhost:7014", "https://127.0.0.1:7014", "127.0.0.1:0", "[ff02::1]:7014"} {
+	for _, addr := range []string{"169.254.169.254:80", "0.0.0.0:7014", "localhost:7014", "ftp://127.0.0.1:7014", "http://127.0.0.1:7014/path", "http://user@127.0.0.1:7014", "127.0.0.1:0", "[ff02::1]:7014"} {
 		if ValidateEndpoint(addr) == nil {
 			t.Error("不合法地址被接受", addr)
 		}
@@ -163,5 +163,55 @@ func TestEndpointAndFingerprintValidation(t *testing.T) {
 	}
 	if ValidateIdentity("untrusted-agent", strings.Repeat("a", 64)) == nil {
 		t.Fatal("非法 Agent ID 被允许")
+	}
+}
+
+func TestPlainHTTPAgentActions(t *testing.T) {
+	const pin = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const ctrl = "22222222-2222-4222-8222-222222222222"
+	const token = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /v1/identity", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-EHA-Agent-ID", mockAgentID)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Identity{AgentID: mockAgentID, SPKISHA256: pin, ProtocolVersion: 1})
+	})
+	mux.HandleFunc("POST /v1/pairings", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-EHA-Agent-ID", mockAgentID)
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusCreated)
+		_ = json.NewEncoder(w).Encode(PairingResult{
+			AgentID: mockAgentID, ControllerID: ctrl, DeviceID: mockAgentID, AccessToken: token,
+		})
+	})
+	for _, action := range []string{"install", "uninstall", "status"} {
+		mux.HandleFunc("POST /v1/apps/"+action, func(w http.ResponseWriter, r *http.Request) {
+			if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Controller-ID") != ctrl {
+				http.Error(w, "unauthorized", http.StatusUnauthorized)
+				return
+			}
+			w.Header().Set("X-EHA-Agent-ID", mockAgentID)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"action": action})
+		})
+	}
+	server := httptest.NewServer(mux)
+	defer server.Close()
+	client, err := NewClient(server.URL, mockAgentID, pin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if client.endpoint != server.URL {
+		t.Fatal("HTTP 地址被强制改为 HTTPS")
+	}
+	identity, err := client.Identity(context.Background())
+	if err != nil || identity.AgentID != mockAgentID {
+		t.Fatalf("HTTP 身份查询失败: %+v %v", identity, err)
+	}
+	for _, action := range []string{"install", "uninstall", "status"} {
+		payload, err := client.request(context.Background(), http.MethodPost, "/v1/apps/"+action, map[string]any{}, ctrl, token)
+		if err != nil || !strings.Contains(string(payload), action) {
+			t.Fatalf("HTTP %s 操作失败: %s %v", action, payload, err)
+		}
 	}
 }
