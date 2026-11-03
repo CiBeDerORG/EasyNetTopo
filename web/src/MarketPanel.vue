@@ -15,6 +15,18 @@ const loading = ref(false)
 const error = ref('')
 const statusError = ref('')
 const form = ref<{app: App; revision: string; fields: Field[]; values: Record<string,string>} | null>(null)
+type AppAction = 'install' | 'update' | 'uninstall'
+type Toast = { id: number; kind: 'success' | 'error' | 'info' | 'warning'; text: string }
+const toast = ref<Toast | null>(null)
+const uninstallTarget = ref<App | null>(null)
+const pending = ref<{ host: string; key: string; action: AppAction; app: string; errors: number } | null>(null)
+let toastSerial = 0
+let toastTimer: ReturnType<typeof setTimeout> | undefined
+function notify(kind: Toast['kind'], text: string) {
+  clearTimeout(toastTimer)
+  toast.value = { id: ++toastSerial, kind, text }
+  toastTimer = setTimeout(() => { toast.value = null }, kind === 'error' ? 11000 : 7500)
+}
 const states: Record<string,string> = { running:'运行中', stopped:'已停止', partial:'部分运行', not_installed:'未安装', unknown:'未知', missing:'已登记，容器缺失', external:'同名外部项目' }
 const results: Record<string,string> = {running:'进行中', succeeded:'成功', failed:'失败', unknown:'结果未知'}
 const key = (a: AppRef) => a.source_id + '/' + a.app_id
@@ -27,6 +39,7 @@ const working = computed(() => Object.values(rows.value).some(r => r.result === 
 let generation = 0
 let timer: ReturnType<typeof setTimeout> | undefined
 let disposed = false
+const active = computed(() => busy.value || !!pending.value || working.value)
 
 async function call<T>(url: string, body?: unknown): Promise<T> {
   const res = await fetch(url,{method: body === undefined ? 'GET':'POST', credentials:'same-origin', cache:'no-store',
@@ -58,9 +71,35 @@ async function refresh(){
       for(const row of result.apps) next[key(row)]=row
     }
     rows.value=next; statusError.value=''
-    if (working.value) timer=setTimeout(refresh,1800)
+    const job = pending.value
+    if (job && job.host === id) {
+      const row = next[job.key]
+      if (row && row.action === job.action && row.result && row.result !== 'running') {
+        pending.value = null
+        if (row.result === 'failed') {
+          notify('error', job.app + ' ' + actionNames[job.action] + '失败：' + (row.message || '请检查 Agent 运行状态'))
+        } else if (row.result === 'unknown') {
+          notify('warning', job.app + ' 操作结果未知，请核对目标主机实际状态')
+        } else if (row.result === 'succeeded' &&
+          (job.action === 'uninstall' ? row.state === 'not_installed' : row.state === 'running')) {
+          notify('success', job.app + ' ' + actionNames[job.action] + '成功')
+        } else {
+          notify('warning', job.app + ' 脚本执行完成，但当前状态为「' + (states[row.state] || '未知') + '」，请核查')
+        }
+      }
+    }
+    if (working.value || pending.value?.host === id) timer=setTimeout(refresh,1800)
   } catch(e) {
-    if (seq===generation && !disposed) {rows.value={}; statusError.value='主机状态未知。'+message(e)}
+    if (seq===generation && !disposed) {
+      rows.value={}; statusError.value='主机状态未知。'+message(e)
+      if (pending.value?.host === id) {
+        pending.value.errors++
+        if (pending.value.errors >= 3) {
+          notify('warning', '无法获取操作最终结果，请恢复连接后刷新主机状态，不能据此判断成功或失败')
+          pending.value = null
+        } else timer=setTimeout(refresh,2500)
+      }
+    }
   } finally {if(seq===generation) loading.value=false}
 }
 async function configure(app: App){
@@ -74,35 +113,81 @@ async function configure(app: App){
     form.value={app,revision:data.revision,fields,values}
   } catch(e){error.value=message(e)} finally {busy.value=false}
 }
-async function submit(app: App, action:'install'|'uninstall'){
+const actionNames: Record<AppAction,string> = {install:'安装', update:'更新', uninstall:'卸载'}
+async function submit(app: App, action: AppAction) {
   const id=host.value, install=form.value
-  if(action==='install' && (!install || key(install.app)!==key(app))) return
-  if(action==='uninstall' && !window.confirm('卸载 '+app.name+'？持久化数据会保留。')) return
-  busy.value=true; error.value=''
-  try{
-    const payload=action==='install' && install ? {...refFor(app),revision:install.revision,config:install.values} : refFor(app)
-    await call(endpoint(id,action),payload)
-    if(id===host.value){ form.value=null; await refresh() }
-  } catch(e){if(id===host.value){error.value=message(e); await refresh()}} finally{busy.value=false}
+  if (!id || active.value) return
+  if (action==='install' && (!install || key(install.app)!==key(app))) return
+  if (action==='update' && !canUpdate(app)) return
+  if (action==='uninstall' && !canUninstall(app)) return
+  busy.value=true
+  error.value=''
+  try {
+    const payload=action==='install' && install
+      ? {...refFor(app),revision:install.revision,config:install.values}
+      : action==='update' ? {...refFor(app),revision:app.revision} : refFor(app)
+    const accepted=await call<{action?: string;result?: string;message?: string}>(endpoint(id,action),payload)
+    uninstallTarget.value=null
+    if (id !== host.value) return
+    form.value=null
+    if (accepted.result === 'running') {
+      pending.value={host:id,key:key(app),action,app:app.name,errors:0}
+      notify('info',app.name+' '+actionNames[action]+'请求已受理，正在等待 Agent 执行结果')
+    } else if (accepted.result === 'succeeded') {
+      notify('success', app.name+' '+actionNames[action]+'已完成')
+    } else {
+      notify('warning', app.name+' 已受理，但结果尚未确认，请刷新状态核对')
+    }
+    await refresh()
+  } catch(e) {
+    if(id===host.value) {
+      error.value=message(e)
+      notify('error',app.name+' '+actionNames[action]+'失败：'+message(e))
+      await refresh()
+    }
+  } finally {busy.value=false}
+}
+function askUninstall(app: App) {
+  if (!active.value && canUninstall(app)) uninstallTarget.value=app
+}
+async function confirmUninstall() {
+  const app=uninstallTarget.value
+  if (app) await submit(app,'uninstall')
 }
 function canInstall(a:App){
   const row=rows.value[key(a)]
-  return row?.allowed && row.state!=='unknown' && !row.external && (!row.managed || row.state==='missing' || (row.action==='install' && ['failed','unknown'].includes(row.result || '')))
+  return !!row?.allowed && !row.external && row.state!=='unknown' &&
+    (!row.managed || row.state==='missing' || (row.action==='install' && ['failed','unknown'].includes(row.result || '') && row.state==='not_installed'))
 }
-watch(host,()=>{form.value=null; rows.value={};error.value='';statusError.value='';void refresh()})
+function canUpdate(a:App) {
+  const row=rows.value[key(a)]
+  return !!row?.allowed && !!row.managed && !row.external && !!a.revision &&
+    ['running','stopped','partial'].includes(row.state)
+}
+function canUninstall(a:App) {
+  const row=rows.value[key(a)]
+  return !!row?.allowed && !!row.managed && !row.external && row.state!=='unknown'
+}
+watch(host,()=>{form.value=null; uninstallTarget.value=null; rows.value={};error.value='';statusError.value='';void refresh()})
 watch(()=>props.apps,()=>{form.value=null;void refresh()})
 watch(()=>props.hostVersion,loadHosts)
 onMounted(loadHosts)
-onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer)})
+onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout(toastTimer)})
 </script>
 
 <template>
 <section class="market">
   <h2>应用商店</h2>
-  <div class="toolbar"><label>目标主机 <select v-model="host" :disabled="busy || !hosts.length">
+  <div class="toolbar"><label>目标主机 <select v-model="host" :disabled="active || !hosts.length">
     <option v-if="!hosts.length" value="">请先配对主机</option>
     <option v-for="h in hosts" :key="h.id" :value="h.id">{{h.name}}</option>
   </select></label><button :disabled="!host || busy || loading" @click="refresh">刷新状态</button></div>
+  <div v-if="toast" class="toast-wrap" role="status" aria-live="polite">
+    <div class="toast" :class="'toast-'+toast.kind">
+      <span>{{ toast.text }}</span>
+      <button type="button" class="toast-close" aria-label="关闭提示" @click="toast=null">×</button>
+    </div>
+  </div>
   <p v-if="error" class="error" role="alert">{{error}}</p>
   <p v-if="statusError" class="error" role="status">{{statusError}}</p>
   <p v-if="!visibleApps.length">暂无应用，请先同步 Git 来源。</p>
@@ -111,7 +196,7 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer)})
       <h3>{{app.name}}</h3><p>{{app.summary}}</p>
       <small>{{sources.find(s=>s.id===app.source_id)?.name || app.source_id}} · {{app.revision.slice(0,12) || '本机保留版本'}}</small>
       <p v-if="host" role="status">服务状态 · {{states[rows[key(app)]?.state] || '未知'}}
-        <span v-if="rows[key(app)]?.result"><br/>最近{{rows[key(app)].action==='install'?'安装':'卸载'}} · {{results[rows[key(app)].result!]}} {{rows[key(app)].message}}</span></p>
+        <span v-if="rows[key(app)]?.result"><br/>最近{{actionNames[rows[key(app)].action as AppAction] || '操作'}} · {{results[rows[key(app)].result!]}} {{rows[key(app)].message}}</span></p>
       <p v-if="rows[key(app)]?.external"><small>同名项目由主机上的其他部署管理。</small></p>
       <p v-else-if="rows[key(app)] && !rows[key(app)].allowed"><small>此来源在该主机上不可操作，请核对主机授权和应用归属。</small></p>
       <form v-if="form && key(form.app)===key(app)" @submit.prevent="submit(app,'install')">
@@ -123,13 +208,24 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer)})
             :min="f.minimum" :max="f.maximum" :required="f.required && f.type!=='secret'" :autocomplete="f.type==='secret'?'new-password':'off'"/>
           <small v-if="f.description">{{f.description}}</small>
         </label>
-        <button :disabled="busy || working">确认安装</button><button type="button" :disabled="busy" @click="form=null">取消</button>
+        <button :disabled="active">确认安装</button><button type="button" :disabled="busy" @click="form=null">取消</button>
       </form>
       <template v-else>
-        <button v-if="catalogKeys.has(key(app))" :disabled="busy || working || !canInstall(app)" @click="configure(app)">安装</button>
-        <button v-if="rows[key(app)]?.managed" :disabled="busy || working || !rows[key(app)].allowed" @click="submit(app,'uninstall')">卸载</button>
+        <button v-if="catalogKeys.has(key(app)) && canInstall(app)" :disabled="active" @click="configure(app)">安装</button>
+        <button v-if="catalogKeys.has(key(app)) && rows[key(app)]?.managed" :disabled="active || !canUpdate(app)" @click="submit(app,'update')">更新</button>
+        <button v-if="rows[key(app)]?.managed" :disabled="active || !canUninstall(app)" class="uninstall" @click="askUninstall(app)">卸载</button>
       </template>
     </article>
+  </div>
+  <div v-if="uninstallTarget" class="dialog-backdrop" @click.self="uninstallTarget=null">
+    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-uninstall-title" aria-describedby="app-uninstall-detail">
+      <h3 id="app-uninstall-title">确认卸载「{{uninstallTarget.name}}」？</h3>
+      <p id="app-uninstall-detail">此操作将通过目标主机 EasyHostAgent 执行 Deploy 应用清单声明的卸载动作。默认保留持久化数据，不会卸载 EasyHostAgent 本身。请确认目标主机和应用正确。</p>
+      <div class="confirm-actions">
+        <button type="button" :disabled="busy" @click="uninstallTarget=null">取消</button>
+        <button type="button" class="uninstall" :disabled="active" @click="confirmUninstall">确认卸载</button>
+      </div>
+    </section>
   </div>
 </section>
 </template>
@@ -142,4 +238,15 @@ article{border:1px solid #dce4ed;border-radius:10px;padding:16px;overflow-wrap:a
 button,select,input{font:inherit;border-radius:6px;padding:7px 10px}button{cursor:pointer;border:0;background:#e9f3f9;color:#155478;margin:3px}
 button:disabled{opacity:.5;cursor:default}small{color:#586a7e}form label{display:grid;gap:4px;margin:10px 0}
 input,select{border:1px solid #becbda;min-width:0;box-sizing:border-box}.error{color:#a32831}
+.uninstall{background:#a42d36;color:white}
+.dialog-backdrop{position:fixed;inset:0;z-index:30;display:grid;place-items:center;background:#14263d9c;padding:20px}
+.confirm-dialog{background:#fff;padding:24px;max-width:470px;width:100%;box-shadow:0 15px 45px #0003;border-radius:12px}
+.confirm-actions{display:flex;justify-content:flex-end;gap:12px;margin-top:20px}
+.toast-wrap{position:fixed;right:20px;top:20px;z-index:40;max-width:min(430px,calc(100vw - 40px))}
+.toast{display:flex;align-items:flex-start;gap:12px;padding:14px 16px;background:#f0f7ff;border-left:4px solid #236aa0;box-shadow:0 8px 25px #0002;border-radius:9px}
+.toast-success{background:#edfaf2;border-color:#27845a}
+.toast-error{background:#fff1f1;border-color:#b83d43}
+.toast-warning{background:#fff7e8;border-color:#b67d27}
+.toast-close{background:transparent;color:inherit;margin:0;padding:0 5px;font-size:21px}
+
 </style>
