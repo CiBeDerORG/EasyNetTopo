@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -86,5 +87,60 @@ func TestCatalogRoutesAuthorizationAndSourceValidation(t *testing.T) {
 	apps := call("GET", "/api/v1/catalog/apps", "", true, false, "")
 	if apps.Code != 200 || !strings.Contains(apps.Body.String(), `"install_enabled":false`) {
 		t.Fatal("应用安装安全开关异常")
+	}
+
+	// 删除来源只影响目标 ID 的记录和目录，不卸载其他来源的应用。
+	otherBody := `{"name":"Deploy Dev","url":"https://github.com/CiBeDerORG/deploy.git","branch":"feat/docker-app-store"}`
+	otherCreated := call("POST", "/api/v1/catalog/sources", otherBody, true, true, "")
+	if otherCreated.Code != 201 {
+		t.Fatalf("创建第二个来源失败: %d", otherCreated.Code)
+	}
+	var other storage.CatalogSource
+	if err := json.Unmarshal(otherCreated.Body.Bytes(), &other); err != nil {
+		t.Fatal(err)
+	}
+	for _, source := range []storage.CatalogSource{s, other} {
+		if err := db.SaveCatalogSnapshot(context.Background(), source.ID, strings.Repeat("a", 40), []storage.CatalogApp{
+			{SourceID: source.ID, AppID: "sub2api", Name: "Sub2API", Revision: strings.Repeat("a", 40)},
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cache := filepath.Join(db.DataDir(), "git-cache", s.ID+".git")
+	if err := os.MkdirAll(cache, 0700); err != nil {
+		t.Fatal(err)
+	}
+	deletePath := "/api/v1/catalog/sources/" + s.ID
+	if got := call("DELETE", deletePath, "", false, true, ""); got.Code != 401 {
+		t.Fatal("未认证可删除 Git 来源", got.Code)
+	}
+	if got := call("DELETE", deletePath, "", true, false, ""); got.Code != 403 {
+		t.Fatal("无防跨站标记可删除来源", got.Code)
+	}
+	if got := call("DELETE", deletePath, "", true, true, "https://malicious.test"); got.Code != 403 {
+		t.Fatal("恶意 Origin 可删除来源", got.Code)
+	}
+	if got := call("DELETE", "/api/v1/catalog/sources/00000000-0000-4000-8000-000000000000", "", true, true, ""); got.Code != 404 {
+		t.Fatal("不存在的来源未返回 404", got.Code)
+	}
+	if got := call("DELETE", deletePath, "", true, true, ""); got.Code != 204 {
+		t.Fatal("删除来源失败", got.Code, got.Body.String())
+	}
+	if _, err := os.Stat(cache); !os.IsNotExist(err) {
+		t.Fatal("删除后 Git 来源缓存仍然存在", err)
+	}
+	if got := call("DELETE", deletePath, "", true, true, ""); got.Code != 404 {
+		t.Fatal("重复删除未返回 404", got.Code)
+	}
+	remaining := call("GET", "/api/v1/catalog/sources", "", true, false, "")
+	if remaining.Code != 200 || strings.Contains(remaining.Body.String(), s.ID) || !strings.Contains(remaining.Body.String(), other.ID) {
+		t.Fatal("删除后来源列表未正确更新", remaining.Body.String())
+	}
+	remainingApps := call("GET", "/api/v1/catalog/apps", "", true, false, "")
+	if remainingApps.Code != 200 || strings.Contains(remainingApps.Body.String(), s.ID) || !strings.Contains(remainingApps.Body.String(), other.ID) {
+		t.Fatal("删除后应用列表错误地保留或删除了其他来源", remainingApps.Body.String())
+	}
+	if got := call("POST", "/api/v1/catalog/sources", body, true, true, ""); got.Code != 201 {
+		t.Fatal("删除来源后无法重新添加", got.Code)
 	}
 }
