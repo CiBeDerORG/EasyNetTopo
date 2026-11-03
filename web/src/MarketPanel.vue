@@ -4,7 +4,7 @@ import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 type AppRef = {source_id: string; app_id: string}
 type App = AppRef & {name: string; summary: string; revision: string}
 type Host = {id: string; name: string; agent_id?: string}
-type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; blocked_reason?: string; state: string; action?: string; result?: string; message?: string}
+type Status = AppRef & {managed: boolean; allowed: boolean; external?: boolean; adoptable?: boolean; mode?: string; blocked_reason?: string; state: string; action?: string; result?: string; message?: string}
 type Field = {key: string; type: string; label: string; description?: string; required: boolean; editable?: boolean; default?: string | boolean | number; minimum?: number; maximum?: number}
 const props = defineProps<{apps: App[]; sources: {id: string; name: string}[]; hostVersion: number; controllerId: string}>()
 const hosts = ref<Host[]>([])
@@ -15,19 +15,20 @@ const loading = ref(false)
 const error = ref('')
 const statusError = ref('')
 const form = ref<{app: App; revision: string; fields: Field[]; values: Record<string,string>} | null>(null)
-type AppAction = 'install' | 'update' | 'uninstall'
+type AppAction = 'install' | 'update' | 'uninstall' | 'adopt'
 type Toast = { id: number; kind: 'success' | 'error' | 'info' | 'warning'; text: string }
 const toast = ref<Toast | null>(null)
 const uninstallTarget = ref<App | null>(null)
+const adoptTarget = ref<App | null>(null)
 const showGrantHelp = ref('')
 const copyStatus = ref('')
-function authorizationValue(sourceId: string) {
-  return props.controllerId + '/' + sourceId
+function authorizationValue(app: AppRef) {
+  return props.controllerId + '/' + app.source_id + '/' + app.app_id
 }
-async function copyGrant(sourceId: string) {
+async function copyGrant(app: AppRef) {
   if (!props.controllerId) return
   try {
-    await navigator.clipboard.writeText(authorizationValue(sourceId))
+    await navigator.clipboard.writeText(authorizationValue(app))
     copyStatus.value = '授权项已复制。请追加到 fnOS 的 EASYHOSTAGENT_APP_GRANTS，保留原有授权。'
   } catch {
     copyStatus.value = '复制失败，请手动选中授权项复制。'
@@ -127,21 +128,23 @@ async function configure(app: App){
     form.value={app,revision:data.revision,fields,values}
   } catch(e){error.value=message(e)} finally {busy.value=false}
 }
-const actionNames: Record<AppAction,string> = {install:'安装', update:'更新', uninstall:'卸载'}
+const actionNames: Record<AppAction,string> = {install:'安装', update:'更新', uninstall:'卸载', adopt:'接管'}
 async function submit(app: App, action: AppAction) {
   const id=host.value, install=form.value
   if (!id || active.value) return
   if (action==='install' && (!install || key(install.app)!==key(app))) return
   if (action==='update' && !canUpdate(app)) return
   if (action==='uninstall' && !canUninstall(app)) return
+  if (action==='adopt' && !canAdopt(app)) return
   busy.value=true
   error.value=''
   try {
     const payload=action==='install' && install
       ? {...refFor(app),revision:install.revision,config:install.values}
-      : action==='update' ? {...refFor(app),revision:app.revision} : refFor(app)
+      : action==='update' || action==='adopt' ? {...refFor(app),revision:app.revision} : refFor(app)
     const accepted=await call<{action?: string;result?: string;message?: string}>(endpoint(id,action),payload)
     uninstallTarget.value=null
+    adoptTarget.value=null
     if (id !== host.value) return
     form.value=null
     if (accepted.result === 'running') {
@@ -160,6 +163,12 @@ async function submit(app: App, action: AppAction) {
       await refresh()
     }
   } finally {busy.value=false}
+}
+function askAdopt(app: App) {
+  if (!active.value && canAdopt(app)) adoptTarget.value = app
+}
+async function confirmAdopt() {
+  if (adoptTarget.value) await submit(adoptTarget.value,'adopt')
 }
 function askUninstall(app: App) {
   if (!active.value && canUninstall(app)) uninstallTarget.value=app
@@ -185,20 +194,39 @@ function canUninstall(a:App) {
 function isExternal(a: App) {
   return !!rows.value[key(a)]?.external
 }
+function canAdopt(a: App) {
+  return !!a.revision && !!rows.value[key(a)]?.adoptable
+}
+function showAdoptAction(a: App) {
+  return (a.app_id === 'sub2api' || a.app_id === 'portainer') &&
+    !!rows.value[key(a)]?.external
+}
 function isManaged(a: App) {
   return !!rows.value[key(a)]?.managed
 }
 function blockReason(a: App) {
   const row = rows.value[key(a)]
   if (!row) return '尚未获取应用状态，点击刷新状态后再操作。'
-  if (row.external || row.blocked_reason === 'external_project') {
-    return '同名 Docker 项目由其他部署管理。为保护已有应用和数据，不能直接覆盖或卸载；需要先进行明确的受控接管。'
+  if (row.blocked_reason === 'grant_required') {
+    return '未授权操作此应用。请在 fnOS 授予对应的 Agent 应用权限。'
   }
   if (row.blocked_reason === 'source_conflict') {
     return '此应用已有其他 Git 来源的安装记录，不能用当前来源覆盖。'
   }
+  if (row.blocked_reason === 'adoption_required') {
+    return '检测到原 Deploy 脚本安装的外部项目。请先确认接管，之后即可通过原 Deploy 脚本更新或卸载。'
+  }
+  if (row.blocked_reason === 'legacy_scripts_missing') {
+    return '项目归属符合原 Deploy，但原始脚本缺失或不安全。请先在 fnOS 更新 Deploy 仓库和业务脚本。'
+  }
+  if (row.blocked_reason === 'legacy_identity_mismatch') {
+    return '该项目的 Compose 工作目录与接管记录不一致，已禁用管理操作。'
+  }
+  if (row.external || row.blocked_reason === 'external_project') {
+    return '同名项目不属于受支持的 Deploy 目录，无法安全接管或卸载。'
+  }
   if (!row.allowed) {
-    return '当前控制端尚未获得此 Git 应用源的 Agent 操作授权。请先在 fnOS 上授权，再刷新状态。'
+    return '当前控制端未获得此应用的 Agent 授权，请先在 fnOS 授权。'
   }
   if (row.state === 'unknown') return '无法确认 Docker 状态，暂时禁止安装、更新或卸载。'
   if (row.state === 'missing') return '已有受管安装记录，但服务容器缺失；可以重新安装。'
@@ -206,16 +234,15 @@ function blockReason(a: App) {
 }
 function grantRequired(a: App) {
   const row = rows.value[key(a)]
-  return !!row && !row.external &&
-    (row.blocked_reason === 'grant_required' ||
-      (!row.allowed && !row.blocked_reason))
+  return !!row && (row.blocked_reason === 'grant_required' ||
+    !row.allowed && !row.external && !row.blocked_reason)
 }
 function showInstallAction(a: App) {
   const row = rows.value[key(a)]
   return !row || (!row.managed && !row.external) || row.state === 'missing'
 }
 
-watch(host,()=>{form.value=null; uninstallTarget.value=null; showGrantHelp.value=''; copyStatus.value=''; rows.value={};error.value='';statusError.value='';void refresh()})
+watch(host,()=>{form.value=null; uninstallTarget.value=null; adoptTarget.value=null; showGrantHelp.value=''; copyStatus.value=''; rows.value={};error.value='';statusError.value='';void refresh()})
 watch(()=>props.apps,()=>{form.value=null;void refresh()})
 watch(()=>props.hostVersion,loadHosts)
 onMounted(loadHosts)
@@ -246,13 +273,13 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
         <span v-if="rows[key(app)]?.result"><br/>最近{{actionNames[rows[key(app)].action as AppAction] || '操作'}} · {{results[rows[key(app)].result!]}} {{rows[key(app)].message}}</span></p>
       <p v-if="blockReason(app)" class="restriction"><small>{{blockReason(app)}}</small></p>
       <div v-if="grantRequired(app)" class="grant-tools">
-        <button type="button" class="secondary" @click="showGrantHelp = showGrantHelp === app.source_id ? '' : app.source_id">
-          {{ showGrantHelp === app.source_id ? '收起授权说明' : '查看授权方法' }}
+        <button type="button" class="secondary" @click="showGrantHelp = showGrantHelp === key(app) ? '' : key(app)">
+          {{ showGrantHelp === key(app) ? '收起授权说明' : '查看授权方法' }}
         </button>
-        <div v-if="showGrantHelp === app.source_id" class="grant-help">
-          <p>在安装 EasyHostAgent 的 fnOS 主机上，编辑 <code>/vol3/1000/software/deploy/.env</code>，将下面的授权项追加到 <code>EASYHOSTAGENT_APP_GRANTS</code>。如果已经有其他授权，用英文逗号分隔，<strong>不要覆盖旧值</strong>。</p>
-          <code class="grant-value">{{ authorizationValue(app.source_id) }}</code>
-          <button type="button" :disabled="!controllerId" @click="copyGrant(app.source_id)">复制授权项</button>
+        <div v-if="showGrantHelp === key(app)" class="grant-help">
+          <p>在安装 EasyHostAgent 的 fnOS 主机上，编辑 <code>/vol3/1000/software/deploy/.env</code>，将下面这条 <strong>仅针对当前应用</strong> 的授权项追加到 <code>EASYHOSTAGENT_APP_GRANTS</code>。若还有其他授权，用英文逗号分隔，<strong>不要覆盖旧值</strong>。仅授权 Sub2API 和 Portainer 时，分别复制两张卡片的值。</p>
+          <code class="grant-value">{{ authorizationValue(app) }}</code>
+          <button type="button" :disabled="!controllerId" @click="copyGrant(app)">复制授权项</button>
           <p v-if="copyStatus" role="status">{{copyStatus}}</p>
           <p>保存后在 fnOS 执行 <code>sudo bash deploy.sh easyhostagent update</code> 使授权进入 Agent 原生配置，然后返回这里点击「刷新状态」。</p>
         </div>
@@ -272,6 +299,8 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
         <button v-if="catalogKeys.has(key(app)) && showInstallAction(app)"
           type="button" :disabled="active || !canInstall(app)" :title="canInstall(app) ? '执行安装脚本' : blockReason(app)"
           @click="configure(app)">{{rows[key(app)]?.state === 'missing' ? '重新安装' : '安装'}}</button>
+        <button v-if="catalogKeys.has(key(app)) && showAdoptAction(app)" type="button"
+          :disabled="active || !canAdopt(app)" :title="blockReason(app)" @click="askAdopt(app)">接管原有 Deploy 部署</button>
         <template v-if="isManaged(app) || isExternal(app)">
           <button v-if="catalogKeys.has(key(app))" type="button" :disabled="active || !canUpdate(app)"
             :title="canUpdate(app) ? '执行更新脚本' : blockReason(app)" @click="submit(app,'update')">更新</button>
@@ -280,6 +309,17 @@ onBeforeUnmount(()=>{disposed=true;generation++;clearTimeout(timer);clearTimeout
         </template>
       </template>
     </article>
+  </div>
+  <div v-if="adoptTarget" class="dialog-backdrop" @click.self="adoptTarget=null">
+    <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-adopt-title" aria-describedby="app-adopt-detail">
+      <h3 id="app-adopt-title">接管「{{adoptTarget.name}}」原有 Deploy 部署？</h3>
+      <p id="app-adopt-detail">接管只会在 Agent 中建立管理记录：不重新安装、不覆盖现有配置或密钥，也不移动 Docker 数据目录。Agent 会再次核对 Compose 项目、原始工作目录和脚本。接管后可以通过原有 Deploy 脚本更新或卸载，卸载仍需单独确认。</p>
+      <p>目标主机：{{hosts.find(h=>h.id===host)?.name}} · 应用：{{adoptTarget.app_id}}</p>
+      <div class="confirm-actions">
+        <button type="button" :disabled="busy" @click="adoptTarget=null">取消</button>
+        <button type="button" :disabled="active" @click="confirmAdopt">确认接管</button>
+      </div>
+    </section>
   </div>
   <div v-if="uninstallTarget" class="dialog-backdrop" @click.self="uninstallTarget=null">
     <section class="confirm-dialog" role="dialog" aria-modal="true" aria-labelledby="app-uninstall-title" aria-describedby="app-uninstall-detail">
