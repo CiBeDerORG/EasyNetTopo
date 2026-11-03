@@ -115,7 +115,7 @@ defineEmits<{ toggle: [] }>()
 .collapse-toggle:hover { background: #143450; }
 .collapse-toggle .el-icon { transition: transform .25s; }
 .is-collapsed .collapse-toggle .el-icon { transform: rotate(180deg); }
-.sidebar-menu { display: flex; flex-direction: column; gap: 8px; }
+.sidebar-menu { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
 .nav-item {
   display: flex;
   width: 100%;
@@ -132,25 +132,14 @@ defineEmits<{ toggle: [] }>()
 }
 .nav-item .el-icon { color: #62e1f1; font-size: 21px; }
 .nav-item span { overflow: hidden; font-size: 13px; font-weight: 680; white-space: nowrap; }
-  display: flex;
-  align-items: center;
-  gap: 9px;
-  margin-top: auto;
-  padding: 14px 8px 0;
-  border-top: 1px solid #192b40;
-  color: #5f809b;
-}
 .is-collapsed .brand { justify-content: center; padding-inline: 0; }
-.is-collapsed .brand-names,
-,
-.is-collapsed .nav-item span,
- { display: none; }
+.is-collapsed .brand-names, .is-collapsed .nav-item span { display: none; }
 .is-collapsed .nav-item { justify-content: center; padding: 0; }
 @media (max-width: 830px) {
   .sidebar { padding: 18px 10px; }
   .collapse-toggle { display: none; }
   .brand { justify-content: center; padding-inline: 0; }
-  .brand-names, , .nav-item span,  { display: none; }
+  .brand-names, .nav-item span { display: none; }
   .nav-item { justify-content: center; padding: 0; }
 }
 </style>
