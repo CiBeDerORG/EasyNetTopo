@@ -96,6 +96,12 @@ async function registerHost() {
 }
 async function pairHost() {
   if (!selectedID.value) return
+  const registered = hosts.value.find(host => host.id === selectedID.value)
+  if (registered && (editName.value.trim() !== registered.name ||
+      editEndpoint.value.trim() !== registered.endpoint)) {
+    error.value = '请先保存名称或连接地址，再进行配对。'
+    return
+  }
   busy.value = true
   error.value = ''
   message.value = ''
@@ -241,9 +247,11 @@ onMounted(loadHosts)
             <input :id="'edit-endpoint-' + host.id" v-model="editEndpoint" required />
             <button type="submit" :disabled="busy">{{ busy ? '处理中…' : '保存修改' }}</button>
           </form>
-          <form class="form pair" @submit.prevent="pairHost">
+          <details class="pair-advanced">
+            <summary>{{ host.agent_id ? '重新配对 Agent（仅手动操作时生效）' : '首次配对 Agent' }}</summary>
+            <form class="form pair" @submit.prevent="pairHost">
             <h3>{{ host.agent_id ? '重新配对 Agent' : '配对 Agent' }}</h3>
-            <p class="muted">从 Agent 本机终端获取 UUID、指纹和最新一次性配对码。HTTPS 会校验指纹，HTTP 不提供加密和服务器身份验证。重新配对可能撤销先前的控制端授权。</p>
+            <p class="muted">只有点击「安全配对」才会更新配对授权；普通「保存修改」不会触碰 Agent ID、指纹、Token 或配对时间。请先保存可能修改过的连接地址。HTTPS 会校验指纹，HTTP 不提供加密和服务器身份验证。重新配对可能撤销先前的控制端授权。</p>
             <label :for="'agent-id-' + host.id">Agent UUID</label>
             <input :id="'agent-id-' + host.id" v-model="agentID" placeholder="终端核对后的 UUID" autocomplete="off" required />
             <label :for="'agent-fingerprint-' + host.id">Agent 公钥指纹（64 位十六进制）</label>
@@ -251,7 +259,8 @@ onMounted(loadHosts)
             <label :for="'pair-code-' + host.id">一次性配对码</label>
             <input :id="'pair-code-' + host.id" v-model="pairingCode" type="password" autocomplete="off" placeholder="本机生成的 32 位十六进制码" required />
             <button type="submit" :disabled="busy">{{ busy ? '处理中…' : '安全配对' }}</button>
-          </form>
+            </form>
+          </details>
         </div>
       </li>
     </ul>
@@ -293,7 +302,9 @@ button{background:#176a9b;color:#fff;border:0;border-radius:8px;padding:10px 13p
 .danger{background:#b43835;color:#fff}
 .edit-panel{margin-top:12px;padding:12px 16px;border:1px solid #d8e2ec;border-radius:10px;background:#f8fbfe}
 .edit-panel .form{max-width:100%;padding:10px 0}
-.edit-panel .form + .form{border-top:1px solid #d8e2ec;margin-top:12px;padding-top:20px}
+.pair-advanced{border-top:1px solid #d8e2ec;margin-top:12px;padding-top:10px}
+.pair-advanced summary{cursor:pointer;padding:8px 0;font-size:14px;font-weight:600;color:#176a9b}
+.pair-advanced .form{padding-top:12px}
 button:disabled{opacity:.55;cursor:not-allowed}
 .hosts{list-style:none;padding:0;margin:15px 0}
 .hosts li{padding:14px 0;border-top:1px solid #e4eaf1}
