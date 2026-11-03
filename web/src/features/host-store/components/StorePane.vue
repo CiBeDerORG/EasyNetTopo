@@ -64,16 +64,13 @@ function authorizationValue(app: CatalogApp) {
   return props.controllerId + '/' + app.source_id + '/' + app.app_id
 }
 function grantCommand(app: CatalogApp) {
-  if (!['sub2api', 'portainer', 'mihomo', 'opencode'].includes(app.app_id)) return ''
+  if (!app.revision || !/^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/.test(app.app_id)) return ''
   const root = props.snapshot?.software_root
   if (!root || !/^\/[A-Za-z0-9_./-]+$/.test(root) || root.split('/').includes('..')) return ''
-  const ids = props.apps
-    .filter(item => item.source_id === app.source_id &&
-      ['sub2api', 'portainer', 'mihomo', 'opencode'].includes(item.app_id))
-    .map(item => item.app_id)
-  const selected = Array.from(new Set(ids)).sort()
+  // 最小授权：只授予当前应用，不自动为同来源的其他应用扩大权限。
   return 'cd ' + root.replace(/\/$/, '') + '/deploy && sudo bash deploy.sh easyhostagent grant ' +
-    props.controllerId + ' ' + app.source_id + ' ' + (selected.length ? selected.join(' ') : app.app_id)
+    props.controllerId + ' ' + app.source_id + ' ' + app.app_id
+
 }
 </script>
 
@@ -137,7 +134,7 @@ function grantCommand(app: CatalogApp) {
       <div class="store-heading">
         <div>
           <h3>应用市场</h3>
-          <p>安装、更新、卸载仅作用于当前选中的主机</p>
+          <p>Docker 应用操作仅作用于所选主机；EasyHostAgent 原生维护需在目标机终端执行</p>
         </div>
         <el-radio-group :model-value="filter" size="small" @update:model-value="$emit('filter-change', $event)">
           <el-radio-button label="all">全部</el-radio-button>
@@ -179,7 +176,7 @@ function grantCommand(app: CatalogApp) {
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
 
       <p class="side-note">
-        <strong>安全提示：</strong>所有安装与管理操作均由目标主机 EasyHostAgent 按已授权的应用清单执行；状态未知、身份不匹配或未授权时不会开放操作。
+        <strong>安全提示：</strong>Docker 应用操作由目标 EasyHostAgent 按授权清单执行；原生 Agent 自身仅提供终端命令。状态未知、身份不匹配或未授权时不会开放远程操作。
       </p>
     </div>
   </section>
