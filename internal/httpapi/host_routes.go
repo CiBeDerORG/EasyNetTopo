@@ -174,7 +174,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			}
 			if err != nil {
 				jsonReply(w, http.StatusBadGateway, map[string]string{
-					"code": "agent_update_unavailable",
+					"code":    "agent_update_unavailable",
 					"message": "Agent 无法接收更新任务。请检查目标主机配对、systemd 与 Deploy 原生安装目录，必要时在主机终端升级 Agent。",
 				})
 				return
