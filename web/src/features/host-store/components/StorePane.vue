@@ -159,7 +159,7 @@ function sourceName(id: string) {
           :status="statusByKey[appKey(app)]"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)])"
-          :busy="busyKey === appKey(app) || pendingKey === appKey(app)"
+          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting'"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
