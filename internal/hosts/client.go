@@ -29,10 +29,10 @@ var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
 
 // Agent 自更新错误使用固定的协议状态，不向 UI 透传远端任意错误正文。
 var (
-	ErrAgentUpdateUnsupported = errors.New("Agent 版本尚不支持远程自更新")
-	ErrAgentUpdateEnvironment = errors.New("Agent 原生自更新环境或 systemd 调度不可用")
+	ErrAgentUpdateUnsupported  = errors.New("Agent 版本尚不支持远程自更新")
+	ErrAgentUpdateEnvironment  = errors.New("Agent 原生自更新环境或 systemd 调度不可用")
 	ErrAgentUpdateUnauthorized = errors.New("Agent 已拒绝当前控制端授权")
-	ErrAgentUpdateBusy = errors.New("Agent 正在处理其他应用操作")
+	ErrAgentUpdateBusy         = errors.New("Agent 正在处理其他应用操作")
 )
 
 // parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
