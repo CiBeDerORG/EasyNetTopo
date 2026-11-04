@@ -3,7 +3,7 @@ name: EasyNetTopo Multi-Arch Container Image
 on:
   push:
     branches:
-      - feat/docker-app-store
+      - feat/deploy-manifest-lifecycle
     paths:
       - Dockerfile
       - .dockerignore
@@ -25,7 +25,7 @@ concurrency:
 
 jobs:
   image:
-    if: github.ref == 'refs/heads/feat/docker-app-store'
+    if: github.ref == 'refs/heads/feat/deploy-manifest-lifecycle'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -50,7 +50,7 @@ jobs:
           push: true
           provenance: true
           tags: |
-            ghcr.io/cibederorg/easynettopo:feat-docker-app-store
+            ghcr.io/cibederorg/easynettopo:feat-deploy-manifest-lifecycle
             ghcr.io/cibederorg/easynettopo:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/CiBeDerORG/EasyNetTopo
