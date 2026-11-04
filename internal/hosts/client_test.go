@@ -2,6 +2,7 @@ package hosts
 
 import (
 	"context"
+	"errors"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -213,5 +214,51 @@ func TestPlainHTTPAgentActions(t *testing.T) {
 		if err != nil || !strings.Contains(string(payload), action) {
 			t.Fatalf("HTTP %s 操作失败: %s %v", action, payload, err)
 		}
+	}
+}
+
+func TestNativeAgentUpdateHTTPErrorClassification(t *testing.T) {
+	const pin = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+	const controller = "22222222-2222-4222-8222-222222222222"
+	const token = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+	for _, tc := range []struct {
+		name   string
+		status int
+		want   error
+	}{
+		{"old-agent-404", http.StatusNotFound, ErrAgentUpdateUnsupported},
+		{"old-agent-405", http.StatusMethodNotAllowed, ErrAgentUpdateUnsupported},
+		{"unsafe-path-or-systemd", http.StatusServiceUnavailable, ErrAgentUpdateEnvironment},
+		{"invalid-pairing", http.StatusForbidden, ErrAgentUpdateUnauthorized},
+		{"busy-app", http.StatusConflict, ErrAgentUpdateBusy},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path != "/v1/host/maintenance/update" || r.Method != http.MethodPost {
+					t.Errorf("unexpected maintenance request %s %s", r.Method, r.URL.Path)
+				}
+				if r.Header.Get("Authorization") != "Bearer "+token ||
+					r.Header.Get("X-EHA-Controller-ID") != controller {
+					t.Error("lost controller pairing authorization")
+				}
+				w.Header().Set("X-EHA-Agent-ID", mockAgentID)
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(tc.status)
+				_, _ = w.Write([]byte(`{"code":"ignored_remote_error","message":"unsafe: do not reflect"}`))
+			}))
+			defer server.Close()
+			client, err := NewClient(server.URL, mockAgentID, pin)
+			if err != nil {
+				t.Fatal(err)
+			}
+			_, err = client.request(context.Background(), http.MethodPost,
+				"/v1/host/maintenance/update", nil, controller, token)
+			if !errors.Is(err, tc.want) {
+				t.Fatalf("HTTP %d: got %v, want %v", tc.status, err, tc.want)
+			}
+			if strings.Contains(err.Error(), "unsafe:") {
+				t.Fatal("remote arbitrary diagnostic text was leaked")
+			}
+		})
 	}
 }

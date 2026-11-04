@@ -173,10 +173,23 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				return
 			}
 			if err != nil {
-				jsonReply(w, http.StatusBadGateway, map[string]string{
-					"code":    "agent_update_unavailable",
-					"message": "Agent 无法接收更新任务。请检查目标主机配对、systemd 与 Deploy 原生安装目录，必要时在主机终端升级 Agent。",
-				})
+				code, message := "agent_update_unavailable",
+					"无法向 Agent 发送更新任务。请检查网络连接及目标主机上的 Agent 服务。"
+				switch {
+				case errors.Is(err, hosts.ErrAgentUpdateUnsupported):
+					code, message = "agent_update_unsupported",
+						"目标 Agent 版本过旧，不支持远程更新。请先在该主机终端从最新 deploy main 执行 sudo bash deploy.sh easyhostagent update，再重试。"
+				case errors.Is(err, hosts.ErrAgentUpdateEnvironment):
+					code, message = "agent_update_environment",
+						"Agent 已收到指令，但本机原生部署目录权限、安装标记或 systemd-run 不满足更新要求。请在目标主机检查相关路径与系统日志。"
+				case errors.Is(err, hosts.ErrAgentUpdateUnauthorized):
+					code, message = "agent_update_authorization",
+						"Agent 拒绝当前配对授权，请检查主机配对状态，必要时重新配对。"
+				case errors.Is(err, hosts.ErrAgentUpdateBusy):
+					code, message = "agent_update_busy",
+						"Agent 正在执行其他应用操作，请在操作完成后重试。"
+				}
+				jsonReply(w, http.StatusBadGateway, map[string]string{"code": code, "message": message})
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")

@@ -27,6 +27,14 @@ var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
 
+// Agent 自更新错误使用固定的协议状态，不向 UI 透传远端任意错误正文。
+var (
+	ErrAgentUpdateUnsupported = errors.New("Agent 版本尚不支持远程自更新")
+	ErrAgentUpdateEnvironment = errors.New("Agent 原生自更新环境或 systemd 调度不可用")
+	ErrAgentUpdateUnauthorized = errors.New("Agent 已拒绝当前控制端授权")
+	ErrAgentUpdateBusy = errors.New("Agent 正在处理其他应用操作")
+)
+
 // parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
 func parseEndpoint(value string) (string, error) {
 	if len(value) > 110 || strings.TrimSpace(value) != value {
@@ -184,6 +192,19 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 		return nil, errors.New("响应 Agent ID 不匹配")
 	}
 	if res.StatusCode < 200 || res.StatusCode >= 300 {
+		if strings.HasPrefix(path, "/v1/host/maintenance/") {
+			// 旧版本 Agent 缺少路由时会返回 404。按固定 HTTP 状态分类，不转发响应正文。
+			switch res.StatusCode {
+			case http.StatusNotFound, http.StatusMethodNotAllowed:
+				return nil, ErrAgentUpdateUnsupported
+			case http.StatusServiceUnavailable:
+				return nil, ErrAgentUpdateEnvironment
+			case http.StatusUnauthorized, http.StatusForbidden:
+				return nil, ErrAgentUpdateUnauthorized
+			case http.StatusConflict:
+				return nil, ErrAgentUpdateBusy
+			}
+		}
 		if path == "/v1/pairings" {
 			// Agent 错误码是固定协议字段，拒绝透传远程自由文本或包含凭据的响应。
 			var failure struct {
