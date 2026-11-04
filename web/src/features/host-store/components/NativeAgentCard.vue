@@ -19,7 +19,8 @@ const emit = defineEmits<{
 }>()
 
 const status = computed(() => {
-  if (props.maintenance?.state === 'timeout') return '更新后连接异常 · 需要排查'
+  if (props.maintenance?.state === 'timeout') return props.connected ?
+    '更新未确认完成 · 需要排查' : '更新后连接异常 · 需要排查'
   if (props.maintenance?.state === 'waiting') return '正在更新 · 短暂断联属于正常现象'
   if (props.checking) return '检查中'
   if (props.connected) return '运行中 · 已关联'
@@ -71,7 +72,7 @@ async function showInstallCommand() {
     <p class="description">自动关联已配对主机。更新由独立 systemd 任务执行，服务会自动重启。</p>
     <div class="state" :class="{ online: connected && !maintenance, danger: maintenance?.state === 'timeout' }">{{ status }}</div>
     <p v-if="maintenance?.state === 'timeout'" class="diagnostic" role="alert">
-      超过 10 分钟仍未确认 Agent 重启并恢复连接。请开发人员在主机检查：
+      超过 10 分钟仍未确认 Agent 完成重启并恢复连接，可能是更新失败、未重启或网络断联。请开发人员在主机检查：
       <code>systemctl status easyhostagent</code>、
       <code>journalctl -u easyhostagent-self-update.service -n 100</code>
       和网络连接。

@@ -40,7 +40,9 @@ const availableCount = computed(() => props.apps.filter(app => !!app.revision).l
 const agentState = computed(() => {
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
   if (props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
-  if (props.agentMaintenance?.state === 'timeout') return { label: '重连超时', type: 'danger' as const }
+  if (props.agentMaintenance?.state === 'timeout') return {
+    label: props.snapshotError ? '重连超时' : '更新未完成', type: 'danger' as const
+  }
   if (props.snapshotLoading) return { label: '检测中', type: 'warning' as const }
   if (props.snapshotError) return { label: '连接异常', type: 'danger' as const }
   if (props.snapshot) return { label: '已连接', type: 'success' as const }
