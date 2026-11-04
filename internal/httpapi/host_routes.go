@@ -157,6 +157,34 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				return
 			}
 		}
+		if len(parts) == 3 && parts[1] == "agent" && (parts[2] == "update" || parts[2] == "force-update") {
+			if r.Method != http.MethodPost {
+				methodNotAllowed(w, "POST")
+				return
+			}
+			if !mutation(w, r) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			queued, err := service.NativeAgentUpdate(ctx, parts[0], parts[2])
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				jsonReply(w, http.StatusBadGateway, map[string]string{
+					"code": "agent_update_unavailable",
+					"message": "Agent 无法接收更新任务。请检查目标主机配对、systemd 与 Deploy 原生安装目录，必要时在主机终端升级 Agent。",
+				})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write(queued)
+			return
+		}
 		if len(parts) == 3 && parts[1] == "apps" && catalogSvc != nil {
 			if r.Method != http.MethodPost {
 				methodNotAllowed(w, "POST")

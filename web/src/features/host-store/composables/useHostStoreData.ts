@@ -8,7 +8,8 @@ export function useHostStoreData(
   selectedHostId: ComputedRef<string>,
   authenticated: ComputedRef<boolean>,
   shouldPoll: ComputedRef<boolean>,
-  dockerOpen: Ref<boolean>
+  dockerOpen: Ref<boolean>,
+  agentRestarting: ComputedRef<boolean>
 ) {
   const hostsQuery = useQuery({
     queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000
@@ -33,7 +34,8 @@ export function useHostStoreData(
     queryFn: () => getHostSnapshot(selectedHostId.value),
     enabled: computed(() => authenticated.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
     retry: 0,
-    staleTime: 10_000
+    staleTime: 10_000,
+    refetchInterval: () => agentRestarting.value ? 3000 : false
   })
   const statusQuery = useQuery({
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),

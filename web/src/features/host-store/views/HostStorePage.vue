@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Close } from '@element-plus/icons-vue'
@@ -18,6 +18,7 @@ import {
   login,
   logout as logoutApi,
   pairHost as pairHostApi,
+  queueNativeAgentUpdate,
   refreshSource,
   updateHost
 } from '../api'
@@ -32,6 +33,7 @@ import SourceSettingsDialog from '../components/SourceSettingsDialog.vue'
 import DockerResourceDrawer from '../components/DockerResourceDrawer.vue'
 import AppConfigDialog from '../components/AppConfigDialog.vue'
 import type {
+  AgentUpdateAction,
   AppAction,
   AppConfig,
   CatalogApp,
@@ -83,7 +85,18 @@ const pendingAction = ref<{
 } | null>(null)
 const shouldPoll = computed(() => !!pendingAction.value)
 const dockerOpen = ref(false)
-const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, dockerOpen)
+const agentMaintenance = ref<{
+  hostId: string; action: AgentUpdateAction; state: 'waiting' | 'timeout'; startedAt: string
+} | null>(null)
+const agentUpdating = computed(() => agentMaintenance.value?.hostId === selectedHostId.value &&
+  agentMaintenance.value.state === 'waiting')
+const agentMaintenanceForHost = computed(() => {
+  const job = agentMaintenance.value
+  return job?.hostId === selectedHostId.value ? { state: job.state, action: job.action } : null
+})
+const agentUpdateBusy = ref(false)
+let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
+const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, dockerOpen, agentUpdating)
 
 const hosts = data.hosts
 const sources = data.sources
@@ -106,6 +119,8 @@ const dockerError = computed(() =>
 )
 const healthStatus = computed<HostHealthStatus>(() => {
   if (!selectedHost.value?.agent_id) return 'unpaired'
+  if (agentUpdating.value) return 'checking'
+  if (agentMaintenanceForHost.value?.state === 'timeout') return 'error'
   if (snapshotLoading.value) return 'checking'
   if (snapshotError.value) return 'error'
   if (snapshot.value) return 'online'
@@ -135,6 +150,65 @@ const configState = ref<{ app: CatalogApp; config: AppConfig } | null>(null)
 const configApp = computed(() => configState.value?.app || null)
 const configRevision = computed(() => configState.value?.config.revision || '')
 const configFields = computed(() => configState.value?.config.config || [])
+
+// 仅收到原生 Agent 重启后的新进程标识，才认为主机重新连通。
+// 未观察到重启则持续等待，超时只显示故障排查信息，不误报更新成功。
+watch(() => data.snapshotQuery.dataUpdatedAt.value, () => {
+  const job = agentMaintenance.value
+  if (!job || job.state !== 'waiting' || job.hostId !== selectedHostId.value ||
+    data.snapshotQuery.isError.value) return
+  const started = data.snapshotQuery.data.value?.agent_started_at
+  if (!started || started === job.startedAt) return
+  if (upgradeDeadline) clearTimeout(upgradeDeadline)
+  upgradeDeadline = null
+  agentMaintenance.value = null
+  ElMessage.info('EasyHostAgent 已重启并恢复连接；请核对发布版本及主机日志确认更新结果。')
+})
+
+async function requestAgentUpdate(action: AgentUpdateAction) {
+  const host = selectedHost.value
+  const startedAt = snapshot.value?.agent_started_at
+  if (!host?.agent_id || !startedAt || snapshotError.value || agentUpdateBusy.value ||
+    agentMaintenanceForHost.value?.state === 'waiting') {
+    ElMessage.warning('需先连接支持远程更新的 EasyHostAgent，并确认主机快照可用。')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '即将在主机「' + host.name + '」上执行 EasyHostAgent ' +
+      (action === 'force-update' ? '强制更新（重新下载并校验所配置 Release）' : '更新') +
+      '。系统会延迟启动独立更新任务并重启 Agent，期间短暂断联属正常现象。超过 10 分钟仍未观察到重启并重新连接，页面仅提示开发人员检查日志。是否继续？',
+      '确认更新 EasyHostAgent',
+      { type: 'warning', confirmButtonText: '发送更新指令', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  agentUpdateBusy.value = true
+  try {
+    const response = await queueNativeAgentUpdate(host.id, action)
+    if (response.state !== 'queued') throw new Error('更新任务未得到 Agent 确认')
+    if (upgradeDeadline) clearTimeout(upgradeDeadline)
+    agentMaintenance.value = { hostId: host.id, action, state: 'waiting', startedAt }
+    upgradeDeadline = setTimeout(() => {
+      if (agentMaintenance.value?.hostId === host.id &&
+        agentMaintenance.value.state === 'waiting') {
+        agentMaintenance.value = { ...agentMaintenance.value, state: 'timeout' }
+      }
+      upgradeDeadline = null
+    }, 10 * 60 * 1000)
+    ElMessage.info('更新指令已受理。Agent 将自动重启，短暂断联不视为失败。')
+  } catch (error) {
+    ElMessage.error('发送 EasyHostAgent 更新指令失败：' + errorMessage(error))
+  } finally {
+    agentUpdateBusy.value = false
+  }
+}
+
+onUnmounted(() => {
+  if (upgradeDeadline) clearTimeout(upgradeDeadline)
+})
+
 
 // 仅自动关联来自可信固定 Git 清单、且 Compose 路径和脚本通过 Agent 核验的原有部署。
 const autoLinkAttempts = new Set<string>()
@@ -610,6 +684,9 @@ async function logout() {
           :filter="ui.appFilter"
           :busy-key="actionBusyKey"
           :pending-key="pendingKey"
+          :agent-maintenance="agentMaintenanceForHost"
+          :agent-update-busy="agentUpdateBusy"
+          @agent-update="requestAgentUpdate"
           @filter-change="ui.appFilter = $event"
           @configure="openInstallConfig"
           @action="handleAppAction"

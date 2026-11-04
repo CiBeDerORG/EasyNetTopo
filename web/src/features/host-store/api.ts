@@ -29,6 +29,12 @@ export function deleteHost(id: string) {
 export function pairHost(id: string, payload: { agent_id: string; spki_sha256: string; pairing_code: string }) {
   return apiRequest<Host>('/api/v1/hosts/' + encodeURIComponent(id) + '/pair', { method: 'POST', body: payload })
 }
+export function queueNativeAgentUpdate(id: string, action: 'update' | 'force-update') {
+  return apiRequest<{ state: 'queued'; action: string }>(
+    '/api/v1/hosts/' + encodeURIComponent(id) + '/agent/' + action,
+    { method: 'POST' }
+  )
+}
 export function getHostSnapshot(id: string) {
   return apiRequest<HostSnapshot>('/api/v1/hosts/' + encodeURIComponent(id) + '/snapshot')
 }

@@ -5,7 +5,7 @@ import AppCard from './AppCard.vue'
 import NativeAgentCard from './NativeAgentCard.vue'
 import { appKey, getAppPermissions } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
-import type { AppAction } from '../types'
+import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
 import type { AppStatus, CatalogApp, CatalogSource, Host, HostSnapshot } from '../types'
 
 const props = defineProps<{
@@ -21,6 +21,8 @@ const props = defineProps<{
   filter: AppFilter
   busyKey: string
   pendingKey: string
+  agentMaintenance: AgentMaintenanceState | null
+  agentUpdateBusy: boolean
 }>()
 
 defineEmits<{
@@ -28,6 +30,7 @@ defineEmits<{
   configure: [app: CatalogApp]
   action: [app: CatalogApp, action: AppAction]
   info: [app: CatalogApp]
+  'agent-update': [action: AgentUpdateAction]
 }>()
 
 const statusByKey = computed(() => Object.fromEntries(props.rows.map(row => [appKey(row), row])))
@@ -36,6 +39,8 @@ const runningCount = computed(() => props.rows.filter(row => row.state === 'runn
 const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
 const agentState = computed(() => {
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
+  if (props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
+  if (props.agentMaintenance?.state === 'timeout') return { label: '重连超时', type: 'danger' as const }
   if (props.snapshotLoading) return { label: '检测中', type: 'warning' as const }
   if (props.snapshotError) return { label: '连接异常', type: 'danger' as const }
   if (props.snapshot) return { label: '已连接', type: 'success' as const }
@@ -107,10 +112,10 @@ function sourceName(id: string) {
         </div>
       </div>
 
-      <div v-if="snapshotError" class="notice-line" role="status">
+      <div v-if="snapshotError && !agentMaintenance" class="notice-line" role="status">
         <el-alert title="暂时无法获取主机快照。连接失败不代表主机或 Docker 资源已删除。" type="warning" :closable="false" show-icon />
       </div>
-      <div v-if="statusError" class="notice-line" role="alert">
+      <div v-if="statusError && !agentMaintenance" class="notice-line" role="alert">
         <el-alert :title="'应用状态未知。' + statusError" type="warning" :closable="false" show-icon />
       </div>
       <div v-if="!host.agent_id" class="notice-line">
@@ -120,7 +125,7 @@ function sourceName(id: string) {
       <div class="store-heading">
         <div>
           <h3>应用市场</h3>
-          <p>Docker 应用操作仅作用于所选主机；EasyHostAgent 原生维护需在目标机终端执行</p>
+          <p>Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新</p>
         </div>
         <el-radio-group :model-value="filter" size="small" @update:model-value="$emit('filter-change', $event)">
           <el-radio-button label="all">全部</el-radio-button>
@@ -137,10 +142,13 @@ function sourceName(id: string) {
         <NativeAgentCard
           v-if="showNativeAgent"
           :software-root="snapshot?.software_root"
-          :connected="!!snapshot"
+          :connected="!!snapshot && !snapshotError"
           :paired="!!host.agent_id"
           :checking="snapshotLoading"
           :connection-error="!!snapshotError"
+          :maintenance="agentMaintenance"
+          :busy="agentUpdateBusy"
+          @update="$emit('agent-update', $event)"
         />
         <AppCard
           v-for="app in visibleApps"
@@ -158,7 +166,7 @@ function sourceName(id: string) {
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
 
       <p class="side-note">
-        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 自身仅提供终端命令；状态未知或身份不匹配时禁止远程操作。
+        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 的更新由独立 systemd 任务执行，短暂断联正常；状态未知或身份不匹配时禁止远程操作。
       </p>
     </div>
   </section>

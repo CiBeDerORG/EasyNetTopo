@@ -13,6 +13,7 @@ export type HostHealthStatus = 'online' | 'checking' | 'error' | 'paired' | 'unp
 
 export type HostSnapshot = {
   agent_id: string
+  agent_started_at?: string
   hostname: string
   platform: string
   arch: string
@@ -67,6 +68,8 @@ export type AppStatus = AppRef & {
   result?: string
   message?: string
 }
+export type AgentUpdateAction = 'update' | 'force-update'
+export type AgentMaintenanceState = { state: 'waiting' | 'timeout'; action: AgentUpdateAction }
 export type AppAction = 'install' | 'update' | 'uninstall' | 'adopt' | 'force_update'
 export type ConfigField = {
   key: string
