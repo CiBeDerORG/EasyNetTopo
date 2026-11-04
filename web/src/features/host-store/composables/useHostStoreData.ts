@@ -35,7 +35,7 @@ export function useHostStoreData(
     enabled: computed(() => authenticated.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
     retry: 0,
     staleTime: 10_000,
-    refetchInterval: () => agentRestarting.value ? 3000 : false
+    refetchInterval: computed(() => agentRestarting.value ? 3000 : false)
   })
   const statusQuery = useQuery({
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),
