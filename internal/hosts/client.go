@@ -27,35 +27,7 @@ var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
-var dockerResourceRE = regexp.MustCompile(`^(compose|container):[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}package hosts
-
-import (
-	"bytes"
-	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"crypto/tls"
-	"crypto/x509"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net"
-	"net/http"
-	"net/url"
-	"regexp"
-	"strconv"
-	"strings"
-	"time"
-
-	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
-)
-
-var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
-var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
-var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
-)
+var dockerResourceRE = regexp.MustCompile(`^(compose|container):[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 func ValidateEndpoint(value string) error {
 	if len(value) > 100 || strings.TrimSpace(value) != value {
