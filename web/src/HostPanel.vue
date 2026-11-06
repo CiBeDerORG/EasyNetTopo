@@ -21,7 +21,7 @@ type Snapshot = {
 type Resource = { resource_id: string; name: string; state: string; kind: string; managed: boolean }
 type Inventory = {
   agent_id: string; observed_at: string; status: string
-  complete: boolean; resources: Resource[]; error?: string
+  complete: boolean; resources: Resource[]; error?: string; actions_supported?: boolean
 }
 type ContainerStats = {
   container_id: string; state: string; available: boolean
@@ -32,6 +32,11 @@ type ResourceStats = {
   complete: boolean; containers: ContainerStats[]
 }
 type ResourceLogs = { agent_id: string; resource_id: string; text: string; truncated: boolean }
+type DockerTask = {
+  agent_id: string; task_id: string; resource_id: string
+  action: string; kind: string; status: string; created_at: string
+  error?: string; result?: { verified: boolean; final_status?: string }
+}
 
 const hosts = ref<Host[]>([])
 const name = ref('')
@@ -48,6 +53,7 @@ const inventory = ref<Inventory | null>(null)
 const selectedResourceID = ref('')
 const resourceStats = ref<ResourceStats | null>(null)
 const resourceLogs = ref<ResourceLogs | null>(null)
+const dockerTask = ref<DockerTask | null>(null)
 
 async function call<T>(url: string, method = 'GET', payload?: unknown): Promise<T> {
   const headers: Record<string, string> = {}
@@ -118,6 +124,7 @@ async function queryHost(id: string, type: 'snapshot' | 'docker') {
       selectedResourceID.value = ''
       resourceStats.value = null
       resourceLogs.value = null
+      dockerTask.value = null
     }
     selectedID.value = id
   } catch {
@@ -146,6 +153,48 @@ async function queryResource(resourceID: string, detail: 'logs' | 'stats') {
     busy.value = false
   }
 }
+async function startDockerTask(resourceID: string, action: 'start' | 'stop' | 'restart') {
+  if (!selectedID.value || !inventory.value?.complete || !inventory.value.actions_supported) return
+  if (action !== 'start' && !window.confirm('此操作会影响该资源所有现有容器，确定继续吗？')) return
+  busy.value = true
+  error.value = ''
+  message.value = ''
+  try {
+    dockerTask.value = await call<DockerTask>('/api/v1/hosts/' + selectedID.value + '/tasks', 'POST', {
+      task_id: crypto.randomUUID(), kind: 'docker_resource', resource_id: resourceID, action
+    })
+    message.value = 'Docker 操作任务已持久化提交。请点击“刷新任务状态”查看最终结果。'
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Docker 任务提交失败。请查询任务历史，避免重复提交。'
+  } finally {
+    busy.value = false
+  }
+}
+async function refreshDockerTask() {
+  if (!selectedID.value || !dockerTask.value) return
+  busy.value = true
+  error.value = ''
+  try {
+    dockerTask.value = await call<DockerTask>('/api/v1/hosts/' + selectedID.value + '/tasks/' + dockerTask.value.task_id)
+  } catch {
+    error.value = '任务状态查询失败。不要直接用新任务代替原任务重试。'
+  } finally {
+    busy.value = false
+  }
+}
+async function cancelDockerTask() {
+  if (!selectedID.value || !dockerTask.value) return
+  if (!window.confirm('取消无法撤销已执行的部分容器操作，确定请求取消吗？')) return
+  busy.value = true
+  error.value = ''
+  try {
+    dockerTask.value = await call<DockerTask>('/api/v1/hosts/' + selectedID.value + '/tasks/' + dockerTask.value.task_id + '/cancel', 'POST')
+  } catch {
+    error.value = '取消请求失败，请查询任务状态。'
+  } finally {
+    busy.value = false
+  }
+}
 function bytes(value: number): string {
   if (!Number.isFinite(value) || value < 0) return '未知'
   return (value / 1024 / 1024).toFixed(1) + ' MiB'
@@ -157,6 +206,7 @@ function selectHost(id: string) {
   selectedResourceID.value = ''
   resourceStats.value = null
   resourceLogs.value = null
+  dockerTask.value = null
   agentID.value = ''
   fingerprint.value = ''
   pairingCode.value = ''
@@ -233,11 +283,16 @@ onMounted(loadHosts)
       <div v-for="resource in inventory.resources" :key="resource.resource_id" class="resource">
         <div>
           <strong>{{ resource.name }}</strong>
-          <p class="muted">{{ resource.kind }} · {{ resource.state }} · {{ resource.managed ? '受管资源' : '外部资源（只读）' }}</p>
+          <p class="muted">{{ resource.kind }} · {{ resource.state }} · {{ resource.managed ? '受管资源' : '外部资源' }}</p>
         </div>
         <div class="actions">
           <button type="button" class="secondary" :disabled="busy || !inventory.complete" @click="queryResource(resource.resource_id, 'stats')">资源占用</button>
           <button type="button" class="secondary" :disabled="busy || !inventory.complete" @click="queryResource(resource.resource_id, 'logs')">查看日志</button>
+          <template v-if="inventory.actions_supported">
+            <button type="button" class="secondary" :disabled="busy || !inventory.complete" @click="startDockerTask(resource.resource_id, 'start')">启动</button>
+            <button type="button" class="secondary" :disabled="busy || !inventory.complete" @click="startDockerTask(resource.resource_id, 'stop')">停止</button>
+            <button type="button" class="secondary" :disabled="busy || !inventory.complete" @click="startDockerTask(resource.resource_id, 'restart')">重启</button>
+          </template>
         </div>
         <div v-if="selectedResourceID === resource.resource_id && resourceStats" class="detail">
           <p v-for="item in resourceStats.containers" :key="item.container_id">
@@ -251,6 +306,19 @@ onMounted(loadHosts)
           <p v-if="resourceLogs.truncated" class="warning">日志已截断，仅显示有限内容</p>
           <pre class="log">{{ resourceLogs.text }}</pre>
         </div>
+      </div>
+    </section>
+    <section v-if="dockerTask" class="result" role="status">
+      <div class="heading">
+        <h3>Docker 持久操作任务</h3>
+        <span>{{ dockerTask.action }} · {{ dockerTask.status }}</span>
+      </div>
+      <p>资源：<code>{{ dockerTask.resource_id }}</code> · 任务：<code>{{ dockerTask.task_id }}</code></p>
+      <p v-if="dockerTask.error" class="warning">{{ dockerTask.error }}</p>
+      <p v-if="dockerTask.result?.verified" class="ok">已核验最终状态：{{ dockerTask.result.final_status }}</p>
+      <div class="actions">
+        <button type="button" class="secondary" :disabled="busy" @click="refreshDockerTask">刷新任务状态</button>
+        <button v-if="['accepted', 'running'].includes(dockerTask.status)" type="button" class="secondary" :disabled="busy" @click="cancelDockerTask">请求取消</button>
       </div>
     </section>
     <p v-if="message" class="ok" role="status">{{ message }}</p>
