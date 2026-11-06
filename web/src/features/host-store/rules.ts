@@ -16,7 +16,7 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
     ['running', 'stopped', 'partial'].includes(row.state)
   const canUninstall = !!row?.allowed && managed && !external && row.state !== 'unknown'
   const canAdopt = false
-  const canForceUpdate = platform !== 'macos' && !!app.revision &&
+  const canForceUpdate = (platform === 'linux' || platform === 'fnos') && !!app.revision &&
     !!row?.force_updatable && (managed && !!row.allowed && !external ||
       external && row.blocked_reason === 'legacy_scripts_missing')
   const grantRequired = false
