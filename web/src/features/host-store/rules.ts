@@ -1,7 +1,7 @@
 import type { AppPermissions, AppRef, AppStatus, CatalogApp } from './types'
 
 export const appKey = (app: AppRef) => app.source_id + '/' + app.app_id
-export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissions {
+export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = ''): AppPermissions {
   const managed = !!row?.managed
   const external = !!row?.external
   const showAdopt = false // 原有 Deploy 应用完成身份核验后自动关联
@@ -16,7 +16,7 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus): AppPermissi
     ['running', 'stopped', 'partial'].includes(row.state)
   const canUninstall = !!row?.allowed && managed && !external && row.state !== 'unknown'
   const canAdopt = false
-  const canForceUpdate = !!app.revision &&
+  const canForceUpdate = platform !== 'macos' && !!app.revision &&
     !!row?.force_updatable && (managed && !!row.allowed && !external ||
       external && row.blocked_reason === 'legacy_scripts_missing')
   const grantRequired = false
