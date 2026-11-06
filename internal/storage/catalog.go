@@ -21,6 +21,7 @@ type CatalogSource struct {
 }
 
 type CatalogApp struct {
+	IconURL        string `json:"icon_url,omitempty"`
 	SourceID       string `json:"source_id"`
 	AppID          string `json:"app_id"`
 	Name           string `json:"name"`

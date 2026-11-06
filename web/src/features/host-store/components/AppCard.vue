@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp } from '../types'
 
@@ -17,17 +17,9 @@ defineEmits<{
   info: []
 }>()
 
-const logoText = computed(() => {
-  if (props.app.app_id === 'sub2api') return 'S2'
-  if (props.app.app_id === 'portainer') return 'P'
-  return props.app.name.slice(0, 2).toUpperCase()
-})
-const logoTone = computed(() => {
-  if (props.app.app_id === 'sub2api') return 'cyan'
-  if (props.app.app_id === 'portainer') return 'violet'
-  if (props.app.app_id === 'openhands') return 'amber'
-  return 'green'
-})
+const logoText = computed(() => props.app.name.slice(0, 2).toUpperCase())
+const iconFailed = ref(false)
+watch(() => props.app.icon_url, () => { iconFailed.value = false })
 const statusLabel = computed(() => {
   if (!props.status) return '状态待获取'
   return ({
@@ -57,7 +49,10 @@ const resultLabel = computed(() => {
 <template>
   <article class="product-card">
     <div class="product-top">
-      <div class="product-logo" :class="logoTone">{{ logoText }}</div>
+      <div class="product-logo green">
+        <img v-if="app.icon_url && !iconFailed" :src="app.icon_url" :alt="app.name + '图标'" @error="iconFailed = true" />
+        <span v-else>{{ logoText }}</span>
+      </div>
       <div class="product-title">
         <h4>{{ app.name }}</h4>
         <span>{{ app.category || '应用' }} · {{ sourceName }}</span>
@@ -120,6 +115,7 @@ const resultLabel = computed(() => {
 }
 .product-card:hover { transform: translateY(-1px); border-color: #3a7393; box-shadow: 0 10px 22px #0003; }
 .product-top { display: flex; min-width: 0; align-items: flex-start; gap: 11px; }
+.product-logo img { width: 100%; height: 100%; object-fit: contain; border-radius: inherit; }
 .product-logo {
   display: grid;
   width: 43px;

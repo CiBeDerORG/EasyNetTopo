@@ -117,13 +117,14 @@ func pinnedClient(agentID, pin string) (*http.Client, error) {
 }
 
 type Identity struct {
-	AgentID         string `json:"agent_id"`
-	SPKISHA256      string `json:"tls_spki_sha256"`
-	ProtocolVersion int    `json:"protocol_version"`
-	Hostname        string `json:"hostname"`
-	Platform        string `json:"platform"`
-	Arch            string `json:"arch"`
-	Version         string `json:"version"`
+	AppManifestVersions []int  `json:"app_manifest_versions"`
+	AgentID             string `json:"agent_id"`
+	SPKISHA256          string `json:"tls_spki_sha256"`
+	ProtocolVersion     int    `json:"protocol_version"`
+	Hostname            string `json:"hostname"`
+	Platform            string `json:"platform"`
+	Arch                string `json:"arch"`
+	Version             string `json:"version"`
 }
 type PairingResult struct {
 	AgentID      string `json:"agent_id"`

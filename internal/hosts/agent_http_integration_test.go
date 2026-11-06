@@ -114,6 +114,9 @@ func TestRealAgentHTTPInterop(t *testing.T) {
 	if _, err := svc.Pair(ctx, host.ID, agentID, pin, code); DiagnosePairing(err).Code != "pairing_window_closed" {
 		t.Fatalf("已使用配对码没有返回精确原因：%+v", DiagnosePairing(err))
 	}
+	if err := svc.RequireManifestVersion(ctx, host.ID, 2); err != nil {
+		t.Fatal("真实 Agent 未声明应用配置 v2 能力", err)
+	}
 	if _, err := svc.Query(ctx, host.ID, "host"); err != nil {
 		t.Fatal("HTTP 配对后的鉴权查询失败", err)
 	}

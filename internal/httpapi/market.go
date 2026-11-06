@@ -62,6 +62,23 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			http.Error(w, "来源版本已变化，请刷新应用商店并重新操作", 409)
 			return
 		}
+		if err = service.RequireManifestVersion(ctx, hostID, pkg.SchemaVersion); err != nil {
+			http.Error(w, "目标 Agent 尚不支持此应用配置版本，或身份校验失败，请更新 Agent 后重试", 422)
+			return
+		}
+		if name == "install" {
+			allowed := map[string]bool{}
+			for _, field := range pkg.Config {
+				key, _ := field["key"].(string)
+				allowed[key] = field["custom_input"] != false && field["editable"] != false
+			}
+			for key := range req.Config {
+				if !allowed[key] {
+					http.Error(w, "请求包含未声明、隐藏或只读的配置字段", 422)
+					return
+				}
+			}
+		}
 		if _, err = service.CacheBundle(ctx, hostID, pkg.SHA256, pkg.ZIP); err != nil {
 			http.Error(w, "安装包未送达，请检查主机配对和 Agent 版本", 502)
 			return

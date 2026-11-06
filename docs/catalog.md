@@ -1,6 +1,18 @@
-# M1-03 — Git 应用源与只读商店
+# Git 应用源与应用商店
 
-> 当前功能仅支持**只读应用目录预览**。尚未实现安装包发行、安全信任批准、EasyHostAgent 部署任务，不能因为商店有条目就启用安装。
+> 当前分支支持应用目录、固定版本候选包以及配对主机上的安装、更新、卸载。安装权限和 Agent 能力独立验证，目录存在不等于可执行授权。
+
+## 通用配置与图标 v2
+
+维护者直接编辑来源仓库的 `<应用>/app.yaml`、`config.yaml`、`secrets.yaml`、`assets/icon.svg`，不提供定义管理页面。安装页只渲染预定义表单：`custom_input:false` 隐藏，开启输入且 `editable:false` 时显示只读；默认可编辑。隐藏、只读和未声明字段在 HTTP 请求和 Agent 两端拒绝覆盖。
+
+- `GET /api/v1/catalog/apps/{source}/{app}/config` 返回固定 Commit 的归一化字段和 `revision`，不读取主机真实密钥。
+- 应用列表增加 `icon_url`，指向需要管理员会话的图标接口，URL 包含来源、应用和 Commit；图标通过固定 Git 对象读取并限制格式、大小与 SVG 内容，浏览器使用图片元素展示，失败时回退统一文字占位。
+- v2 配置定义和生成模板必须进入原有逐文件校验的安装包；脚本与表单版本一致。ZIP 格式仍为 v1。
+- 传包前要求目标 `/v1/identity` 的 `app_manifest_versions` 包含 2；旧 Agent 不会静默接收新配置契约。v1 来源仍按原规则读取。
+- 新字段和新应用无需修改前端或 Agent 的应用名分支。字段类型和默认值以仓库契约为准，`number` 使用整数语义。
+
+验证：`DEPLOY_CONTRACT_ROOT=<Deploy checkout> go test ./internal/catalog ./internal/hosts`；前端执行 `npm --prefix web test`、`npm --prefix web run build`。本地 Git 固定快照测试覆盖未提交修改不能改变安装包，真实设备安装须单独验收。
 
 ## 1. 实际入口
 
@@ -11,7 +23,7 @@ API：
 - `GET /api/v1/catalog/sources`：列出已登记来源；
 - `POST /api/v1/catalog/sources`：新增来源，JSON `{"name":"Deploy","url":"git@github.com:CiBeDerORG/deploy.git","branch":"main"}`；
 - `POST /api/v1/catalog/sources/{source_id}/refresh`：手动刷新指定来源并固定本次 Git Commit；
-- `GET /api/v1/catalog/apps`：列出成功快照中的应用，只读响应 `install_enabled=false`。
+- `GET /api/v1/catalog/apps`：列出成功快照中的应用及图标地址；安装能力由服务配置、主机状态及权限决定。
 
 上述接口全部要求管理员会话；写接口要求同源专用请求头及 Origin 检查。浏览器不保存 Git 令牌。
 
@@ -40,11 +52,11 @@ Git 同步失败仅记录安全的通用错误，并**保留上次成功的 SQLi
 - 查询完成后使用固定 Git Commit 保存此次只读快照，保留对应 Git Ref；不通过移动的 `main` 代表安装版本。
 - 应用唯一身份是 `source_id + app_id`。目录切换由 SQLite 单事务完成，展示的来源版本及应用记录必须一致。
 - 快照清单只包含展示字段、来源 Commit 和 Manifest SHA-256，不含真实用户部署密钥。
-- 通过初步 Manifest 校验后展示的应用**并不等同完整通过 Deploy Schema/语义校验**；本阶段的检查仅覆盖结构关键项、文件存在和安全路径，不支持发行包或信任判断。
+- 目录预览检查结构关键项、文件存在和安全路径；安装前另行执行完整的 Deploy Schema、配置定义和跨文件语义校验。通过校验不代表发布方身份认证。
 
 ## 4. 当前验收与限制
 
 - 可验证已登录操作、同源写请求、非法仓库 URL 拒绝、来源重复、静态 Manifest 约束、失败快照不覆盖旧数据。
 - CI 没有注入任何 GitHub SSH 私钥，因此不会从 CI 真实拉取私有 Deploy。实际私有源联调需在具有只读授权的运行主机进行。
-- 本阶段没有 Agent，不能执行 Docker、Shell 或完成 Sub2API 远程安装。
+- 安装、更新和卸载由配对 Agent 执行受控脚本；本地契约测试不代替目标主机的 Docker 生命周期验收。
 - 尚未实现来源删除、更改凭据、远程 HTTPS Token Vault；后续按实际用户需求单独评审。

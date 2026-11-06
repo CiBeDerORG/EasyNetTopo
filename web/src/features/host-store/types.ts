@@ -46,6 +46,7 @@ export type CatalogSource = {
   updated_at?: string
 }
 export type CatalogApp = {
+  icon_url?: string
   source_id: string
   app_id: string
   name: string
@@ -72,6 +73,8 @@ export type AgentUpdateAction = 'update' | 'force-update'
 export type AgentMaintenanceState = { state: 'waiting' | 'timeout'; action: AgentUpdateAction }
 export type AppAction = 'install' | 'update' | 'uninstall' | 'adopt' | 'force_update'
 export type ConfigField = {
+  custom_input?: boolean
+  pattern?: string
   key: string
   type: string
   label: string

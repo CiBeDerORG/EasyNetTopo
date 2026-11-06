@@ -16,6 +16,7 @@ var appID = regexp.MustCompile("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 var safeFile = regexp.MustCompile("^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
 type appManifest struct {
+	Icon     string `yaml:"icon"`
 	Version  int    `yaml:"schema_version"`
 	ID       string `yaml:"id"`
 	Name     string `yaml:"name"`
@@ -64,7 +65,7 @@ func previewManifest(id string, raw []byte, objects map[string]gitObject) (appMa
 	if err := decoder.Decode(&m); err != nil {
 		return m, "", err
 	}
-	if m.Version != 1 || m.ID != id || !appID.MatchString(id) || len(id) > 64 || m.Name == "" || len(m.Name) > 100 || m.Summary == "" || len(m.Summary) > 500 {
+	if (m.Version != 1 && m.Version != 2) || m.ID != id || !appID.MatchString(id) || len(id) > 64 || m.Name == "" || len(m.Name) > 100 || m.Summary == "" || len(m.Summary) > 500 {
 		return m, "", errors.New("Manifest 基本字段不满足 v1 约束")
 	}
 	if m.Runtime.Kind != "docker_compose" || m.Runtime.Project != id || !safePath(m.Runtime.File) || len(m.Package.Files) == 0 || len(m.Package.Files) > 128 || len(m.Verification.Services) == 0 || !m.Data.DefaultRetain {

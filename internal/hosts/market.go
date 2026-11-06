@@ -33,3 +33,31 @@ func (s *Service) AppAction(ctx context.Context, hostID, name string, body any) 
 	}
 	return client.request(ctx, http.MethodPost, "/v1/apps/"+name, body, s.db.ControllerID(), token)
 }
+
+// RequireManifestVersion 在传包之前检查目标能力，旧 Agent 不会误执行新配置契约。
+func (s *Service) RequireManifestVersion(ctx context.Context, hostID string, version int) error {
+	if version <= 1 {
+		return nil
+	}
+	h, err := s.hosts.Get(ctx, hostID)
+	if err != nil {
+		return err
+	}
+	client, err := NewClient(h.Endpoint, h.AgentID, h.SPKISHA256)
+	if err != nil {
+		return err
+	}
+	identity, err := client.Identity(ctx)
+	if err != nil {
+		return err
+	}
+	if identity.AgentID != h.AgentID || identity.SPKISHA256 != h.SPKISHA256 {
+		return errors.New("Agent 身份不匹配")
+	}
+	for _, supported := range identity.AppManifestVersions {
+		if supported == version {
+			return nil
+		}
+	}
+	return errors.New("目标 Agent 尚不支持此应用配置版本，请先更新 Agent")
+}

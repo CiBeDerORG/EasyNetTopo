@@ -46,7 +46,11 @@ func (s *Service) Sources(ctx context.Context) ([]storage.CatalogSource, error) 
 	return s.store.CatalogSources(ctx)
 }
 func (s *Service) Apps(ctx context.Context) ([]storage.CatalogApp, error) {
-	return s.store.CatalogApps(ctx)
+	apps, err := s.store.CatalogApps(ctx)
+	for i := range apps {
+		apps[i].IconURL = fmt.Sprintf("/api/v1/catalog/apps/%s/%s/icon?revision=%s", apps[i].SourceID, apps[i].AppID, apps[i].Revision)
+	}
+	return apps, err
 }
 
 // Delete 删除一个 Git 来源及其应用索引，不会向 Agent 发送卸载指令。
@@ -102,6 +106,11 @@ func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 		manifest, digest, err := previewManifest(parts[0], raw, repository.objects)
 		if err != nil {
 			continue
+		}
+		if manifest.Icon != "" {
+			if _, _, err := readIcon(ctx, repository, manifest.ID, manifest.Icon); err != nil {
+				continue
+			}
 		}
 		apps = append(apps, storage.CatalogApp{
 			SourceID: id, AppID: manifest.ID, Name: manifest.Name,

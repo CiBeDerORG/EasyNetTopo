@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { validateAppConfig } from '../validation'
+import { validateAppConfig, appConfigInput } from '../validation'
 import type { CatalogApp, ConfigField } from '../types'
 
 const props = defineProps<{
@@ -18,11 +18,11 @@ const emit = defineEmits<{
 
 const values = ref<Record<string, string>>({})
 const errors = ref<Record<string, string>>({})
-const editableFields = computed(() => props.fields.filter(field => field.editable !== false))
+const visibleFields = computed(() => props.fields.filter(field => field.custom_input !== false))
 
 function resetValues() {
   errors.value = {}
-  values.value = Object.fromEntries(editableFields.value.map(field => [
+  values.value = Object.fromEntries(visibleFields.value.map(field => [
     field.key,
     String(field.default ?? '')
   ]))
@@ -31,19 +31,19 @@ watch(() => props.modelValue, open => { if (open) resetValues() })
 watch(() => props.fields, () => { if (props.modelValue) resetValues() }, { deep: true })
 watch(values, () => {
   if (Object.keys(errors.value).length > 0) {
-    errors.value = validateAppConfig(editableFields.value, values.value)
+    errors.value = validateAppConfig(visibleFields.value, values.value)
   }
 }, { deep: true })
 
 function submit() {
   if (props.saving) return
-  errors.value = validateAppConfig(editableFields.value, values.value)
+  errors.value = validateAppConfig(visibleFields.value, values.value)
   const firstError = Object.values(errors.value)[0]
   if (firstError) {
     ElMessage.warning('请检查安装配置：' + firstError)
     return
   }
-  emit('submit', { revision: props.revision, config: { ...values.value } })
+  emit('submit', { revision: props.revision, config: appConfigInput(props.fields, values.value) })
 }
 </script>
 
@@ -52,9 +52,9 @@ function submit() {
     width="min(600px, calc(100vw - 28px))" append-to-body :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)">
     <p class="config-intro">以下参数由应用清单定义。密钥只会提交给 EasyNetTopo 服务端，并通过已配对 Agent 发送给目标主机。</p>
-    <el-form v-if="editableFields.length" label-position="top">
-      <el-form-item v-for="field in editableFields" :key="field.key" :label="field.label" :required="field.required" :error="errors[field.key]">
-        <el-select v-if="field.type === 'boolean'" v-model="values[field.key]" class="full-width">
+    <el-form v-if="visibleFields.length" label-position="top">
+      <el-form-item v-for="field in visibleFields" :key="field.key" :label="field.label" :required="field.required" :error="errors[field.key]">
+        <el-select v-if="field.type === 'boolean'" v-model="values[field.key]" :disabled="saving || field.editable === false" class="full-width">
           <el-option v-if="!field.required" label="未设置" value="" />
           <el-option label="是" value="true" />
           <el-option label="否" value="false" />
@@ -62,6 +62,7 @@ function submit() {
         <el-input
           v-else
           v-model="values[field.key]"
+          :disabled="saving || field.editable === false"
           :type="field.type === 'secret' ? 'password' : field.type === 'number' || field.type === 'port' ? 'number' : 'text'"
           :show-password="field.type === 'secret'"
           :autocomplete="field.type === 'secret' ? 'new-password' : 'off'"

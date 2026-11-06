@@ -51,11 +51,13 @@ type Resource struct {
 
 // Artifact 只供服务端内部流程使用，不得视为可执行授权。
 type Artifact struct {
-	Revision  string
-	Manifest  []byte
-	ZIP       []byte
-	SHA256    string
-	SizeBytes int64
+	Config        []map[string]any
+	SchemaVersion int
+	Revision      string
+	Manifest      []byte
+	ZIP           []byte
+	SHA256        string
+	SizeBytes     int64
 }
 
 type fileRecord struct {

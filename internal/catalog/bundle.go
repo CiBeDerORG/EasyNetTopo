@@ -98,8 +98,8 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 	if err != nil {
 		return packagebuilder.Artifact{}, errors.New("固定版本 Manifest 不可读取")
 	}
-	if err := ValidateManifestSchemaV1(manifestRaw); err != nil {
-		return packagebuilder.Artifact{}, fmt.Errorf("固定版本 Manifest 未通过完整 Deploy v1 JSON Schema 校验: %w", err)
+	if err := ValidateManifestSchema(manifestRaw); err != nil {
+		return packagebuilder.Artifact{}, fmt.Errorf("固定版本 Manifest 未通过 Deploy JSON Schema 校验: %w", err)
 	}
 	manifest, actualDigest, err := previewManifest(applicationID, manifestRaw, repository.objects)
 	if err != nil || actualDigest != digest {
@@ -115,19 +115,32 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 			Source: item.Source, Destination: item.Destination, Mode: item.Mode, Content: blob,
 		})
 	}
-	// 模板只用于固定快照语义核对，不进入候选 ZIP，也不读取真实运行态 .env/.secrets。
-	envExample, err := repository.contents(ctx, ".env.example")
+	expanded, fields, envExample, secretsExample, err := resolveConfiguration(manifestRaw, resources)
 	if err != nil {
-		return packagebuilder.Artifact{}, errors.New("固定 Git Commit 缺少共享环境变量模板")
+		return packagebuilder.Artifact{}, err
 	}
-	secretsExample, err := repository.contents(ctx, ".secrets.example")
-	if err != nil {
-		return packagebuilder.Artifact{}, errors.New("固定 Git Commit 缺少共享密钥模板")
+	if manifest.Version == 1 {
+		envExample, err = repository.contents(ctx, ".env.example")
+		if err != nil {
+			return packagebuilder.Artifact{}, errors.New("固定版本缺少普通配置模板")
+		}
+		secretsExample, err = repository.contents(ctx, ".secrets.example")
+		if err != nil {
+			return packagebuilder.Artifact{}, errors.New("固定版本缺少密钥模板")
+		}
 	}
-	if err := ValidateManifestSemanticsV1(manifestRaw, resources, envExample, secretsExample); err != nil {
-		return packagebuilder.Artifact{}, fmt.Errorf("Manifest 未通过 Deploy v1 跨文件语义校验: %w", err)
+	if manifest.Icon != "" {
+		if _, _, err := readIcon(ctx, repository, applicationID, manifest.Icon); err != nil {
+			return packagebuilder.Artifact{}, err
+		}
 	}
-	return packagebuilder.Build(packagebuilder.Identity{
+	if err := ValidateManifestSemanticsV1(expanded, resources, envExample, secretsExample); err != nil {
+		return packagebuilder.Artifact{}, fmt.Errorf("Manifest 未通过 Deploy 跨文件语义校验: %w", err)
+	}
+	artifact, err := packagebuilder.Build(packagebuilder.Identity{
 		SourceID: sourceID, ApplicationID: applicationID, GitRevision: appRevision, ManifestSHA256: digest,
 	}, manifestRaw, resources)
+	artifact.Config = fields
+	artifact.SchemaVersion = manifest.Version
+	return artifact, err
 }

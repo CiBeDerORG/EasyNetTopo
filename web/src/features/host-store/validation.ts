@@ -8,9 +8,9 @@ export function validateAppConfig(
   const errors: Record<string, string> = {}
 
   for (const field of fields) {
-    if (field.editable === false) continue
+    if (field.custom_input === false || field.editable === false) continue
     const raw = String(values[field.key] ?? '')
-    const value = raw.trim()
+    const value = raw
     const label = field.label || field.key
 
     if (!value) {
@@ -44,8 +44,8 @@ export function validateAppConfig(
 
     if (field.type === 'number') {
       // 拒绝 NaN、Infinity、十六进制和纯空格等 Number() 可接受的非普通数字格式。
-      if (!/^-?(?:\d+(?:\.\d*)?|\.\d+)$/.test(value) || !Number.isFinite(Number(value))) {
-        errors[field.key] = label + '必须填写有效数字'
+      if (!/^[+-]?\d+$/.test(value) || !Number.isSafeInteger(Number(value))) {
+        errors[field.key] = label + '必须填写有效整数'
         continue
       }
       const number = Number(value)
@@ -68,4 +68,10 @@ export function validateAppConfig(
   }
 
   return errors
+}
+
+// 只发送允许页面输入的字段；隐藏项与只读项由 Agent 按定义解析。
+export function appConfigInput(fields: ConfigField[], values: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(fields.filter(field => field.custom_input !== false && field.editable !== false)
+    .map(field => [field.key, String(values[field.key] ?? '')]))
 }
