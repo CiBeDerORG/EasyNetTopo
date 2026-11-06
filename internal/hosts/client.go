@@ -261,3 +261,35 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 	}
 	return nil, errors.New("未知 Agent 查询类型")
 }
+
+
+// DockerTaskRequest 使用 Agent 的持久任务契约，不接受脚本、路径或危险删除操作。
+type DockerTaskRequest struct {
+	TaskID     string `json:"task_id"`
+	Kind       string `json:"kind"`
+	Action     string `json:"action"`
+	ResourceID string `json:"resource_id"`
+}
+
+func (c *Client) StartDockerTask(ctx context.Context, controllerID, token string, task DockerTaskRequest) (json.RawMessage, error) {
+	if !uuidRE.MatchString(task.TaskID) || task.Kind != "docker_resource" ||
+		(task.Action != "start" && task.Action != "stop" && task.Action != "restart") ||
+		!dockerResourceRE.MatchString(task.ResourceID) {
+		return nil, errors.New("Docker 操作任务参数不合法")
+	}
+	return c.request(ctx, http.MethodPost, "/v1/tasks", task, controllerID, token)
+}
+
+func (c *Client) GetDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
+	if !uuidRE.MatchString(taskID) {
+		return nil, errors.New("Docker 任务 ID 不合法")
+	}
+	return c.request(ctx, http.MethodGet, "/v1/tasks/"+taskID, nil, controllerID, token)
+}
+
+func (c *Client) CancelDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
+	if !uuidRE.MatchString(taskID) {
+		return nil, errors.New("Docker 任务 ID 不合法")
+	}
+	return c.request(ctx, http.MethodPost, "/v1/tasks/"+taskID+"/cancel", nil, controllerID, token)
+}

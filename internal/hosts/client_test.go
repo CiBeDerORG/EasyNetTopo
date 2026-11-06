@@ -90,6 +90,34 @@ func mockAgent(t *testing.T) (endpoint, pin string, closeFn func()) {
 				return
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{"agent_id": mockAgentID, "resource_id": "compose:test", "text": "sample log"})
+		case "/v1/tasks":
+			if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Agent-ID") != mockAgentID || r.Header.Get("X-EHA-Controller-ID") == "" {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			if r.Method != http.MethodPost {
+				http.Error(w, "method", 405)
+				return
+			}
+			var request DockerTaskRequest
+			if err := json.NewDecoder(r.Body).Decode(&request); err != nil || request.Kind != "docker_resource" || request.Action != "stop" {
+				http.Error(w, "request", 400)
+				return
+			}
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(map[string]any{"agent_id": mockAgentID, "task_id": request.TaskID, "status": "accepted"})
+		case "/v1/tasks/11111111-1111-4111-8111-111111111111":
+			if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Agent-ID") != mockAgentID {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"agent_id": mockAgentID, "task_id": "11111111-1111-4111-8111-111111111111", "status": "succeeded"})
+		case "/v1/tasks/11111111-1111-4111-8111-111111111111/cancel":
+			if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Agent-ID") != mockAgentID || r.Method != http.MethodPost {
+				http.Error(w, "unauthorized", 401)
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"agent_id": mockAgentID, "task_id": "11111111-1111-4111-8111-111111111111", "status": "cancelled"})
 		case "/v1/docker/resources/compose:test/stats":
 			if r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Agent-ID") != mockAgentID {
 				http.Error(w, "unauthorized", 401)
@@ -170,6 +198,26 @@ func TestEndToEndPinnedPairAndPrivateToken(t *testing.T) {
 	}
 	if _, err := svc.QueryDockerResource(context.Background(), host.ID, "compose:test", "logs", 501); err == nil {
 		t.Fatal("日志查询允许超过 500 行")
+	}
+	taskID := "11111111-1111-4111-8111-111111111111"
+	task, err := svc.StartDockerTask(context.Background(), host.ID, DockerTaskRequest{
+		TaskID: taskID, Kind: "docker_resource", Action: "stop", ResourceID: "compose:test",
+	})
+	if err != nil || !strings.Contains(string(task), `"status":"accepted"`) {
+		t.Fatalf("Docker 任务创建代理失败：%s %v", task, err)
+	}
+	task, err = svc.GetDockerTask(context.Background(), host.ID, taskID)
+	if err != nil || !strings.Contains(string(task), `"status":"succeeded"`) {
+		t.Fatalf("Docker 任务查询代理失败：%s %v", task, err)
+	}
+	task, err = svc.CancelDockerTask(context.Background(), host.ID, taskID)
+	if err != nil || !strings.Contains(string(task), `"status":"cancelled"`) {
+		t.Fatalf("Docker 任务取消代理失败：%s %v", task, err)
+	}
+	if _, err := svc.StartDockerTask(context.Background(), host.ID, DockerTaskRequest{
+		TaskID: taskID, Kind: "docker_resource", Action: "delete", ResourceID: "compose:test",
+	}); err == nil {
+		t.Fatal("控制端不得提交危险删除操作")
 	}
 	if _, err := svc.Pair(context.Background(), host.ID, "22222222-2222-4222-8222-222222222222", pin, code); err == nil {
 		t.Fatal("允许已绑定主机更改 Agent ID")

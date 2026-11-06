@@ -100,11 +100,57 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
-		if (len(parts) != 2 && len(parts) != 5) || len(parts[0]) != 36 {
+		if len(parts) < 2 || len(parts) > 5 || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return
 		}
 		id, action := parts[0], parts[1]
+		if action == "tasks" {
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			var raw json.RawMessage
+			var err error
+			switch {
+			case len(parts) == 2 && r.Method == http.MethodPost:
+				if !mutation(w, r) {
+					return
+				}
+				var request hosts.DockerTaskRequest
+				if !decode(w, r, &request) {
+					return
+				}
+				raw, err = service.StartDockerTask(ctx, id, request)
+			case len(parts) == 3 && r.Method == http.MethodGet:
+				raw, err = service.GetDockerTask(ctx, id, parts[2])
+			case len(parts) == 4 && parts[3] == "cancel" && r.Method == http.MethodPost:
+				if !mutation(w, r) {
+					return
+				}
+				raw, err = service.CancelDockerTask(ctx, id, parts[2])
+			default:
+				http.NotFound(w, r)
+				return
+			}
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				http.Error(w, "Docker 任务操作失败，请查询已有任务状态，避免重复提交", 502)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			if len(parts) == 2 {
+				w.WriteHeader(http.StatusAccepted)
+			}
+			_, _ = w.Write(raw)
+			return
+		}
+		if len(parts) != 2 && len(parts) != 5 {
+			http.NotFound(w, r)
+			return
+		}
 		if len(parts) == 5 {
 			if action != "docker" || parts[2] != "resources" || (parts[4] != "logs" && parts[4] != "stats") {
 				http.NotFound(w, r)
