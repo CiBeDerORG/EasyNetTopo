@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CiBeDerORG/EasyHostAgent
-          ref: 674321680051815d8917391d1a1c3b7fe22a50e5
+          ref: 87d7f9e387435a7ba0301af4b4f1d9de2b270feb
           path: integration-agent
           persist-credentials: false
       - name: Install Go toolchain
