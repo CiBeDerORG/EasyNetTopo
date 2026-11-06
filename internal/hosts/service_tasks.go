@@ -56,4 +56,3 @@ func (s *Service) CancelDockerTask(ctx context.Context, hostID, taskID string) (
 		return c.CancelDockerTask(ctx, controllerID, token, taskID)
 	})
 }
-

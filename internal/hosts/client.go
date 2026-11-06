@@ -262,7 +262,6 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 	return nil, errors.New("未知 Agent 查询类型")
 }
 
-
 // DockerTaskRequest 使用 Agent 的持久任务契约，不接受脚本、路径或危险删除操作。
 type DockerTaskRequest struct {
 	TaskID     string `json:"task_id"`
