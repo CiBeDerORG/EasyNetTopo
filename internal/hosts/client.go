@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,35 @@ var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
+var dockerResourceRE = regexp.MustCompile(`^(compose|container):[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}package hosts
+
+import (
+	"bytes"
+	"context"
+	"crypto/sha256"
+	"crypto/subtle"
+	"crypto/tls"
+	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net"
+	"net/http"
+	"net/url"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+)
+
+var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$")
+var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
+var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
+)
 
 func ValidateEndpoint(value string) error {
 	if len(value) > 100 || strings.TrimSpace(value) != value {
@@ -206,6 +236,24 @@ func (c *Client) Host(ctx context.Context, controllerID, token string) (json.Raw
 }
 func (c *Client) Inventory(ctx context.Context, controllerID, token string) (json.RawMessage, error) {
 	return c.request(ctx, http.MethodGet, "/v1/docker/inventory", nil, controllerID, token)
+}
+
+// DockerResource 只读取已知类型的 Docker 资源，不接受斜杠或任意路径注入。
+func (c *Client) DockerResource(ctx context.Context, controllerID, token, resourceID, detail string, tail int) (json.RawMessage, error) {
+	if !dockerResourceRE.MatchString(resourceID) {
+		return nil, errors.New("Docker 资源标识不合法")
+	}
+	if detail != "stats" && detail != "logs" {
+		return nil, errors.New("Docker 资源查询类型不合法")
+	}
+	path := "/v1/docker/resources/" + url.PathEscape(resourceID) + "/" + detail
+	if detail == "logs" {
+		if tail < 1 || tail > 500 {
+			return nil, errors.New("Docker 日志行数必须在 1 至 500 之间")
+		}
+		path += "?tail=" + strconv.Itoa(tail)
+	}
+	return c.request(ctx, http.MethodGet, path, nil, controllerID, token)
 }
 
 // IdentityAndPair 在握手验证通过后仍检查 Agent 自报的 SPKI，与用户输入保持一致。

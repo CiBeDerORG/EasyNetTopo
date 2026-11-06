@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -99,11 +100,47 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
-		if len(parts) != 2 || len(parts[0]) != 36 {
+		if (len(parts) != 2 && len(parts) != 5) || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return
 		}
 		id, action := parts[0], parts[1]
+		if len(parts) == 5 {
+			if action != "docker" || parts[2] != "resources" || (parts[4] != "logs" && parts[4] != "stats") {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, "GET")
+				return
+			}
+			tail := 100
+			if parts[4] == "logs" {
+				if value := r.URL.Query().Get("tail"); value != "" {
+					number, parseErr := strconv.Atoi(value)
+					if parseErr != nil || number < 1 || number > 500 {
+						http.Error(w, "日志行数必须在 1 至 500 之间", 400)
+						return
+					}
+					tail = number
+				}
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.QueryDockerResource(ctx, id, parts[3], parts[4], tail)
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				http.Error(w, "Agent Docker 资源查询失败，不能据此推断容器已删除", 502)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(raw)
+			return
+		}
 		if action == "pair" {
 			if r.Method != http.MethodPost {
 				methodNotAllowed(w, "POST")

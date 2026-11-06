@@ -89,3 +89,36 @@ func (s *Service) Query(ctx context.Context, id, kind string) (json.RawMessage, 
 	}
 	return raw, nil
 }
+
+// QueryDockerResource 仅通过经过 SPKI 固定与配对令牌验证的 Agent 读取日志和资源统计。
+func (s *Service) QueryDockerResource(ctx context.Context, id, resourceID, detail string, tail int) (json.RawMessage, error) {
+	h, err := s.hosts.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if h.AgentID == "" {
+		return nil, errors.New("主机尚未配对")
+	}
+	token, err := s.hosts.Credentials(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	client, err := NewClient(h.Endpoint, h.AgentID, h.SPKISHA256)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := client.DockerResource(ctx, s.db.ControllerID(), token, resourceID, detail, tail)
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		AgentID string `json:"agent_id"`
+	}
+	if err := json.Unmarshal(raw, &envelope); err != nil {
+		return nil, err
+	}
+	if envelope.AgentID != h.AgentID {
+		return nil, errors.New("Agent 返回了不匹配的资源身份")
+	}
+	return raw, nil
+}
