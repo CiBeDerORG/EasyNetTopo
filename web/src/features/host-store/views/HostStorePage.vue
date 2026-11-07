@@ -317,8 +317,14 @@ async function refreshAll() {
   await Promise.allSettled(tasks)
 }
 
-function openEditor(host: Host) {
-  editorHost.value = host
+async function openEditor(host: Host) {
+  // 编辑前刷新主机记录，避免用过期缓存判断 Agent 地址是否已保存。
+  try {
+    await data.hostsQuery.refetch()
+  } catch {
+    // 刷新失败时仍可编辑当前记录；保存与配对仍由服务端校验。
+  }
+  editorHost.value = data.hosts.value.find(item => item.id === host.id) || host
   editorOpen.value = true
 }
 async function openDocker(host: Host) {
@@ -351,8 +357,12 @@ async function saveHost(payload: { name: string; endpoint: string }) {
   editorSaving.value = true
   try {
     const updated = await updateHost(host.id, payload)
+    // PATCH 响应是服务端已保存的权威记录，先立即同步编辑器，避免旧 endpoint
+    // 继续触发 endpointDirty 并阻止配对。
     editorHost.value = updated
     await queryClient.invalidateQueries({ queryKey: ['hosts'] })
+    await data.hostsQuery.refetch()
+    editorHost.value = data.hosts.value.find(item => item.id === host.id) || updated
     ElMessage.success('主机资料已保存，原有配对凭据保持不变。')
   } catch (error) {
     ElMessage.error('保存主机失败：' + errorMessage(error))
