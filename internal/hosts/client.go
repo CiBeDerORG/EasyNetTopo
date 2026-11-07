@@ -37,7 +37,7 @@ var (
 	ErrAgentUpdateBusy         = errors.New("Agent 正在处理其他应用操作")
 )
 
-// parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
+// validEndpointHostname accepts ordinary DNS labels, including host.docker.internal.
 func validEndpointHostname(host string) bool {
 	if len(host) == 0 || len(host) > 253 || strings.Contains(host, "%") {
 		return false
@@ -349,9 +349,9 @@ func (c *Client) DockerResource(ctx context.Context, controllerID, token, resour
 // DockerTaskRequest follows the Agent persistent task contract. It does not
 // accept scripts, arbitrary paths, or destructive resource deletion.
 type DockerTaskRequest struct {
-	TaskID string `json:"task_id"`
-	Kind string `json:"kind"`
-	Action string `json:"action"`
+	TaskID     string `json:"task_id"`
+	Kind       string `json:"kind"`
+	Action     string `json:"action"`
 	ResourceID string `json:"resource_id"`
 }
 

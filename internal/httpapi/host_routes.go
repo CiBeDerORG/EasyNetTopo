@@ -216,35 +216,50 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			var err error
 			switch {
 			case len(parts) == 2 && r.Method == http.MethodPost:
-				if !mutation(w, r) { return }
+				if !mutation(w, r) {
+					return
+				}
 				var request hosts.DockerTaskRequest
-				if !decode(w, r, &request) { return }
+				if !decode(w, r, &request) {
+					return
+				}
 				raw, err = service.StartDockerTask(ctx, parts[0], request)
 			case len(parts) == 3 && r.Method == http.MethodGet:
 				raw, err = service.GetDockerTask(ctx, parts[0], parts[2])
 			case len(parts) == 4 && parts[3] == "cancel" && r.Method == http.MethodPost:
-				if !mutation(w, r) { return }
+				if !mutation(w, r) {
+					return
+				}
 				raw, err = service.CancelDockerTask(ctx, parts[0], parts[2])
 			default:
 				http.NotFound(w, r)
 				return
 			}
-			if errors.Is(err, storage.ErrHostNotFound) { http.NotFound(w, r); return }
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
 			if err != nil {
 				http.Error(w, "Docker 任务操作失败，请查询已有任务状态，避免重复提交", http.StatusBadGateway)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json; charset=utf-8")
 			w.Header().Set("Cache-Control", "no-store")
-			if len(parts) == 2 { w.WriteHeader(http.StatusAccepted) }
+			if len(parts) == 2 {
+				w.WriteHeader(http.StatusAccepted)
+			}
 			_, _ = w.Write(raw)
 			return
 		}
 		if len(parts) == 5 && len(parts[0]) == 36 && parts[1] == "docker" {
 			if parts[2] != "resources" || (parts[4] != "logs" && parts[4] != "stats") {
-				http.NotFound(w, r); return
+				http.NotFound(w, r)
+				return
 			}
-			if r.Method != http.MethodGet { methodNotAllowed(w, "GET"); return }
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, "GET")
+				return
+			}
 			tail := 100
 			if parts[4] == "logs" {
 				if value := r.URL.Query().Get("tail"); value != "" {
@@ -259,7 +274,10 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
 			defer cancel()
 			raw, err := service.QueryDockerResource(ctx, parts[0], parts[3], parts[4], tail)
-			if errors.Is(err, storage.ErrHostNotFound) { http.NotFound(w, r); return }
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
 			if err != nil {
 				http.Error(w, "Agent Docker 资源查询失败，不能据此推断容器已删除", http.StatusBadGateway)
 				return
@@ -269,6 +287,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			_, _ = w.Write(raw)
 			return
 		}
+
 		if len(parts) != 2 || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return
