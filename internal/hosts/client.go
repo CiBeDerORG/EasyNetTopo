@@ -27,7 +27,6 @@ var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
-var dockerResourceRE = regexp.MustCompile(`^(compose|container):[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 // Agent 自更新错误使用固定的协议状态，不向 UI 透传远端任意错误正文。
 var (
@@ -37,7 +36,7 @@ var (
 	ErrAgentUpdateBusy         = errors.New("Agent 正在处理其他应用操作")
 )
 
-// validEndpointHostname accepts ordinary DNS labels, including host.docker.internal.
+// parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
 func validEndpointHostname(host string) bool {
 	if len(host) == 0 || len(host) > 253 || strings.Contains(host, "%") {
 		return false
@@ -326,56 +325,6 @@ func (c *Client) Host(ctx context.Context, controllerID, token string) (json.Raw
 }
 func (c *Client) Inventory(ctx context.Context, controllerID, token string) (json.RawMessage, error) {
 	return c.request(ctx, http.MethodGet, "/v1/docker/inventory", nil, controllerID, token)
-}
-
-// DockerResource reads logs or live statistics for a validated Docker resource ID.
-func (c *Client) DockerResource(ctx context.Context, controllerID, token, resourceID, detail string, tail int) (json.RawMessage, error) {
-	if !dockerResourceRE.MatchString(resourceID) {
-		return nil, errors.New("Docker 资源标识不合法")
-	}
-	if detail != "stats" && detail != "logs" {
-		return nil, errors.New("Docker 资源查询类型不合法")
-	}
-	path := "/v1/docker/resources/" + url.PathEscape(resourceID) + "/" + detail
-	if detail == "logs" {
-		if tail < 1 || tail > 500 {
-			return nil, errors.New("日志行数必须在 1 至 500 之间")
-		}
-		path += "?tail=" + strconv.Itoa(tail)
-	}
-	return c.request(ctx, http.MethodGet, path, nil, controllerID, token)
-}
-
-// DockerTaskRequest follows the Agent persistent task contract. It does not
-// accept scripts, arbitrary paths, or destructive resource deletion.
-type DockerTaskRequest struct {
-	TaskID     string `json:"task_id"`
-	Kind       string `json:"kind"`
-	Action     string `json:"action"`
-	ResourceID string `json:"resource_id"`
-}
-
-func (c *Client) StartDockerTask(ctx context.Context, controllerID, token string, task DockerTaskRequest) (json.RawMessage, error) {
-	if !uuidRE.MatchString(task.TaskID) || task.Kind != "docker_resource" ||
-		(task.Action != "start" && task.Action != "stop" && task.Action != "restart") ||
-		!dockerResourceRE.MatchString(task.ResourceID) {
-		return nil, errors.New("Docker 操作任务参数不合法")
-	}
-	return c.request(ctx, http.MethodPost, "/v1/tasks", task, controllerID, token)
-}
-
-func (c *Client) GetDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
-	if !uuidRE.MatchString(taskID) {
-		return nil, errors.New("Docker 任务 ID 不合法")
-	}
-	return c.request(ctx, http.MethodGet, "/v1/tasks/"+taskID, nil, controllerID, token)
-}
-
-func (c *Client) CancelDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
-	if !uuidRE.MatchString(taskID) {
-		return nil, errors.New("Docker 任务 ID 不合法")
-	}
-	return c.request(ctx, http.MethodPost, "/v1/tasks/"+taskID+"/cancel", nil, controllerID, token)
 }
 
 // IdentityAndPair 在握手验证通过后仍检查 Agent 自报的 SPKI，与用户输入保持一致。

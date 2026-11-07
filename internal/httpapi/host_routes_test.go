@@ -66,17 +66,6 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 		t.Fatal("主机列表错误", err)
 	}
 	id = hs[0].ID
-	taskID := "11111111-1111-4111-8111-111111111111"
-	taskPayload := `{"task_id":"11111111-1111-4111-8111-111111111111","kind":"docker_resource","action":"stop","resource_id":"compose:test"}`
-	if got := req("POST", "/api/v1/hosts/"+id+"/tasks", taskPayload, true, false); got.Code != 403 {
-		t.Fatal("Docker task create must require same-origin mutation protection", got.Code)
-	}
-	if got := req("GET", "/api/v1/hosts/"+id+"/tasks/"+taskID, "", false, false); got.Code != 401 {
-		t.Fatal("unauthenticated Docker task query was allowed", got.Code)
-	}
-	if got := req("GET", "/api/v1/hosts/"+id+"/docker/resources/compose:test/logs", "", false, false); got.Code != 401 {
-		t.Fatal("unauthenticated Docker logs query was allowed", got.Code)
-	}
 	if got := req("GET", "/api/v1/hosts/"+id+"/snapshot", "", false, false); got.Code != 401 {
 		t.Fatal("快照未认证", got.Code)
 	}

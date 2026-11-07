@@ -49,6 +49,7 @@ func (s *Service) Register(ctx context.Context, name, endpoint string) (storage.
 	return s.hosts.Create(ctx, name, endpoint)
 }
 
+
 // Update only edits local display name and endpoint; credentials remain byte-for-byte unchanged.
 // A change of Agent identity must use an explicit pairing operation.
 func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storage.Host, error) {
@@ -61,6 +62,7 @@ func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storag
 	defer s.pairingMu.Unlock()
 	return s.hosts.UpdateMetadata(ctx, id, name, endpoint)
 }
+
 
 // Delete only removes a local registration; it does not remove Docker resources
 // or revoke Agent grants remotely. Never turn this into a cascade deletion.

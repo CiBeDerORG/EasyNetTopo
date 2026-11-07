@@ -35,45 +35,6 @@ export type DockerInventory = {
   complete: boolean
   resources: DockerResource[]
   error?: string
-  actions_supported?: boolean
-}
-export type DockerContainerStats = {
-  container_id: string
-  state: string
-  available: boolean
-  cpu_percent: number
-  memory_bytes: number
-  memory_limit_bytes: number
-}
-export type DockerResourceStats = {
-  agent_id: string
-  resource_id: string
-  observed_at: string
-  complete: boolean
-  containers: DockerContainerStats[]
-}
-export type DockerResourceLogs = {
-  agent_id: string
-  resource_id: string
-  text: string
-  truncated: boolean
-}
-export type DockerTask = {
-  agent_id: string
-  task_id: string
-  resource_id: string
-  action: string
-  kind: string
-  status: string
-  created_at: string
-  error?: string
-  result?: { verified: boolean; final_status?: string }
-}
-export type DockerTaskRequest = {
-  task_id: string
-  kind: 'docker_resource'
-  action: 'start' | 'stop' | 'restart'
-  resource_id: string
 }
 export type CatalogSource = {
   id: string
