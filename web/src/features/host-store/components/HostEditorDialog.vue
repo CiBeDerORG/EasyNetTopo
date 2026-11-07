@@ -60,8 +60,8 @@ function pair() {
         <el-form-item label="主机名称" required>
           <el-input v-model="form.name" maxlength="100" :disabled="saving || pairing" />
         </el-form-item>
-        <el-form-item label="Agent 地址（IP:端口或完整 URL）" required>
-          <el-input v-model="form.endpoint" maxlength="200" :disabled="saving || pairing" />
+        <el-form-item label="Agent 地址（主机名/IP:端口或完整 URL）" required>
+          <el-input v-model="form.endpoint" maxlength="255" :disabled="saving || pairing" />
         </el-form-item>
         <el-alert title="保存主机资料只修改名称和连接地址。现有 Agent ID、TLS 指纹、Token 与配对时间保持不变；只有主动执行重新配对才会更新授权。" type="info" :closable="false" />
         <el-alert v-if="endpointDirty" class="endpoint-warning" title="Agent 地址已修改但尚未保存。请先保存修改，待主机地址更新后再配对，避免请求发送到旧地址。" type="warning" :closable="false" show-icon />

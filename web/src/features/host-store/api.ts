@@ -1,5 +1,9 @@
 import { apiRequest } from '../../lib/api-client'
-import type { AppAction, AppActionResponse, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot } from './types'
+import type {
+  AppAction, AppActionResponse, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp,
+  CatalogSource, ControllerInfo, DockerInventory, DockerResourceLogs, DockerResourceStats,
+  DockerTask, DockerTaskRequest, Host, HostSnapshot
+} from './types'
 
 export function getAuthStatus() {
   return apiRequest<AuthStatus>('/api/v1/auth/status')
@@ -40,6 +44,34 @@ export function getHostSnapshot(id: string) {
 }
 export function getDockerInventory(id: string) {
   return apiRequest<DockerInventory>('/api/v1/hosts/' + encodeURIComponent(id) + '/docker')
+}
+export function getDockerResource(
+  hostId: string,
+  resourceId: string,
+  detail: 'logs' | 'stats',
+  tail = 100
+) {
+  const path = '/api/v1/hosts/' + encodeURIComponent(hostId) + '/docker/resources/' +
+    encodeURIComponent(resourceId) + '/' + detail
+  return apiRequest<DockerResourceLogs | DockerResourceStats>(
+    detail === 'logs' ? path + '?tail=' + tail : path
+  )
+}
+export function startDockerTask(hostId: string, payload: DockerTaskRequest) {
+  return apiRequest<DockerTask>('/api/v1/hosts/' + encodeURIComponent(hostId) + '/tasks', {
+    method: 'POST', body: payload
+  })
+}
+export function getDockerTask(hostId: string, taskId: string) {
+  return apiRequest<DockerTask>(
+    '/api/v1/hosts/' + encodeURIComponent(hostId) + '/tasks/' + encodeURIComponent(taskId)
+  )
+}
+export function cancelDockerTask(hostId: string, taskId: string) {
+  return apiRequest<DockerTask>(
+    '/api/v1/hosts/' + encodeURIComponent(hostId) + '/tasks/' + encodeURIComponent(taskId) + '/cancel',
+    { method: 'POST' }
+  )
 }
 export async function getSources() {
   const result = await apiRequest<{ sources: CatalogSource[] }>('/api/v1/catalog/sources')

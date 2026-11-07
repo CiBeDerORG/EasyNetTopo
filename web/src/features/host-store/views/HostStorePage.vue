@@ -720,6 +720,7 @@ async function logout() {
       :inventory="dockerInventory"
       :loading="dockerLoading"
       :error="dockerError"
+      @refresh="data.dockerQuery.refetch()"
     />
     <AppConfigDialog
       v-model="configDialogOpen"

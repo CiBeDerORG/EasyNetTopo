@@ -149,12 +149,22 @@ func TestEndToEndPinnedPairAndPrivateToken(t *testing.T) {
 }
 
 func TestEndpointAndFingerprintValidation(t *testing.T) {
-	for _, addr := range []string{"192.168.1.3:7014", "127.0.0.1:7014", "[::1]:7014", "http://127.0.0.1:7014", "https://192.168.1.3:7014"} {
+	for _, addr := range []string{
+		"192.168.1.3:7014", "127.0.0.1:7014", "[::1]:7014",
+		"http://127.0.0.1:7014", "https://192.168.1.3:7014",
+		"localhost:7014", "host.docker.internal:7018",
+		"http://host.docker.internal:7018", "https://agent.example.com:7018",
+	} {
 		if err := ValidateEndpoint(addr); err != nil {
 			t.Fatal("合法地址错误", addr, err)
 		}
 	}
-	for _, addr := range []string{"169.254.169.254:80", "0.0.0.0:7014", "localhost:7014", "ftp://127.0.0.1:7014", "http://127.0.0.1:7014/path", "http://user@127.0.0.1:7014", "127.0.0.1:0", "[ff02::1]:7014"} {
+	for _, addr := range []string{
+		"169.254.169.254:80", "0.0.0.0:7014", "ftp://127.0.0.1:7014",
+		"http://127.0.0.1:7014/path", "http://user@127.0.0.1:7014",
+		"http://host.docker.internal:7018/path", "http://host.docker.internal:bad",
+		"bad_host:7014", "999.999.999.999:7014", "127.0.0.1:0", "[ff02::1]:7014",
+	} {
 		if ValidateEndpoint(addr) == nil {
 			t.Error("不合法地址被接受", addr)
 		}

@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -88,7 +89,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			}
 			h, err := service.Register(r.Context(), v.Name, v.Endpoint)
 			if err != nil {
-				http.Error(w, "主机名称或 IP:port 不合法", 400)
+				http.Error(w, "主机名称或连接地址不合法", 400)
 				return
 			}
 			jsonReply(w, 201, h)
@@ -124,7 +125,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				}
 				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
 					jsonReply(w, http.StatusBadRequest, map[string]string{
-						"code": "invalid_host_metadata", "message": "主机名称或连接地址不合法，请检查名称、IP 和端口",
+						"code": "invalid_host_metadata", "message": "主机名称或连接地址不能为空或过长",
 					})
 					return
 				}
@@ -206,6 +207,66 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			if mutation(w, r) {
 				appAction(w, r, parts[0], parts[2], service, catalogSvc)
 			}
+			return
+		}
+		if len(parts) >= 2 && len(parts[0]) == 36 && parts[1] == "tasks" {
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			var raw json.RawMessage
+			var err error
+			switch {
+			case len(parts) == 2 && r.Method == http.MethodPost:
+				if !mutation(w, r) { return }
+				var request hosts.DockerTaskRequest
+				if !decode(w, r, &request) { return }
+				raw, err = service.StartDockerTask(ctx, parts[0], request)
+			case len(parts) == 3 && r.Method == http.MethodGet:
+				raw, err = service.GetDockerTask(ctx, parts[0], parts[2])
+			case len(parts) == 4 && parts[3] == "cancel" && r.Method == http.MethodPost:
+				if !mutation(w, r) { return }
+				raw, err = service.CancelDockerTask(ctx, parts[0], parts[2])
+			default:
+				http.NotFound(w, r)
+				return
+			}
+			if errors.Is(err, storage.ErrHostNotFound) { http.NotFound(w, r); return }
+			if err != nil {
+				http.Error(w, "Docker 任务操作失败，请查询已有任务状态，避免重复提交", http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			if len(parts) == 2 { w.WriteHeader(http.StatusAccepted) }
+			_, _ = w.Write(raw)
+			return
+		}
+		if len(parts) == 5 && len(parts[0]) == 36 && parts[1] == "docker" {
+			if parts[2] != "resources" || (parts[4] != "logs" && parts[4] != "stats") {
+				http.NotFound(w, r); return
+			}
+			if r.Method != http.MethodGet { methodNotAllowed(w, "GET"); return }
+			tail := 100
+			if parts[4] == "logs" {
+				if value := r.URL.Query().Get("tail"); value != "" {
+					number, parseErr := strconv.Atoi(value)
+					if parseErr != nil || number < 1 || number > 500 {
+						http.Error(w, "日志行数必须在 1 至 500 之间", http.StatusBadRequest)
+						return
+					}
+					tail = number
+				}
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.QueryDockerResource(ctx, parts[0], parts[3], parts[4], tail)
+			if errors.Is(err, storage.ErrHostNotFound) { http.NotFound(w, r); return }
+			if err != nil {
+				http.Error(w, "Agent Docker 资源查询失败，不能据此推断容器已删除", http.StatusBadGateway)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json; charset=utf-8")
+			w.Header().Set("Cache-Control", "no-store")
+			_, _ = w.Write(raw)
 			return
 		}
 		if len(parts) != 2 || len(parts[0]) != 36 {

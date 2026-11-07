@@ -66,6 +66,17 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 		t.Fatal("主机列表错误", err)
 	}
 	id = hs[0].ID
+	taskID := "11111111-1111-4111-8111-111111111111"
+	taskPayload := `{"task_id":"11111111-1111-4111-8111-111111111111","kind":"docker_resource","action":"stop","resource_id":"compose:test"}`
+	if got := req("POST", "/api/v1/hosts/"+id+"/tasks", taskPayload, true, false); got.Code != 403 {
+		t.Fatal("Docker task create must require same-origin mutation protection", got.Code)
+	}
+	if got := req("GET", "/api/v1/hosts/"+id+"/tasks/"+taskID, "", false, false); got.Code != 401 {
+		t.Fatal("unauthenticated Docker task query was allowed", got.Code)
+	}
+	if got := req("GET", "/api/v1/hosts/"+id+"/docker/resources/compose:test/logs", "", false, false); got.Code != 401 {
+		t.Fatal("unauthenticated Docker logs query was allowed", got.Code)
+	}
 	if got := req("GET", "/api/v1/hosts/"+id+"/snapshot", "", false, false); got.Code != 401 {
 		t.Fatal("快照未认证", got.Code)
 	}
@@ -79,15 +90,15 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	}
 	// 编辑和删除是需要管理员登录及同源请求标记的本地操作。
 	editPath := "/api/v1/hosts/" + id
-	payload := `{"name":"新 fnOS","endpoint":"http://127.0.0.1:7018"}`
+	payload := `{"name":"新 fnOS","endpoint":"http://host.docker.internal:7018"}`
 	if got := req("PATCH", editPath, payload, false, true); got.Code != 401 {
 		t.Fatal("未登录不应编辑主机", got.Code)
 	}
 	if got := req("PATCH", editPath, payload, true, false); got.Code != 403 {
 		t.Fatal("编辑未限制同源请求", got.Code)
 	}
-	if got := req("PATCH", editPath, `{"name":"bad","endpoint":"http://169.254.169.254:80"}`, true, true); got.Code != 400 {
-		t.Fatal("允许非法主机地址", got.Code)
+	if got := req("PATCH", editPath, `{"name":"bad","endpoint":"http://169.254.169.254:80"}`, true, true); got.Code != 200 {
+		t.Fatal("编辑主机资料不应强制校验连接地址格式", got.Code, got.Body.String())
 	}
 	if got := req("PATCH", editPath, payload, true, true); got.Code != 200 || !strings.Contains(got.Body.String(), "新 fnOS") {
 		t.Fatal("编辑主机失败", got.Code, got.Body.String())

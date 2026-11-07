@@ -14,6 +14,7 @@ import (
 	"io"
 	"net"
 	"net/http"
+	"net/url"
 	"regexp"
 	"strconv"
 	"strings"
@@ -26,6 +27,7 @@ var uuidRE = regexp.MustCompile("^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4
 var hashRE = regexp.MustCompile("^[0-9a-f]{64}$")
 var codeRE = regexp.MustCompile("^[0-9a-f]{32}$")
 var tokenRE = regexp.MustCompile("^[0-9a-f]{64}$")
+var dockerResourceRE = regexp.MustCompile(`^(compose|container):[a-zA-Z0-9][a-zA-Z0-9_.-]{0,127}$`)
 
 // Agent 自更新错误使用固定的协议状态，不向 UI 透传远端任意错误正文。
 var (
@@ -36,34 +38,80 @@ var (
 )
 
 // parseEndpoint 兼容原 IP:port（默认 HTTPS）以及显式 HTTP/HTTPS 协议。
+func validEndpointHostname(host string) bool {
+	if len(host) == 0 || len(host) > 253 || strings.Contains(host, "%") {
+		return false
+	}
+	allNumeric := true
+	for _, label := range strings.Split(host, ".") {
+		if len(label) == 0 || len(label) > 63 || label[0] == '-' || label[len(label)-1] == '-' {
+			return false
+		}
+		for _, r := range label {
+			if (r < 'a' || r > 'z') && (r < 'A' || r > 'Z') &&
+				(r < '0' || r > '9') && r != '-' {
+				return false
+			}
+			if r < '0' || r > '9' {
+				allNumeric = false
+			}
+		}
+	}
+	return !allNumeric
+}
+
+// parseEndpoint accepts IP:port or DNS hostname:port. Missing schemes retain
+// the legacy HTTPS default; explicit HTTP remains available for trusted LANs.
 func parseEndpoint(value string) (string, error) {
-	if len(value) > 110 || strings.TrimSpace(value) != value {
-		return "", errors.New("主机地址必须为 IP:port 或 http(s)://IP:port")
+	if len(value) > 255 || strings.TrimSpace(value) != value ||
+		strings.ContainsAny(value, "\r\n\t\x00") {
+		return "", errors.New("主机地址必须为 IP:port、主机名:port 或 http(s)://主机:port")
 	}
-	scheme, addr := "https", value
-	switch {
-	case strings.HasPrefix(value, "http://"):
-		scheme, addr = "http", strings.TrimPrefix(value, "http://")
-	case strings.HasPrefix(value, "https://"):
-		addr = strings.TrimPrefix(value, "https://")
-	case strings.Contains(value, "://"):
-		return "", errors.New("只允许 HTTP 或 HTTPS")
+	scheme, address := "https", value
+	if strings.Contains(value, "://") {
+		parsed, err := url.Parse(value)
+		if err != nil {
+			return "", errors.New("主机地址 URL 格式不合法")
+		}
+		scheme = strings.ToLower(parsed.Scheme)
+		if scheme != "http" && scheme != "https" {
+			return "", errors.New("只允许 HTTP 或 HTTPS")
+		}
+		if parsed.Host == "" || parsed.User != nil || parsed.Opaque != "" ||
+			(parsed.Path != "" && parsed.Path != "/") ||
+			parsed.RawQuery != "" || parsed.Fragment != "" {
+			return "", errors.New("Agent 地址不能包含账号、路径、查询参数或片段")
+		}
+		address = parsed.Host
 	}
-	host, port, err := net.SplitHostPort(addr)
+	host, port, err := net.SplitHostPort(address)
 	if err != nil {
-		return "", errors.New("主机地址必须使用 IP:port")
+		return "", errors.New("Agent 地址必须包含主机名或 IP 及端口")
 	}
-	ip := net.ParseIP(host)
-	if ip == nil || ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
-		return "", errors.New("仅允许直接可达的合法 IPv4/IPv6，禁止主机名及链路本地地址")
+	if strings.Contains(host, "%") {
+		return "", errors.New("不支持带区域标识的主机地址")
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		if ip.IsUnspecified() || ip.IsMulticast() || ip.IsLinkLocalUnicast() || ip.IsLinkLocalMulticast() {
+			return "", errors.New("不允许未指定、多播或链路本地 IP 地址")
+		}
+	} else if !validEndpointHostname(host) {
+		return "", errors.New("主机名格式不合法")
+	}
+	if port == "" || len(port) > 5 {
+		return "", errors.New("端口不合法")
+	}
+	for _, r := range port {
+		if r < '0' || r > '9' {
+			return "", errors.New("端口必须为数字")
+		}
 	}
 	n, err := strconv.Atoi(port)
 	if err != nil || n < 1 || n > 65535 {
-		return "", errors.New("端口不合法")
+		return "", errors.New("端口必须在 1 至 65535 之间")
 	}
-	return scheme + "://" + addr, nil
+	return scheme + "://" + net.JoinHostPort(host, port), nil
 }
-
 func ValidateEndpoint(value string) error {
 	_, err := parseEndpoint(value)
 	return err
@@ -278,6 +326,56 @@ func (c *Client) Host(ctx context.Context, controllerID, token string) (json.Raw
 }
 func (c *Client) Inventory(ctx context.Context, controllerID, token string) (json.RawMessage, error) {
 	return c.request(ctx, http.MethodGet, "/v1/docker/inventory", nil, controllerID, token)
+}
+
+// DockerResource reads logs or live statistics for a validated Docker resource ID.
+func (c *Client) DockerResource(ctx context.Context, controllerID, token, resourceID, detail string, tail int) (json.RawMessage, error) {
+	if !dockerResourceRE.MatchString(resourceID) {
+		return nil, errors.New("Docker 资源标识不合法")
+	}
+	if detail != "stats" && detail != "logs" {
+		return nil, errors.New("Docker 资源查询类型不合法")
+	}
+	path := "/v1/docker/resources/" + url.PathEscape(resourceID) + "/" + detail
+	if detail == "logs" {
+		if tail < 1 || tail > 500 {
+			return nil, errors.New("日志行数必须在 1 至 500 之间")
+		}
+		path += "?tail=" + strconv.Itoa(tail)
+	}
+	return c.request(ctx, http.MethodGet, path, nil, controllerID, token)
+}
+
+// DockerTaskRequest follows the Agent persistent task contract. It does not
+// accept scripts, arbitrary paths, or destructive resource deletion.
+type DockerTaskRequest struct {
+	TaskID string `json:"task_id"`
+	Kind string `json:"kind"`
+	Action string `json:"action"`
+	ResourceID string `json:"resource_id"`
+}
+
+func (c *Client) StartDockerTask(ctx context.Context, controllerID, token string, task DockerTaskRequest) (json.RawMessage, error) {
+	if !uuidRE.MatchString(task.TaskID) || task.Kind != "docker_resource" ||
+		(task.Action != "start" && task.Action != "stop" && task.Action != "restart") ||
+		!dockerResourceRE.MatchString(task.ResourceID) {
+		return nil, errors.New("Docker 操作任务参数不合法")
+	}
+	return c.request(ctx, http.MethodPost, "/v1/tasks", task, controllerID, token)
+}
+
+func (c *Client) GetDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
+	if !uuidRE.MatchString(taskID) {
+		return nil, errors.New("Docker 任务 ID 不合法")
+	}
+	return c.request(ctx, http.MethodGet, "/v1/tasks/"+taskID, nil, controllerID, token)
+}
+
+func (c *Client) CancelDockerTask(ctx context.Context, controllerID, token, taskID string) (json.RawMessage, error) {
+	if !uuidRE.MatchString(taskID) {
+		return nil, errors.New("Docker 任务 ID 不合法")
+	}
+	return c.request(ctx, http.MethodPost, "/v1/tasks/"+taskID+"/cancel", nil, controllerID, token)
 }
 
 // IdentityAndPair 在握手验证通过后仍检查 Agent 自报的 SPKI，与用户输入保持一致。
