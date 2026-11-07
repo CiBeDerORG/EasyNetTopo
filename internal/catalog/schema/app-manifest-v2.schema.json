@@ -44,6 +44,11 @@
       "minLength": 1,
       "maxLength": 500
     },
+    "enabled": {
+      "type": "boolean",
+      "default": true,
+      "description": "为 false 时不发布到应用市场，缺省视为启用。"
+    },
     "category": {
       "type": "string",
       "enum": [
