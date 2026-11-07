@@ -159,6 +159,8 @@ func resolveConfiguration(raw []byte, resources []packagebuilder.Resource) ([]by
 	data["schema_version"] = 1
 	delete(data, "configuration")
 	delete(data, "icon")
+	// enabled 仅用于商店发布；标准化为 v1 语义输入时移除展示字段。
+	delete(data, "enabled")
 	expanded, err := yaml.Marshal(data)
 	if err != nil {
 		return nil, nil, nil, nil, err
