@@ -21,12 +21,29 @@ export type HostSnapshot = {
   observed_at: string
   docker?: { available?: boolean; status?: string }
 }
+export type DockerPort = {
+  protocol: 'tcp' | 'udp' | string
+  host_ip?: string
+  host_port: number
+  container_port: number
+  is_web?: boolean
+}
+export type DockerContainer = {
+  container_id: string
+  name: string
+  image?: string
+  state: string
+  ports?: DockerPort[]
+}
 export type DockerResource = {
   resource_id: string
   name: string
   state: string
   kind: string
   managed: boolean
+  compose_project?: string
+  ports?: DockerPort[]
+  containers?: DockerContainer[]
 }
 export type DockerInventory = {
   agent_id: string
