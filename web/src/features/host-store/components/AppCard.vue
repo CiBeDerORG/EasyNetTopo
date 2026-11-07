@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
-import type { AppAction, AppPermissions, AppStatus, CatalogApp } from '../types'
+import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort } from '../types'
 
 const props = defineProps<{
   app: CatalogApp
@@ -9,6 +9,7 @@ const props = defineProps<{
   sourceName: string
   permissions: AppPermissions
   busy: boolean
+  ports?: DockerPort[]
 }>()
 
 defineEmits<{
@@ -20,7 +21,9 @@ defineEmits<{
 const logoText = computed(() => props.app.name.slice(0, 2).toUpperCase())
 const iconFailed = ref(false)
 watch(() => props.app.icon_url, () => { iconFailed.value = false })
+const installing = computed(() => props.status?.action === 'install' && props.status.result === 'running')
 const statusLabel = computed(() => {
+  if (installing.value) return '安装中'
   if (!props.status) return '状态待获取'
   return ({
     running: '运行中',
@@ -33,11 +36,18 @@ const statusLabel = computed(() => {
   } as Record<string, string>)[props.status.state] || props.status.state
 })
 const statusType = computed(() => {
+  if (installing.value) return 'warning'
   if (props.status?.state === 'running') return 'success'
   if (props.status?.state === 'stopped' || props.status?.state === 'partial') return 'warning'
   if (props.status?.state === 'unknown' || props.status?.state === 'missing') return 'danger'
   return 'info'
 })
+function formatPort(port: DockerPort) {
+  const host = !port.host_ip || port.host_ip === '0.0.0.0' || port.host_ip === '::'
+    ? '*'
+    : port.host_ip
+  return host + ':' + port.host_port + ' → ' + port.container_port + '/' + port.protocol
+}
 const resultLabel = computed(() => {
   if (!props.status?.result) return ''
   const action = ({ install: '安装', update: '更新', uninstall: '卸载', adopt: '接管' } as Record<string, string>)[props.status.action || ''] || '操作'
@@ -81,11 +91,17 @@ const resultLabel = computed(() => {
         </span>
       </el-tooltip>
     </div>
+    <div v-if="ports?.length && status?.managed" class="published-ports" aria-label="当前对外端口">
+      <span class="ports-label">对外端口</span>
+      <el-tag v-for="(port, index) in ports" :key="index" size="small" effect="plain" type="success">
+        {{ formatPort(port) }}
+      </el-tag>
+    </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
     <div class="product-bottom">
       <div class="app-actions">
-        <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || !permissions.canInstall" @click="$emit('configure')">
-          <el-icon><Download /></el-icon>{{ status?.state === 'missing' ? '重新安装' : '安装' }}
+        <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
+          <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
         </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">
           <el-icon><Lightning /></el-icon>强制更新
@@ -157,6 +173,9 @@ const resultLabel = computed(() => {
 button.restriction-icon { cursor: pointer; }
 .restriction-icon:hover,
 .restriction-icon:focus-visible { background: #80603430; color: #ffd496; }
+.published-ports { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
+.ports-label { color: #82a8bf; font-size: 10px; }
+.published-ports :deep(.el-tag) { max-width: 100%; height: auto; padding: 2px 6px; white-space: normal; overflow-wrap: anywhere; font-size: 10px; }
 .result-label { margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
 .product-bottom { margin-top: auto; border-top: 1px solid #243b50; padding-top: 12px; }
 .app-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
