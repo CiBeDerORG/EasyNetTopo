@@ -16,6 +16,7 @@ var appID = regexp.MustCompile("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 var safeFile = regexp.MustCompile("^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
 type appManifest struct {
+	Enabled  *bool  `yaml:"enabled"`
 	Icon     string `yaml:"icon"`
 	Version  int    `yaml:"schema_version"`
 	ID       string `yaml:"id"`
@@ -41,6 +42,11 @@ type appManifest struct {
 	Data struct {
 		DefaultRetain bool `yaml:"default_retain"`
 	} `yaml:"data"`
+}
+
+// enabled 缺省兼容旧清单；显式 false 时不作为可安装的商店应用。
+func (m appManifest) IsEnabled() bool {
+	return m.Enabled == nil || *m.Enabled
 }
 
 func safePath(p string) bool {
