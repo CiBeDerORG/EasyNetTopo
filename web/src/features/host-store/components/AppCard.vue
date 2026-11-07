@@ -20,6 +20,14 @@ defineEmits<{
 }>()
 
 const logoText = computed(() => props.app.name.slice(0, 2).toUpperCase())
+const categoryLabel = computed(() => ({
+  infrastructure: '基础设施',
+  network: '网络工具',
+  developer: '开发工具',
+  media: '影音媒体',
+  productivity: '效率工具',
+  other: '其他应用'
+} as Record<string, string>)[props.app.category] || props.app.category || '应用')
 const iconFailed = ref(false)
 watch(() => props.app.icon_url, () => { iconFailed.value = false })
 const installing = computed(() => props.status?.action === 'install' && props.status.result === 'running')
@@ -56,12 +64,12 @@ const resultLabel = computed(() => {
   <article class="product-card">
     <div class="product-top">
       <div class="product-logo green">
-        <img v-if="app.icon_url && !iconFailed" :src="app.icon_url" :alt="app.name + '图标'" @error="iconFailed = true" />
+        <img v-if="app.icon_url && !iconFailed" :key="app.icon_url" :src="app.icon_url" :alt="app.name + '图标'" @error="iconFailed = true" />
         <span v-else>{{ logoText }}</span>
       </div>
       <div class="product-title">
         <h4>{{ app.name }}</h4>
-        <span>{{ app.category || '应用' }} · {{ sourceName }}</span>
+        <span>{{ categoryLabel }} · {{ sourceName }}</span>
       </div>
       <el-tooltip content="应用信息" placement="top">
         <el-button text circle size="small" aria-label="应用信息" @click="$emit('info')">
