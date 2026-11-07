@@ -105,6 +105,9 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 	if err != nil || actualDigest != digest {
 		return packagebuilder.Artifact{}, errors.New("Manifest 与已索引快照不一致")
 	}
+	if !manifest.IsEnabled() {
+		return packagebuilder.Artifact{}, errors.New("应用已在来源仓库中停用，不能创建新的安装包")
+	}
 	resources := make([]packagebuilder.Resource, 0, len(manifest.Package.Files))
 	for _, item := range manifest.Package.Files {
 		blob, err := repository.bundleContents(ctx, item.Source)
