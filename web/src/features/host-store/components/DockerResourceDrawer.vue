@@ -15,6 +15,9 @@ function formatPort(port: DockerPort) {
     : port.host_ip
   return host + ':' + port.host_port + ' → ' + port.container_port + '/' + port.protocol
 }
+function formatPorts(ports?: DockerPort[]) {
+  return (ports || []).map(formatPort).join('；')
+}
 </script>
 
 <template>
@@ -49,7 +52,7 @@ function formatPort(port: DockerPort) {
               <div v-if="resource.containers?.length" class="container-list">
                 <div v-for="container in resource.containers" :key="container.container_id" class="container-item">
                   <span>{{ container.name }} · {{ container.state }}</span>
-                  <small v-if="container.ports?.length">{{ container.ports.map(formatPort).join('；') }}</small>
+                  <small v-if="container.ports?.length">{{ formatPorts(container.ports) }}</small>
                 </div>
               </div>
             </div>
