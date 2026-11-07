@@ -110,6 +110,42 @@ func (s *HostStore) Get(ctx context.Context, id string) (Host, error) {
 	}
 	return h, err
 }
+
+// UpdateMetadata only changes the user-editable fields. It never rewrites
+// the pinned identity, sealed token or original pairing timestamp.
+func (s *HostStore) UpdateMetadata(ctx context.Context, id, name, endpoint string) (Host, error) {
+	result, err := s.store.db.ExecContext(ctx,
+		"UPDATE hosts SET name=?,endpoint=? WHERE id=?", name, endpoint, id)
+	if err != nil {
+		return Host{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return Host{}, err
+	}
+	if count == 0 {
+		return Host{}, ErrHostNotFound
+	}
+	return s.Get(ctx, id)
+}
+
+// Delete removes only this controller's local host registration and encrypted
+// credentials. It never contacts or deletes the remote Agent or its resources.
+func (s *HostStore) Delete(ctx context.Context, id string) error {
+	result, err := s.store.db.ExecContext(ctx, "DELETE FROM hosts WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrHostNotFound
+	}
+	return nil
+}
+
 func (s *HostStore) AssertAgentNotBoundElsewhere(ctx context.Context, hostID, agentID string) error {
 	var count int
 	err := s.store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM hosts WHERE agent_id=? AND id<>?", agentID, hostID).Scan(&count)

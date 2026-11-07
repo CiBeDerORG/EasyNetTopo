@@ -17,7 +17,7 @@ permissions:
 
 jobs:
   real-agent:
-    name: Actual Agent HTTPS handshake / pairing / read-only APIs
+    name: 真实 Agent HTTPS + HTTP 配对与错误码一致性
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
@@ -27,7 +27,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: CiBeDerORG/EasyHostAgent
-          ref: 7ad5ea9804b67d1d630b7c5e93dedf430ef6f7d7
+          ref: 87d7f9e387435a7ba0301af4b4f1d9de2b270feb
           path: integration-agent
           persist-credentials: false
       - name: Install Go toolchain
@@ -38,7 +38,7 @@ jobs:
         working-directory: integration-agent
         run: |
           CGO_ENABLED=0 go build -trimpath -o "$RUNNER_TEMP/easyhostagent-integration" ./cmd/easyhostagent
-      - name: Test actual Agent identity, one-time pairing, host and inventory
+      - name: 验证真实 Agent HTTPS/HTTP 身份、一次性配对和授权接口
         env:
           EASYNETTOPO_TEST_AGENT_BINARY: ${{ runner.temp }}/easyhostagent-integration
-        run: go test -race -count=1 -timeout=90s -v -run '^TestRealAgentInterop$' ./internal/hosts
+        run: go test -race -count=1 -timeout=90s -v -run '^TestRealAgent(Interop|HTTPInterop)$' ./internal/hosts

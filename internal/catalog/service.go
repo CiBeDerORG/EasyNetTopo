@@ -46,7 +46,23 @@ func (s *Service) Sources(ctx context.Context) ([]storage.CatalogSource, error) 
 	return s.store.CatalogSources(ctx)
 }
 func (s *Service) Apps(ctx context.Context) ([]storage.CatalogApp, error) {
-	return s.store.CatalogApps(ctx)
+	apps, err := s.store.CatalogApps(ctx)
+	for i := range apps {
+		apps[i].IconURL = fmt.Sprintf("/api/v1/catalog/apps/%s/%s/icon?revision=%s", apps[i].SourceID, apps[i].AppID, apps[i].Revision)
+	}
+	return apps, err
+}
+
+// Delete 删除一个 Git 来源及其应用索引，不会向 Agent 发送卸载指令。
+func (s *Service) Delete(ctx context.Context, id string) error {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if err := s.store.DeleteCatalogSource(ctx, id); err != nil {
+		return err
+	}
+	// 缓存仅属于该来源；即使磁盘清理失败，数据库删除也已经提交。
+	_ = os.RemoveAll(filepath.Join(s.cacheDir, id+".git"))
+	return nil
 }
 
 func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
@@ -71,6 +87,7 @@ func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 	}
 	apps := make([]storage.CatalogApp, 0)
 	candidates := 0
+	validated := 0
 	for name, entry := range repository.objects {
 		if entry.Mode != "100644" && entry.Mode != "100755" {
 			continue
@@ -91,15 +108,27 @@ func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 		if err != nil {
 			continue
 		}
+		if manifest.Icon != "" {
+			if _, _, err := readIcon(ctx, repository, manifest.ID, manifest.Icon); err != nil {
+				continue
+			}
+		}
+		validated++
+		// Deploy 显式停用的应用不写入商店快照。已安装状态由 Agent
+		// 独立保存，不会触发停止服务或删除数据。
+		if !manifest.IsEnabled() {
+			continue
+		}
 		apps = append(apps, storage.CatalogApp{
 			SourceID: id, AppID: manifest.ID, Name: manifest.Name,
 			Summary: manifest.Summary, Category: manifest.Category,
 			Revision: repository.revision, ManifestSHA256: digest,
 		})
 	}
-	if len(apps) == 0 {
+	if validated == 0 {
 		return fail(errors.New("仓库中没有受支持且校验通过的应用描述"))
 	}
+	// 全部有效应用都被 enabled:false 停用也是一次有效同步，允许清空商店索引。
 	// 提前保留固定 Commit 的 Git 对象，后续 Fetch 不应使已展示版本消失。
 	if err := repository.pin(ctx); err != nil {
 		return fail(errors.New("无法保留固定 Git Commit"))

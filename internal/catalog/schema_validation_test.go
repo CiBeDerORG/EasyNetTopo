@@ -15,11 +15,15 @@ func TestDeployV1SchemaRejectsInvalidManifest(t *testing.T) {
 	if err := ValidateManifestSchemaV1(good); err != nil {
 		t.Fatalf("Deploy Sub2API v1 官方样本未通过: %v", err)
 	}
+	macos := bytes.Replace(good, []byte("  - fnos"), []byte("  - fnos\n  - macos"), 1)
+	if err := ValidateManifestSchemaV1(macos); err != nil {
+		t.Fatalf("macOS 平台声明应通过应用清单 Schema：%v", err)
+	}
 	cases := []struct {
 		name string
 		data []byte
 	}{
-		{"必填属性缺失", bytes.Replace(good, []byte("schema_version: 1\n"), nil, 1)},
+		{"必填属性缺失", bytes.Replace(good, []byte("schema_version: 1"), nil, 1)},
 		{"非法版本", bytes.Replace(good, []byte("schema_version: 1"), []byte("schema_version: 2"), 1)},
 		{"多余字段", append(append([]byte(nil), good...), []byte("\nunknown_root: true\n")...)},
 		{"非法权限", bytes.Replace(good, []byte("mode: \"0755\""), []byte("mode: \"0777\""), 1)},

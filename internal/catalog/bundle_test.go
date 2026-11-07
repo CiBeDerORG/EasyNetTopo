@@ -16,6 +16,11 @@ import (
 
 // 测试使用真正的本地 Git Commit 和裸仓库对象，不得从工作区读取文件。
 func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
+	t.Run("v1", func(t *testing.T) { testCandidateBundleUsesPinnedSnapshot(t, false) })
+	t.Run("v2", func(t *testing.T) { testCandidateBundleUsesPinnedSnapshot(t, true) })
+}
+
+func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 	ctx := context.Background()
 	dir := t.TempDir()
 	db, err := storage.Open(filepath.Join(dir, "controller", "app.db"))
@@ -49,6 +54,11 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 	git("config", "user.name", "Catalog Test")
 	git("config", "user.email", "test@example.invalid")
 	manifestRaw, resources, envExample, secretsExample := syntheticDeployFixture(t)
+	app := "sub2api"
+	if independent {
+		manifestRaw, resources, envExample, secretsExample = independentConfigurationFixture(t)
+		app = "unregistered-demo"
+	}
 	write := func(name string, data []byte) {
 		t.Helper()
 		full := filepath.Join(workdir, filepath.FromSlash(name))
@@ -59,7 +69,10 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	write("sub2api/app.yaml", manifestRaw)
+	write(app+"/app.yaml", manifestRaw)
+	if independent {
+		write(app+"/assets/icon.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12"/></svg>`))
+	}
 	for _, resource := range resources {
 		write(resource.Source, resource.Content)
 	}
@@ -78,25 +91,32 @@ func TestCandidateBundleUsesPinnedSnapshot(t *testing.T) {
 	}
 	hash := sha256.Sum256(manifestRaw)
 	if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, []storage.CatalogApp{{
-		SourceID: source.ID, AppID: "sub2api", Name: "Sub2API", Summary: "Service",
+		SourceID: source.ID, AppID: app, Name: "Sub2API", Summary: "Service",
 		Category: "developer", Revision: revision, ManifestSHA256: hex.EncodeToString(hash[:]),
 	}}); err != nil {
 		t.Fatal(err)
 	}
-	first, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api")
+	first, err := service.BuildCandidateBundle(ctx, source.ID, app)
 	if err != nil {
 		t.Fatal(err)
 	}
+	if independent {
+		icon, mime, err := service.Icon(ctx, source.ID, app, revision)
+		if err != nil || len(icon) == 0 || mime != "image/svg+xml" {
+			t.Fatalf("固定版本图标读取失败：%v", err)
+		}
+		write(app+"/config.yaml", []byte("fields: invalid"))
+	}
 	// 修改当前工作目录不会改变已固定的 Git 对象。
 	write(resources[0].Source, []byte("uncommitted and untrusted replacement"))
-	second, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api")
+	second, err := service.BuildCandidateBundle(ctx, source.ID, app)
 	if err != nil || !bytes.Equal(first.ZIP, second.ZIP) || first.SHA256 != second.SHA256 {
 		t.Fatalf("未提交的工作区文件影响已锁定的包: %v", err)
 	}
 	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "-d", "refs/easynettopo/catalog/"+revision); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := service.BuildCandidateBundle(ctx, source.ID, "sub2api"); err == nil {
+	if _, err := service.BuildCandidateBundle(ctx, source.ID, app); err == nil {
 		t.Fatal("未固定的 Git Commit 被用于构建")
 	}
 	if _, err := service.BuildCandidateBundle(ctx, "../not-a-source-id", "sub2api"); err == nil {

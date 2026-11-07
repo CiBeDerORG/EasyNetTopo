@@ -1,0 +1,64 @@
+.el-dialog, .el-drawer, .el-message-box {
+  border: 1px solid #35516a !important;
+  border-radius: 16px !important;
+  background: linear-gradient(160deg, #13253a, #0a1828) !important;
+  box-shadow: 0 25px 80px rgb(0 0 0 / 55%) !important;
+}
+.el-dialog__header, .el-drawer__header {
+  border-bottom: 1px solid #254157;
+  margin: 0 !important;
+  padding: 19px 22px !important;
+}
+.el-dialog__title, .el-drawer__title, .el-message-box__title {
+  color: var(--ent-text) !important;
+  font-weight: 700;
+}
+.el-dialog__body, .el-drawer__body { color: var(--ent-text); padding: 20px 22px !important; }
+.el-dialog__footer { border-top: 1px solid #254157; padding: 14px 22px !important; }
+.el-input__wrapper, .el-textarea__inner, .el-select__wrapper {
+  background: #0a1729 !important;
+  box-shadow: 0 0 0 1px #31516a inset !important;
+}
+.el-input__inner, .el-textarea__inner, .el-select__selected-item { color: var(--ent-text) !important; }
+.el-form-item__label { color: #99b5cd !important; }
+.el-button--primary {
+  --el-button-bg-color: #176879;
+  --el-button-border-color: #2d9cae;
+  --el-button-hover-bg-color: #21869a;
+  --el-button-hover-border-color: #4ac8d5;
+  --el-button-active-bg-color: #125463;
+}
+.el-button--danger {
+  --el-button-bg-color: #522633;
+  --el-button-border-color: #954d64;
+  --el-button-hover-bg-color: #713344;
+  --el-button-hover-border-color: #c06a80;
+}
+/* Element Plus 的 .is-light 颜色变体优先级更高：同时覆盖变量与实际背景，避免暗色弹窗出现白底白字。 */
+.el-alert.el-alert--info.is-light,
+.el-alert.el-alert--success.is-light,
+.el-alert.el-alert--warning.is-light,
+.el-alert.el-alert--error.is-light {
+  --el-alert-bg-color: #102338;
+  --el-alert-text-color: var(--ent-text);
+  border: 1px solid #2c4b62;
+  background-color: #102338;
+  color: var(--ent-text);
+}
+.el-alert.el-alert--warning.is-light {
+  --el-alert-bg-color: #2c251c;
+  border-color: #775830;
+  background-color: #2c251c;
+}
+.el-alert.el-alert--error.is-light {
+  --el-alert-bg-color: #30202c;
+  border-color: #78435a;
+  background-color: #30202c;
+}
+.el-alert .el-alert__title,
+.el-alert .el-alert__description { color: var(--ent-text); }
+.el-alert--info .el-alert__icon { color: var(--ent-cyan); }
+.el-alert--warning .el-alert__icon { color: var(--ent-amber); }
+.el-alert--error .el-alert__icon { color: var(--ent-red); }
+.el-empty__description p { color: var(--ent-muted); }
+.el-skeleton__item { background: linear-gradient(90deg, #13263b 25%, #1a334c 37%, #13263b 63%); }

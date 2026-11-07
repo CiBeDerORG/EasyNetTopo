@@ -12,7 +12,7 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service) {
+func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service, enabled bool) {
 	requireAdmin := func(w http.ResponseWriter, r *http.Request) bool {
 		cookie, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), cookie.Value) {
@@ -86,15 +86,31 @@ func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service) 
 		if !requireAdmin(w, r) {
 			return
 		}
-		if r.Method != http.MethodPost {
-			methodNotAllowed(w, "POST")
+		if r.Method != http.MethodPost && r.Method != http.MethodDelete {
+			methodNotAllowed(w, "POST, DELETE")
 			return
 		}
 		if !mutation(w, r) {
 			return
 		}
 		segments := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/catalog/sources/"), "/")
-		if len(segments) != 2 || segments[1] != "refresh" || len(segments[0]) != 36 {
+		if len(segments[0]) != 36 {
+			http.NotFound(w, r)
+			return
+		}
+		if r.Method == http.MethodDelete && len(segments) == 1 {
+			if err := svc.Delete(r.Context(), segments[0]); err != nil {
+				if errors.Is(err, storage.ErrSourceNotFound) {
+					http.NotFound(w, r)
+					return
+				}
+				http.Error(w, "删除 Git 来源失败", http.StatusServiceUnavailable)
+				return
+			}
+			w.WriteHeader(http.StatusNoContent)
+			return
+		}
+		if r.Method != http.MethodPost || len(segments) != 2 || segments[1] != "refresh" {
 			http.NotFound(w, r)
 			return
 		}
@@ -122,6 +138,32 @@ func catalogRoutes(mux *http.ServeMux, db *storage.Store, svc *catalog.Service) 
 			http.Error(w, "无法读取应用目录", 503)
 			return
 		}
-		reply(w, 200, map[string]any{"apps": apps, "install_enabled": false})
+		reply(w, 200, map[string]any{"apps": apps, "install_enabled": enabled})
+	})
+	mux.HandleFunc("GET /api/v1/catalog/apps/{source}/{app}/icon", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		raw, mime, err := svc.Icon(r.Context(), r.PathValue("source"), r.PathValue("app"), r.URL.Query().Get("revision"))
+		if err != nil {
+			http.Error(w, "图标不可用", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", mime)
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("Content-Security-Policy", "default-src 'none'; sandbox")
+		w.Header().Set("Cache-Control", "private, max-age=86400, immutable")
+		_, _ = w.Write(raw)
+	})
+	mux.HandleFunc("GET /api/v1/catalog/apps/{source}/{app}/config", func(w http.ResponseWriter, r *http.Request) {
+		if !requireAdmin(w, r) {
+			return
+		}
+		pkg, err := svc.BuildCandidateBundle(r.Context(), r.PathValue("source"), r.PathValue("app"))
+		if err != nil {
+			http.Error(w, "当前应用未通过安装包校验，请检查来源清单与配置模板", 422)
+			return
+		}
+		reply(w, 200, map[string]any{"revision": pkg.Revision, "config": pkg.Config})
 	})
 }

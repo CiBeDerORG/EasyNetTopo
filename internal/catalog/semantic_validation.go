@@ -386,20 +386,22 @@ func ValidateManifestSemanticsV1(raw []byte, resources []packagebuilder.Resource
 		}
 	}
 	for name, action := range m.Actions {
-		if action.RemoveOrphans || (name == "uninstall" && action.Strategy != "compose_down") ||
-			(name != "uninstall" && action.Strategy != "script") {
+		if action.RemoveOrphans || (action.Strategy != "script" && !(name == "uninstall" && action.Strategy == "compose_down")) {
 			return errors.New("不允许的应用生命周期策略")
 		}
 		if len(action.Argv) > 1 {
 			return errors.New("脚本参数数量超过 v1 约束")
 		}
 		for _, arg := range action.Argv {
-			if (name != "install" || arg != "install") && (name != "update" || arg != "update") {
+			if action.Strategy != "script" || arg != name {
 				return errors.New("安装脚本参数不在固定允许列表")
 			}
 		}
 		if action.Strategy != "script" {
 			continue
+		}
+		if name == "uninstall" && action.Path == install.Path && len(action.Argv) == 0 {
+			return errors.New("共用安装脚本时必须显式传入 uninstall")
 		}
 		scriptDest := m.ID + "/" + action.Path
 		script, exists := byDest[scriptDest]

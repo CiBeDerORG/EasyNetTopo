@@ -60,5 +60,7 @@ jobs:
           node-version: '22'
       - name: Install locked dependencies
         run: npm ci --no-audit --no-fund
+      - name: Frontend API error and install form regression tests
+        run: npm test
       - name: Typecheck and build
         run: npm run build

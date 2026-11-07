@@ -5,16 +5,18 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
 	"time"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
+func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, catalogSvc *catalog.Service) {
 	authorize := func(w http.ResponseWriter, r *http.Request) bool {
 		c, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), c.Value) {
@@ -86,7 +88,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 			}
 			h, err := service.Register(r.Context(), v.Name, v.Endpoint)
 			if err != nil {
-				http.Error(w, "主机名称或 IP:port 不合法", 400)
+				http.Error(w, "主机名称或连接地址不合法", 400)
 				return
 			}
 			jsonReply(w, 201, h)
@@ -99,6 +101,113 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
+		// Only local host metadata is editable. No Agent identity, fingerprint or
+		// sealed credentials are accepted by this endpoint.
+		if len(parts) == 1 && len(parts[0]) == 36 {
+			id := parts[0]
+			switch r.Method {
+			case http.MethodPatch:
+				if !mutation(w, r) {
+					return
+				}
+				var req struct {
+					Name     string `json:"name"`
+					Endpoint string `json:"endpoint"`
+				}
+				if !decode(w, r, &req) {
+					return
+				}
+				h, err := service.Update(r.Context(), id, req.Name, req.Endpoint)
+				if errors.Is(err, storage.ErrHostNotFound) {
+					http.NotFound(w, r)
+					return
+				}
+				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
+					jsonReply(w, http.StatusBadRequest, map[string]string{
+						"code": "invalid_host_metadata", "message": "主机名称或连接地址不能为空或过长",
+					})
+					return
+				}
+				if err != nil {
+					http.Error(w, "主机资料保存失败", http.StatusServiceUnavailable)
+					return
+				}
+				slog.Info("主机资料已更新（配对凭据未修改）", "host_id", id)
+				jsonReply(w, http.StatusOK, h)
+				return
+			case http.MethodDelete:
+				if !mutation(w, r) {
+					return
+				}
+				err := service.Delete(r.Context(), id)
+				if errors.Is(err, storage.ErrHostNotFound) {
+					http.NotFound(w, r)
+					return
+				}
+				if err != nil {
+					http.Error(w, "主机记录删除失败", http.StatusServiceUnavailable)
+					return
+				}
+				slog.Info("本地主机记录已删除（未清理远端 Agent 或应用）", "host_id", id)
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusNoContent)
+				return
+			default:
+				methodNotAllowed(w, "PATCH, DELETE")
+				return
+			}
+		}
+		if len(parts) == 3 && parts[1] == "agent" && (parts[2] == "update" || parts[2] == "force-update") {
+			if r.Method != http.MethodPost {
+				methodNotAllowed(w, "POST")
+				return
+			}
+			if !mutation(w, r) {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			queued, err := service.NativeAgentUpdate(ctx, parts[0], parts[2])
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+				return
+			}
+			if err != nil {
+				code, message := "agent_update_unavailable",
+					"无法向 Agent 发送更新任务。请检查网络连接及目标主机上的 Agent 服务。"
+				switch {
+				case errors.Is(err, hosts.ErrAgentUpdateUnsupported):
+					code, message = "agent_update_unsupported",
+						"目标 Agent 版本过旧，不支持远程更新。请先在该主机终端从最新 deploy main 执行 sudo bash deploy.sh easyhostagent update，再重试。"
+				case errors.Is(err, hosts.ErrAgentUpdateEnvironment):
+					code, message = "agent_update_environment",
+						"Agent 已收到指令，但本机原生部署目录权限、安装标记或 systemd-run 不满足更新要求。请在目标主机检查相关路径与系统日志。"
+				case errors.Is(err, hosts.ErrAgentUpdateUnauthorized):
+					code, message = "agent_update_authorization",
+						"Agent 拒绝当前配对授权，请检查主机配对状态，必要时重新配对。"
+				case errors.Is(err, hosts.ErrAgentUpdateBusy):
+					code, message = "agent_update_busy",
+						"Agent 正在执行其他应用操作，请在操作完成后重试。"
+				}
+				jsonReply(w, http.StatusBadGateway, map[string]string{"code": code, "message": message})
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write(queued)
+			return
+		}
+		if len(parts) == 3 && parts[1] == "apps" && catalogSvc != nil {
+			if r.Method != http.MethodPost {
+				methodNotAllowed(w, "POST")
+				return
+			}
+			if mutation(w, r) {
+				appAction(w, r, parts[0], parts[2], service, catalogSvc)
+			}
+			return
+		}
 		if len(parts) != 2 || len(parts[0]) != 36 {
 			http.NotFound(w, r)
 			return
@@ -128,13 +237,22 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
 				return
 			}
 			if errors.Is(err, storage.ErrHostBinding) {
-				http.Error(w, "主机或 Agent 已绑定其他身份", 409)
+				slog.Warn("主机配对失败", "host_id", id, "stage", "binding", "code", "host_binding_conflict")
+				jsonReply(w, http.StatusConflict, map[string]string{
+					"code":    "host_binding_conflict",
+					"stage":   "binding",
+					"message": "主机或 Agent 已绑定其他身份；请核对现有绑定，不能直接覆盖",
+				})
 				return
 			}
 			if err != nil {
-				http.Error(w, "配对失败：请核对终端指纹、Agent ID、配对码和主机连接；若 Agent 已接受配对但凭据保存失败，请重新本机配对", 502)
+				diagnostic := hosts.DiagnosePairing(err)
+				// 严格只记录分类信息。绝不记录配对码、Token、指纹或 HTTP 请求正文。
+				slog.Warn("主机配对失败", "host_id", id, "stage", diagnostic.Stage, "code", diagnostic.Code, "agent_status", diagnostic.AgentStatus)
+				jsonReply(w, diagnostic.Status, diagnostic)
 				return
 			}
+			slog.Info("主机配对完成", "host_id", id, "stage", "saved")
 			jsonReply(w, 200, h)
 			return
 		}

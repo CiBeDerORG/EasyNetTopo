@@ -1,0 +1,15 @@
+**
+!go.mod
+!go.sum
+!cmd/
+!cmd/**
+!internal/
+!internal/**
+!web/
+!web/package*.json
+!web/index.html
+!web/vite.config.ts
+!web/tsconfig.json
+!web/src/
+!web/src/**
+**/*_test.go

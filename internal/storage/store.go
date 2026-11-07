@@ -9,15 +9,19 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"golang.org/x/crypto/bcrypt"
-	_ "modernc.org/sqlite"
 	"os"
 	"path/filepath"
+	"strings"
 	"time"
+
+	"golang.org/x/crypto/bcrypt"
+	_ "modernc.org/sqlite"
 )
 
 var ErrInitialized = errors.New("管理员已创建")
 var ErrCredentials = errors.New("账号或密码错误")
+
+const passwordHashPrefix = "sha256-bcrypt:"
 
 type Store struct {
 	db           *sql.DB
@@ -82,17 +86,14 @@ func (s *Store) Initialized(ctx context.Context) (bool, error) {
 	return n > 0, err
 }
 func (s *Store) CreateAdmin(ctx context.Context, user, password string) error {
-	if user != "admin" {
-		return errors.New("首期只能创建 admin 账号")
-	}
-	if len(password) < 12 || len(password) > 72 {
-		return errors.New("密码必须为 12 至 72 字节")
-	}
-	hash, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+	// 完整密码先做 SHA-256 再交给 bcrypt，避免 bcrypt 的 72 字节输入上限。
+	// 用户名和密码均不额外限制长度、字符种类或格式。
+	sum := sha256.Sum256([]byte(password))
+	hash, err := bcrypt.GenerateFromPassword([]byte(hex.EncodeToString(sum[:])), bcrypt.DefaultCost)
 	if err != nil {
 		return err
 	}
-	result, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO administrators(id,username,password_hash) VALUES(1,?,?)", user, string(hash))
+	result, err := s.db.ExecContext(ctx, "INSERT OR IGNORE INTO administrators(id,username,password_hash) VALUES(1,?,?)", user, passwordHashPrefix+string(hash))
 	if err != nil {
 		return err
 	}
@@ -109,6 +110,12 @@ func (s *Store) Verify(ctx context.Context, user, password string) error {
 	var hash string
 	if s.db.QueryRowContext(ctx, "SELECT password_hash FROM administrators WHERE id=1 AND username=?", user).Scan(&hash) != nil {
 		return ErrCredentials
+	}
+	if strings.HasPrefix(hash, passwordHashPrefix) {
+		// 新账号校验完整密码；旧版本的原始 bcrypt 哈希仍可直接验证。
+		sum := sha256.Sum256([]byte(password))
+		hash = strings.TrimPrefix(hash, passwordHashPrefix)
+		password = hex.EncodeToString(sum[:])
 	}
 	if bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)) != nil {
 		return ErrCredentials

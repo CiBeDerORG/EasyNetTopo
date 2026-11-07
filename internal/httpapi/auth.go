@@ -2,13 +2,14 @@ package httpapi
 
 import (
 	"encoding/json"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 const authCookie = "easynettopo_session"
@@ -91,9 +92,10 @@ func authRoutes(mux *http.ServeMux, store *storage.Store) {
 			Username string `json:"username"`
 			Password string `json:"password"`
 		}
-		decoder := json.NewDecoder(io.LimitReader(r.Body, 4097))
+		// 登录请求只限制 HTTP 传输体积，不设账号或密码的业务长度/字符限制。
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1<<20))
 		decoder.DisallowUnknownFields()
-		if decoder.Decode(&v) != nil || len(v.Username) > 128 || len(v.Password) > 72 || decoder.Decode(&struct{}{}) != io.EOF {
+		if decoder.Decode(&v) != nil || decoder.Decode(&struct{}{}) != io.EOF {
 			http.Error(w, "请求格式错误", 400)
 			return
 		}
@@ -107,7 +109,7 @@ func authRoutes(mux *http.ServeMux, store *storage.Store) {
 			return
 		}
 		http.SetCookie(w, &http.Cookie{Name: authCookie, Value: token, Path: "/api/v1/", HttpOnly: true, SameSite: http.SameSiteStrictMode, Secure: r.TLS != nil, Expires: expiry})
-		jsonReply(w, 200, map[string]string{"username": "admin"})
+		jsonReply(w, 200, map[string]string{"username": v.Username})
 	})
 	mux.HandleFunc("/api/v1/auth/logout", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "POST" {

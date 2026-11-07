@@ -21,6 +21,7 @@ type CatalogSource struct {
 }
 
 type CatalogApp struct {
+	IconURL        string `json:"icon_url,omitempty"`
 	SourceID       string `json:"source_id"`
 	AppID          string `json:"app_id"`
 	Name           string `json:"name"`
@@ -83,6 +84,31 @@ func (s *Store) CatalogSourceByID(ctx context.Context, id string) (CatalogSource
 	}
 	return v, err
 }
+
+// DeleteCatalogSource 原子地删除指定来源及其商店快照，不影响其他来源和已部署的应用。
+func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, "DELETE FROM catalog_apps WHERE source_id=?", id); err != nil {
+		return err
+	}
+	result, err := tx.ExecContext(ctx, "DELETE FROM catalog_sources WHERE id=?", id)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n == 0 {
+		return ErrSourceNotFound
+	}
+	return tx.Commit()
+}
+
 func (s *Store) CatalogApps(ctx context.Context) ([]CatalogApp, error) {
 	rows, err := s.db.QueryContext(ctx, "SELECT source_id,app_id,name,summary,category,revision,manifest_sha256 FROM catalog_apps ORDER BY name,source_id")
 	if err != nil {
