@@ -5,10 +5,12 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
   const managed = !!row?.managed
   const external = !!row?.external
   const showAdopt = false // 原有 Deploy 应用完成身份核验后自动关联
-  const showInstall = !row || (!managed && !external) || row.state === 'missing'
+  // 安装任务已受理但容器尚未创建时，不能把中间态显示成“容器缺失/重新安装”。
+  const installing = row?.action === 'install' && row.result === 'running'
+  const showInstall = !installing && (!row || (!managed && !external) || row.state === 'missing')
   const showUpdate = (managed || external) && !!app.revision
   const showUninstall = managed || external
-  const canInstall = !!row?.allowed && !external && row.state !== 'unknown' &&
+  const canInstall = !installing && !!row?.allowed && !external && row.state !== 'unknown' &&
     (!managed || row.state === 'missing' ||
       (row.action === 'install' && ['failed', 'unknown'].includes(row.result || '') &&
         row.state === 'not_installed'))
