@@ -1,4 +1,5 @@
 <script setup lang="ts">
+import { formatPublishedPort, uniquePublishedPorts } from '../ports'
 import type { DockerInventory, DockerPort, Host } from '../types'
 
 defineProps<{
@@ -9,14 +10,8 @@ defineProps<{
   error: string
 }>()
 defineEmits<{ 'update:modelValue': [value: boolean] }>()
-function formatPort(port: DockerPort) {
-  const host = !port.host_ip || port.host_ip === '0.0.0.0' || port.host_ip === '::'
-    ? '*'
-    : port.host_ip
-  return host + ':' + port.host_port + ' → ' + port.container_port + '/' + port.protocol
-}
 function formatPorts(ports?: DockerPort[]) {
-  return (ports || []).map(formatPort).join('；')
+  return uniquePublishedPorts(ports).map(formatPublishedPort).join('；')
 }
 </script>
 
@@ -43,10 +38,10 @@ function formatPorts(ports?: DockerPort[]) {
               <strong>{{ resource.name }}</strong>
               <span>{{ resource.kind }} · {{ resource.state }}</span>
               <small>{{ resource.managed ? 'EasyNetTopo 受管资源' : '外部资源 · 只读发现' }}</small>
-              <div v-if="resource.ports?.length" class="resource-ports">
+              <div v-if="uniquePublishedPorts(resource.ports).length" class="resource-ports">
                 <span>对外端口</span>
-                <el-tag v-for="(port, index) in resource.ports" :key="index" size="small" effect="plain" type="success">
-                  {{ formatPort(port) }}
+                <el-tag v-for="(port, index) in uniquePublishedPorts(resource.ports)" :key="index" size="small" effect="plain" type="success">
+                  {{ formatPublishedPort(port) }}
                 </el-tag>
               </div>
               <div v-if="resource.containers?.length" class="container-list">
