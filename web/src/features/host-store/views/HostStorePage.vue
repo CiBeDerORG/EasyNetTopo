@@ -96,7 +96,7 @@ const agentMaintenanceForHost = computed(() => {
 })
 const agentUpdateBusy = ref(false)
 let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
-const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, dockerOpen, agentUpdating)
+const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating)
 
 const hosts = data.hosts
 const sources = data.sources
@@ -268,6 +268,8 @@ watch(() => data.statusQuery.data.value, result => {
   if (!row || row.action !== expectedAction || !row.result || row.result === 'running') return
 
   pendingAction.value = null
+  // 安装/更新脚本执行结束后重新采集 Docker 端口映射，供卡片和资源抽屉共用。
+  void data.dockerQuery.refetch()
   if (row.result === 'failed') {
     ElMessage.error(job.appName + ' ' + actionName(job.action) + '失败：' + (row.message || '请检查 Agent 执行状态'))
   } else if (row.result === 'unknown') {
@@ -556,6 +558,7 @@ async function runAppAction(
       ElMessage.warning(app.name + ' 已受理，但最终结果尚未确认，请刷新状态核对。')
     }
     await data.statusQuery.refetch()
+    if (accepted.result === 'succeeded') await data.dockerQuery.refetch()
   } catch (error) {
     ElMessage.error(app.name + ' ' + actionName(action) + '失败：' + errorMessage(error))
     await data.statusQuery.refetch()
@@ -684,6 +687,7 @@ async function logout() {
         <StorePane
           :host="selectedHost"
           :snapshot="snapshot"
+          :docker-inventory="dockerInventory"
           :snapshot-loading="snapshotLoading"
           :snapshot-error="snapshotError"
           :apps="visibleApps"
