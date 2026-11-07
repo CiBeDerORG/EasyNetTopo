@@ -6,11 +6,12 @@ import NativeAgentCard from './NativeAgentCard.vue'
 import { appKey, getAppPermissions } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
-import type { AppStatus, CatalogApp, CatalogSource, Host, HostSnapshot } from '../types'
+import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, Host, HostSnapshot } from '../types'
 
 const props = defineProps<{
   host: Host | null
   snapshot: HostSnapshot | null
+  dockerInventory?: DockerInventory
   snapshotLoading: boolean
   snapshotError: string
   apps: CatalogApp[]
@@ -63,6 +64,14 @@ const visibleApps = computed(() => props.apps.filter(app => {
 }))
 function sourceName(id: string) {
   return props.sources.find(source => source.id === id)?.name || id
+}
+function appPorts(app: CatalogApp): DockerPort[] {
+  const resources = props.dockerInventory?.resources || []
+  const resource = resources.find(item =>
+    item.kind === 'compose_project' &&
+    (item.compose_project === app.app_id || item.name === app.app_id)
+  )
+  return resource?.ports || []
 }
 
 </script>
@@ -157,6 +166,7 @@ function sourceName(id: string) {
           :key="appKey(app)"
           :app="app"
           :status="statusByKey[appKey(app)]"
+          :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting'"
