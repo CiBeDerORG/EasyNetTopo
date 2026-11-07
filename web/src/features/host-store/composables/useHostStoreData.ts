@@ -49,9 +49,11 @@ export function useHostStoreData(
   const dockerQuery = useQuery({
     queryKey: computed(() => ['host-docker', selectedHostId.value]),
     queryFn: () => getDockerInventory(selectedHostId.value),
-    enabled: computed(() => authenticated.value && dockerOpen.value && !!selectedHost.value?.agent_id),
+    // 应用卡片也需要使用同一份 Docker 快照展示宿主机映射端口，
+    // 不再等到用户打开资源抽屉时才读取。
+    enabled: computed(() => authenticated.value && !!selectedHost.value?.agent_id),
     retry: 0,
-    staleTime: 0
+    staleTime: 10_000
   })
 
   const rows = computed(() => statusQuery.data.value || [])
