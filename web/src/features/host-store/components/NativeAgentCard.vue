@@ -2,6 +2,7 @@
 import { computed } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CopyDocument, Refresh, Download, Lightning } from '@element-plus/icons-vue'
+import nativeAgentIcon from '../../../assets/easyhostagent.svg'
 import type { AgentMaintenanceState, AgentUpdateAction } from '../types'
 
 const props = defineProps<{
@@ -63,7 +64,7 @@ async function showInstallCommand() {
 <template>
   <article class="native-card">
     <div class="heading">
-      <div class="native-logo">EH</div>
+      <div class="native-logo"><img :src="nativeAgentIcon" alt="EasyHostAgent 图标" /></div>
       <div>
         <h4>EasyHostAgent</h4>
         <span class="kind">宿主机原生服务 · systemd</span>
@@ -94,6 +95,7 @@ async function showInstallCommand() {
 .native-card{display:flex;min-width:0;min-height:220px;flex-direction:column;padding:16px;border:1px solid #36536a;border-radius:13px;background:linear-gradient(145deg,#16253a,#102235)}
 .heading{display:flex;align-items:center;gap:10px}
 .native-logo{display:grid;place-items:center;width:43px;height:43px;flex:none;border-radius:12px;background:#214b60;color:#96e4fd;font-weight:800}
+.native-logo img{display:block;width:100%;height:100%;object-fit:contain;border-radius:inherit}
 h4{margin:0 0 5px;font-size:14px}.kind{color:#80a6c3;font-size:10px}.description{color:#87a5bf;font-size:11px;line-height:1.7;margin:14px 0}
 .state{color:#e0bb77;font-size:12px}.state.online{color:#8ce4b4}.state.danger{color:#ff9d92}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:14px}.actions :deep(.el-button){margin:0}
 .foot{display:flex;align-items:center;gap:4px;color:#7f9ab4;font-size:10px;margin:10px 0 0;line-height:1.4}
