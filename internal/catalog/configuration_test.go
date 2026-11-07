@@ -156,3 +156,67 @@ func TestConfigurationSchemasRejectUnsupportedControls(t *testing.T) {
 		}
 	}
 }
+
+func TestV2EnabledFlagAndNormalization(t *testing.T) {
+	raw, resources, _, _ := independentConfigurationFixture(t)
+	for _, test := range []struct {
+		name    string
+		enabled any
+		want    bool
+	}{
+		{name: "缺省启用", want: true},
+		{name: "明确启用", enabled: true, want: true},
+		{name: "明确停用", enabled: false, want: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			data, err := parseStrictYAML(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if test.enabled != nil {
+				data["enabled"] = test.enabled
+			}
+			manifestBytes, err := yaml.Marshal(data)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if err := ValidateManifestSchema(manifestBytes); err != nil {
+				t.Fatalf("合法的 enabled 字段被拒绝: %v", err)
+			}
+			var m appManifest
+			if err := yaml.Unmarshal(manifestBytes, &m); err != nil {
+				t.Fatal(err)
+			}
+			if m.IsEnabled() != test.want {
+				t.Fatalf("enabled 语义不正确: got %t, want %t", m.IsEnabled(), test.want)
+			}
+			objects := make(map[string]gitObject)
+			for _, item := range resources {
+				objects[item.Source] = gitObject{Mode: "100644", Object: strings.Repeat("a", 40)}
+			}
+			preview, _, err := previewManifest("unregistered-demo", manifestBytes, objects)
+			if err != nil || preview.IsEnabled() != test.want {
+				t.Fatalf("商店预览未保留 enabled 语义: %v", err)
+			}
+			expanded, fields, env, secrets, err := resolveConfiguration(manifestBytes, resources)
+			if err != nil || len(fields) == 0 {
+				t.Fatalf("v2 规范化失败: %v", err)
+			}
+			if err := ValidateManifestSemanticsV1(expanded, resources, env, secrets); err != nil {
+				t.Fatalf("enabled 字段破坏了原有安装包语义校验: %v", err)
+			}
+		})
+	}
+	data, err := parseStrictYAML(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	data["enabled"] = "false"
+	invalid, err := yaml.Marshal(data)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := ValidateManifestSchema(invalid); err == nil {
+		t.Fatal("enabled 必须为布尔值，不能接受字符串")
+	}
+}
