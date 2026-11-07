@@ -30,7 +30,11 @@ function reset() {
   pairSections.value = props.host?.agent_id ? [] : ['pair']
 }
 watch(() => props.modelValue, open => { if (open) reset() })
-watch(() => props.host, () => { if (props.modelValue) reset() })
+// 父组件保存资料后会替换 host 对象；只要仍是同一台主机，就不能重置配对表单。
+// 否则刚填写的配对码会在保存成功后被清空。
+watch(() => props.host?.id, (id, previous) => {
+  if (props.modelValue && id && id !== previous) reset()
+})
 
 function save() {
   const name = form.name.trim()
