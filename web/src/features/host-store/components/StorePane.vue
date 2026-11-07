@@ -55,7 +55,7 @@ const showNativeAgent = computed(() =>
 )
 const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
-  const permissions = getAppPermissions(app, row)
+  const permissions = getAppPermissions(app, row, props.snapshot?.platform)
   if (props.filter === 'installed') return !!row && (row.managed || row.external)
   if (props.filter === 'available') return !row || (!row.managed && !row.external)
   if (props.filter === 'update') return permissions.canUpdate
@@ -158,7 +158,7 @@ function sourceName(id: string) {
           :app="app"
           :status="statusByKey[appKey(app)]"
           :source-name="sourceName(app.source_id)"
-          :permissions="getAppPermissions(app, statusByKey[appKey(app)])"
+          :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting'"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"

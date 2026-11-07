@@ -30,8 +30,8 @@ function submit() {
       <el-form-item label="主机名称" required>
         <el-input v-model="form.name" maxlength="100" placeholder="例如：fnOS-NAS-01" autofocus />
       </el-form-item>
-      <el-form-item label="Agent 地址（包含端口）" required>
-        <el-input v-model="form.endpoint" maxlength="200" placeholder="https://192.168.1.20:7014" />
+      <el-form-item label="Agent 地址（主机名/IP:端口或完整 URL）" required>
+        <el-input v-model="form.endpoint" maxlength="255" placeholder="http://host.docker.internal:7018" />
       </el-form-item>
       <el-alert title="支持 HTTPS 地址，也支持可信网络内显式使用 http://。添加后还需要核验 Agent UUID、TLS 指纹并完成配对。" type="info" :closable="false" />
     </el-form>

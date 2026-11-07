@@ -88,7 +88,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			}
 			h, err := service.Register(r.Context(), v.Name, v.Endpoint)
 			if err != nil {
-				http.Error(w, "主机名称或 IP:port 不合法", 400)
+				http.Error(w, "主机名称或连接地址不合法", 400)
 				return
 			}
 			jsonReply(w, 201, h)
@@ -124,7 +124,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				}
 				if errors.Is(err, hosts.ErrInvalidHostMetadata) {
 					jsonReply(w, http.StatusBadRequest, map[string]string{
-						"code": "invalid_host_metadata", "message": "主机名称或连接地址不合法，请检查名称、IP 和端口",
+						"code": "invalid_host_metadata", "message": "主机名称或连接地址不能为空或过长",
 					})
 					return
 				}

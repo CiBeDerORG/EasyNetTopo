@@ -79,15 +79,15 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	}
 	// 编辑和删除是需要管理员登录及同源请求标记的本地操作。
 	editPath := "/api/v1/hosts/" + id
-	payload := `{"name":"新 fnOS","endpoint":"http://127.0.0.1:7018"}`
+	payload := `{"name":"新 fnOS","endpoint":"http://host.docker.internal:7018"}`
 	if got := req("PATCH", editPath, payload, false, true); got.Code != 401 {
 		t.Fatal("未登录不应编辑主机", got.Code)
 	}
 	if got := req("PATCH", editPath, payload, true, false); got.Code != 403 {
 		t.Fatal("编辑未限制同源请求", got.Code)
 	}
-	if got := req("PATCH", editPath, `{"name":"bad","endpoint":"http://169.254.169.254:80"}`, true, true); got.Code != 400 {
-		t.Fatal("允许非法主机地址", got.Code)
+	if got := req("PATCH", editPath, `{"name":"bad","endpoint":"http://169.254.169.254:80"}`, true, true); got.Code != 200 {
+		t.Fatal("编辑主机资料不应强制校验连接地址格式", got.Code, got.Body.String())
 	}
 	if got := req("PATCH", editPath, payload, true, true); got.Code != 200 || !strings.Contains(got.Body.String(), "新 fnOS") {
 		t.Fatal("编辑主机失败", got.Code, got.Body.String())

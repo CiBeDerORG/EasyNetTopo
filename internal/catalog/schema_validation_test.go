@@ -15,6 +15,10 @@ func TestDeployV1SchemaRejectsInvalidManifest(t *testing.T) {
 	if err := ValidateManifestSchemaV1(good); err != nil {
 		t.Fatalf("Deploy Sub2API v1 官方样本未通过: %v", err)
 	}
+	macos := bytes.Replace(good, []byte("  - fnos"), []byte("  - fnos\n  - macos"), 1)
+	if err := ValidateManifestSchemaV1(macos); err != nil {
+		t.Fatalf("macOS 平台声明应通过应用清单 Schema：%v", err)
+	}
 	cases := []struct {
 		name string
 		data []byte

@@ -481,7 +481,7 @@ async function openInstallConfig(app: CatalogApp) {
 }
 
 function permissionsFor(app: CatalogApp) {
-  return getAppPermissions(app, data.statusByKey.value[appKey(app)])
+  return getAppPermissions(app, data.statusByKey.value[appKey(app)], snapshot.value?.platform)
 }
 
 async function handleAppAction(app: CatalogApp, action: AppAction) {
