@@ -8,7 +8,6 @@ export function useHostStoreData(
   selectedHostId: ComputedRef<string>,
   authenticated: ComputedRef<boolean>,
   shouldPoll: ComputedRef<boolean>,
-  dockerOpen: Ref<boolean>,
   agentRestarting: ComputedRef<boolean>
 ) {
   const hostsQuery = useQuery({
