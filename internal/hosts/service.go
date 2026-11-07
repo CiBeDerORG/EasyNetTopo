@@ -57,6 +57,11 @@ func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storag
 	if err != nil {
 		return storage.Host{}, fmt.Errorf("%w: %v", ErrInvalidHostMetadata, err)
 	}
+	// Register 与 Update 必须采用同一套 Agent 地址规则，避免资料能保存、
+	// 但随后配对时才发现地址格式不受支持。
+	if err := ValidateEndpoint(endpoint); err != nil {
+		return storage.Host{}, fmt.Errorf("%w: %v", ErrInvalidHostMetadata, err)
+	}
 	s.pairingMu.Lock()
 	defer s.pairingMu.Unlock()
 	return s.hosts.UpdateMetadata(ctx, id, name, endpoint)
