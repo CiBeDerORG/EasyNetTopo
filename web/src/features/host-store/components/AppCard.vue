@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { formatPublishedPort, uniquePublishedPorts } from '../ports'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort } from '../types'
 
 const props = defineProps<{
@@ -42,12 +43,7 @@ const statusType = computed(() => {
   if (props.status?.state === 'unknown' || props.status?.state === 'missing') return 'danger'
   return 'info'
 })
-function formatPort(port: DockerPort) {
-  const host = !port.host_ip || port.host_ip === '0.0.0.0' || port.host_ip === '::'
-    ? '*'
-    : port.host_ip
-  return host + ':' + port.host_port + ' → ' + port.container_port + '/' + port.protocol
-}
+const publishedPorts = computed(() => uniquePublishedPorts(props.ports))
 const resultLabel = computed(() => {
   if (!props.status?.result) return ''
   const action = ({ install: '安装', update: '更新', uninstall: '卸载', adopt: '接管' } as Record<string, string>)[props.status.action || ''] || '操作'
@@ -91,10 +87,10 @@ const resultLabel = computed(() => {
         </span>
       </el-tooltip>
     </div>
-    <div v-if="ports?.length && status?.managed" class="published-ports" aria-label="当前对外端口">
+    <div v-if="publishedPorts.length && status?.managed" class="published-ports" aria-label="当前对外端口">
       <span class="ports-label">对外端口</span>
-      <el-tag v-for="(port, index) in ports" :key="index" size="small" effect="plain" type="success">
-        {{ formatPort(port) }}
+      <el-tag v-for="(port, index) in publishedPorts" :key="index" size="small" effect="plain" type="success">
+        {{ formatPublishedPort(port) }}
       </el-tag>
     </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
