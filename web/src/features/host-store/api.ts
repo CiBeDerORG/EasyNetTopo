@@ -1,5 +1,5 @@
 import { apiRequest } from '../../lib/api-client'
-import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot } from './types'
+import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot, AdapterTypesResponse } from './types'
 
 export function getAuthStatus() {
   return apiRequest<AuthStatus>('/api/v1/auth/status')
@@ -33,6 +33,15 @@ export function queueNativeAgentUpdate(id: string, action: 'update' | 'force-upd
   return apiRequest<{ state: 'queued'; action: string }>(
     '/api/v1/hosts/' + encodeURIComponent(id) + '/agent/' + action,
     { method: 'POST' }
+  )
+}
+export function getAgentAdapters(id: string) {
+  return apiRequest<AdapterTypesResponse>('/api/v1/hosts/' + encodeURIComponent(id) + '/adapters')
+}
+export function setAgentAdapter(id: string, type: string, enabled: boolean) {
+  return apiRequest<AdapterTypesResponse>(
+    '/api/v1/hosts/' + encodeURIComponent(id) + '/adapters/' + encodeURIComponent(type),
+    { method: 'PUT', body: { enabled } }
   )
 }
 export function getHostSnapshot(id: string) {

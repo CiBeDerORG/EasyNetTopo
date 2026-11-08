@@ -129,3 +129,35 @@ func (s *Service) Query(ctx context.Context, id, kind string) (json.RawMessage, 
 	}
 	return raw, nil
 }
+
+// SetAdapter 仅转发管理端已配对主机的开关设置；不在控制端重复保存 Driver 状态。
+func (s *Service) SetAdapter(ctx context.Context, id, name string, enabled bool) (json.RawMessage, error) {
+	if name != "easytier" {
+		return nil, errors.New("当前不支持的 Driver")
+	}
+	h, err := s.hosts.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if h.AgentID == "" {
+		return nil, errors.New("主机尚未配对")
+	}
+	token, err := s.hosts.Credentials(ctx, h)
+	if err != nil {
+		return nil, err
+	}
+	client, err := NewClient(h.Endpoint, h.AgentID, h.SPKISHA256)
+	if err != nil {
+		return nil, err
+	}
+	raw, err := client.request(ctx, "PUT", "/v1/adapters/types/"+name,
+		map[string]bool{"enabled": enabled}, s.db.ControllerID(), token)
+	if err != nil {
+		return nil, err
+	}
+	var reply struct { AgentID string `json:"agent_id"` }
+	if err := json.Unmarshal(raw, &reply); err != nil || reply.AgentID != h.AgentID {
+		return nil, errors.New("Agent Driver 响应身份不匹配")
+	}
+	return raw, nil
+}

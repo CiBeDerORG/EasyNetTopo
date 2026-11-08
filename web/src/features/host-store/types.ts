@@ -88,6 +88,8 @@ export type AppStatus = AppRef & {
   result?: string
   message?: string
 }
+export type AdapterType = { type: string; enabled: boolean; capabilities: string[] }
+export type AdapterTypesResponse = { agent_id: string; types: AdapterType[] }
 export type AgentUpdateAction = 'update' | 'force-update'
 export type AgentMaintenanceState = { state: 'waiting' | 'timeout'; action: AgentUpdateAction }
 export type AppAction = 'install' | 'update' | 'uninstall' | 'adopt' | 'force_update'
