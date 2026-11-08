@@ -112,3 +112,41 @@ func TestTaskInterruptedBlocksHostAndPreparationRecovery(t *testing.T) {
 		t.Fatal("interrupted task must block subsequent updates")
 	}
 }
+
+func TestNativeAgentAndAppShareHostQueue(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "native-queue.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewTaskStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	rows, err := store.Enqueue(ctx, "github_actions", []TaskTarget{
+		{HostID: "host", SourceID: NativeAgentSourceID, AppID: NativeAgentAppID, Action: "update"},
+		{HostID: "host", SourceID: "git-source", AppID: "other-app", Action: "update"},
+	})
+	if err != nil || len(rows) != 3 {
+		t.Fatalf("native and application tasks must share one parent: %+v, %v", rows, err)
+	}
+	native, ok, err := store.Next(ctx, "host")
+	if err != nil || !ok || native.SourceID != NativeAgentSourceID || native.AppID != NativeAgentAppID {
+		t.Fatalf("native should run first: %+v, %v", native, err)
+	}
+	if err := store.SetState(ctx, native, "running", "agent-baseline:old"); err != nil {
+		t.Fatal(err)
+	}
+	running, ok, err := store.Next(ctx, "host")
+	if err != nil || !ok || running.ID != native.ID || running.Message != "agent-baseline:old" {
+		t.Fatalf("restart must resume the same native task, not issue new work: %+v, %v", running, err)
+	}
+	if err := store.SetState(ctx, native, "succeeded", ""); err != nil {
+		t.Fatal(err)
+	}
+	next, ok, err := store.Next(ctx, "host")
+	if err != nil || !ok || next.AppID != "other-app" {
+		t.Fatalf("application should follow native update: %+v, %v", next, err)
+	}
+}

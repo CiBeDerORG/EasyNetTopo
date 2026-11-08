@@ -192,6 +192,14 @@ func resolveTargets(req []hookTarget, registered []storage.Host, apps []storage.
 		if hostCount != 1 || host.AgentID == "" {
 			return nil, errors.New("目标主机不存在、名称重复或未配对: " + item.HostName)
 		}
+		// 原生 Agent 是保留的服务目标，不需要 Docker/Git 应用清单。
+		if item.ServiceName == storage.NativeAgentAppID {
+			targets = append(targets, storage.TaskTarget{
+				HostID: host.ID, SourceID: storage.NativeAgentSourceID,
+				AppID: storage.NativeAgentAppID, Action: "update",
+			})
+			continue
+		}
 		appCount := 0
 		var app storage.CatalogApp
 		for _, candidate := range apps {

@@ -8,6 +8,7 @@ import (
 	"errors"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -110,6 +111,10 @@ func (s *Service) set(task storage.Task, state, message string) bool {
 }
 
 func (s *Service) process(task storage.Task) {
+	if task.SourceID == storage.NativeAgentSourceID && task.AppID == storage.NativeAgentAppID {
+		s.processNativeAgent(task)
+		return
+	}
 	// running 任务可能在控制端重启前已下发。只恢复状态轮询，不重复执行更新。
 	if task.State == "running" {
 		s.monitor(task, "")
@@ -247,6 +252,120 @@ func (s *Service) monitor(task storage.Task, digest string) {
 		// 主机暂时离线不是更新失败。持续轮询，保证同一主机不会运行下一条任务。
 		select {
 		case <-s.ctx.Done():
+			return
+		case <-ticker.C:
+		}
+	}
+}
+
+// Agent 自更新不经过 Git 应用包传输；只使用已配对的原生维护 API。
+// 进程可能在收到 202 后重启，因此必须保留更新前的启动时间和构建 Commit。
+type nativeAgentBaseline struct {
+	StartedAt string `json:"agent_started_at"`
+	Commit    string `json:"agent_commit"`
+}
+
+const nativeBaselinePrefix = "agent-baseline:"
+
+func (s *Service) nativeAgentSnapshot(hostID string) (nativeAgentBaseline, error) {
+	ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
+	defer cancel()
+	raw, err := s.hosts.Query(ctx, hostID, "host")
+	if err != nil {
+		return nativeAgentBaseline{}, err
+	}
+	var snap nativeAgentBaseline
+	if err := json.Unmarshal(raw, &snap); err != nil || snap.StartedAt == "" {
+		return nativeAgentBaseline{}, errors.New("Agent 快照缺少启动标识")
+	}
+	return snap, nil
+}
+
+func (s *Service) processNativeAgent(task storage.Task) {
+	if task.State == "running" {
+		s.monitorNativeAgent(task)
+		return
+	}
+	if s.ctx.Err() != nil || !s.set(task, "preparing", "") {
+		return
+	}
+	before, err := s.nativeAgentSnapshot(task.HostID)
+	if err != nil {
+		s.fail(task, "无法读取 Agent 更新前状态")
+		return
+	}
+	baseline, err := json.Marshal(before)
+	if err != nil {
+		s.fail(task, "无法准备 Agent 更新前状态")
+		return
+	}
+	// 先持久化 running 和基线，再下发一次固定的 Release 强制更新指令。
+	// 更新失败不能退回 queued，否则网络丢包可能导致重复更新。
+	task.Message = nativeBaselinePrefix + string(baseline)
+	if !s.set(task, "running", task.Message) {
+		return
+	}
+	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
+	raw, err := s.hosts.NativeAgentUpdate(ctx, task.HostID, "force-update")
+	cancel()
+	if err != nil {
+		if errors.Is(err, hosts.ErrAgentUpdateBusy) {
+			s.set(task, "queued", "Agent 正在执行其他操作，等待重试")
+			return
+		}
+		if errors.Is(err, hosts.ErrAgentUpdateUnsupported) ||
+			errors.Is(err, hosts.ErrAgentUpdateEnvironment) ||
+			errors.Is(err, hosts.ErrAgentUpdateUnauthorized) {
+			s.fail(task, "目标 Agent 拒绝原生更新，请核对版本、配对和部署环境")
+			return
+		}
+		s.set(task, "interrupted", "Agent 更新请求是否已受理无法确认；禁止自动重发")
+		return
+	}
+	var ack struct {
+		State  string `json:"state"`
+		Action string `json:"action"`
+	}
+	if json.Unmarshal(raw, &ack) != nil || ack.State != "queued" || ack.Action != "force-update" {
+		s.set(task, "interrupted", "Agent 原生更新回执与请求不匹配")
+		return
+	}
+	s.monitorNativeAgent(task)
+}
+
+func (s *Service) monitorNativeAgent(task storage.Task) {
+	if !strings.HasPrefix(task.Message, nativeBaselinePrefix) {
+		s.set(task, "interrupted", "无法恢复更新前的 Agent 启动信息，需人工核对")
+		return
+	}
+	var before nativeAgentBaseline
+	if json.Unmarshal([]byte(strings.TrimPrefix(task.Message, nativeBaselinePrefix)), &before) != nil ||
+		before.StartedAt == "" {
+		s.set(task, "interrupted", "Agent 更新前的状态记录损坏，需人工核对")
+		return
+	}
+	ticker := time.NewTicker(3 * time.Second)
+	defer ticker.Stop()
+	deadline := time.NewTimer(10 * time.Minute)
+	defer deadline.Stop()
+	for {
+		if s.ctx.Err() != nil {
+			return
+		}
+		after, err := s.nativeAgentSnapshot(task.HostID)
+		if err == nil && after.StartedAt != before.StartedAt {
+			if after.Commit != "" && after.Commit != "unknown" && after.Commit != before.Commit {
+				s.set(task, "succeeded", "")
+			} else {
+				s.set(task, "interrupted", "Agent 已重启，但构建 Commit 未变化或不可验证；请核对 Release 和更新日志")
+			}
+			return
+		}
+		select {
+		case <-s.ctx.Done():
+			return
+		case <-deadline.C:
+			s.set(task, "interrupted", "10 分钟内未确认 Agent 新版本重启，请检查原生更新日志")
 			return
 		case <-ticker.C:
 		}

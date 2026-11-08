@@ -20,6 +20,8 @@
 
 **关联只需要两个字段：**
 
+原生服务例外：`service_name: "easyhostagent"` 为内置保留目标，按 `host_name` 对应主机调用已有 Agent 维护接口，**无需**在 Git 应用源登记 `easyhostagent/app.yaml`；其他应用仍遵守 Git 应用目录唯一匹配规则。
+
 | 字段 | 写什么 | 从哪里找 |
 | --- | --- | --- |
 | `host_name` | 要更新的目标主机名称；大小写及空格必须完全一致 | EasyNetTopo 的主机管理列表 |
@@ -34,7 +36,7 @@
 1. EasyNetTopo 控制端已部署并可从 CI/CD 运行环境访问；`POST /api/hooks/deploy/update` 是它的 HTTP API，不是 Agent 的接口。
 2. 目标主机已在 EasyNetTopo 中登记并成功配对 EasyHostAgent，且目标主机当前能被控制端访问。
 3. 相应 Git 应用源已在 EasyNetTopo 中添加并刷新，应用目录存在有效的 `app.yaml`，且目标服务名称能够唯一匹配。
-4. 目标应用已安装、符合 Agent 的受管身份校验，具有兼容当前操作系统/架构的清单及更新能力；Hook **不会绕过** Agent 的安全/权限检查。
+4. 目标普通应用已安装并符合 Agent 受管身份、兼容清单及更新检查；对于 `easyhostagent`，必须先在本机使用最新版 deploy 安装支持原生维护接口的 Agent，macOS 还必须使用支持 launchd 自更新的版本。Hook **不会绕过**任何安装来源或权限校验。
 5. 目标应用的镜像/程序已由 CI/CD 成功发布，并且 deploy 当前配置的更新版本确实指向预期的新发布物。Hook 不根据本次 CI 提交号自行改写 deploy 版本配置。
 
 **macOS 特别说明：** macOS 使用普通登录用户的 Docker Desktop 和 `bash deploy.sh ... update`，不使用 `sudo bash deploy.sh`。EasyNetTopo 本身在 macOS 上的自动更新依赖新版本 EasyHostAgent 对现有双 Compose 文件及部署目录的受控核验，并沿用 macOS deploy 更新入口；仅改应用清单中的 `platforms` 不等于完成平台适配。其他应用是否能更新仍以其自身清单与 Agent 检查为准。
@@ -182,6 +184,21 @@ EASYNETTOPO_HOOK_URL=https://你的受保护域名/api/hooks/deploy/update
 
 当前 EasyNetTopo 自带工作流并**未**从这个 URL Variable 读取地址；它继续使用文件里固定的 `HOOK_URL`。只有采用下节通用模板的仓库才需配置这个新 Variable。
 
+### 4.4 EasyHostAgent 原生服务目标
+
+当 `EasyHostAgent/.github/workflows/native-release.yml` 已构建并完整上传 Linux AMD64、Linux ARM64、macOS ARM64 的 Release 文件及 SHA-256 后，可使用与其他仓库完全相同的变量和 Hook 协议：
+
+```json
+[
+  {"host_name":"Mac mini m6","service_name":"easyhostagent"},
+  {"host_name":"Linux-01","service_name":"easyhostagent"}
+]
+```
+
+EasyNetTopo 使用同一主机任务队列分派 Agent 自更新（不创建新表、不下载应用 Git 包），最终通过 Agent 重启及构建 Commit 变化确认新版本；不确认时标记 `interrupted`，**不自动重试**。此目标固定调用受控 `force-update`，跳过可选本地二进制，从 deploy 配置的 `EASYHOSTAGENT_RELEASE` 下载对应平台资产。Linux/fnOS 通过 systemd 延迟执行，macOS 通过用户 launchd 延迟执行，均由原本的 deploy 脚本验证和安装。
+
+特别注意：如果 `lib/versions.env` 所配置的 Release 标签不是刚刚发布的目标版本，Hook 不会自动覆盖该配置，不能保证本次更新成功。滚动开发标签使用相同标签但资源可更新，实际以构建 Commit 变化做成功判断。
+
 ## 5. GitHub Actions 构建成功后发送 Hook
 
 ### 5.1 EasyNetTopo 自身
@@ -194,6 +211,8 @@ EASYNETTOPO_HOOK_URL=https://你的受保护域名/api/hooks/deploy/update
 - 有效请求返回 HTTP 202，表示任务**已受理**，不是应用已更新完成。
 
 默认无需再复制一遍 Hook 步骤，避免同一个构建重复发送。
+
+EasyHostAgent 自带的 `.github/workflows/native-release.yml` 也已经包含发布完成后的通知步骤，配置同名 Secret/Variables 即可，不要重复添加。
 
 ### 5.2 其他应用的 GitHub 仓库（通用模板）
 
