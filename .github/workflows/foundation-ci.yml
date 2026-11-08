@@ -36,7 +36,6 @@ jobs:
       - name: Check gofmt
         run: |
           gofmt -l cmd internal | tee /tmp/unformatted-go-files
-          gofmt -d internal/tasks/service.go
           test ! -s /tmp/unformatted-go-files
       - name: Vet and test
         run: |
