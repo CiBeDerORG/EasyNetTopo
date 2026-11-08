@@ -105,7 +105,7 @@ export type ConfigField = {
   max_length?: number
 }
 export type AppConfig = { revision: string; config: ConfigField[] }
-export type AppActionResponse = { action?: string; result?: string; message?: string }
+export type AppActionResponse = { action?: string; result?: string; message?: string; accepted?: boolean; tasks?: ExecutionTask[] }
 export type AppPermissions = {
   showInstall: boolean
   canInstall: boolean
