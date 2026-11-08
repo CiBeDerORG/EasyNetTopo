@@ -258,7 +258,6 @@ func (s *Service) monitor(task storage.Task, digest string) {
 	}
 }
 
-
 // Agent 自更新不经过 Git 应用包传输；只使用已配对的原生维护 API。
 // 进程可能在收到 202 后重启，因此必须保留更新前的启动时间和构建 Commit。
 type nativeAgentBaseline struct {
