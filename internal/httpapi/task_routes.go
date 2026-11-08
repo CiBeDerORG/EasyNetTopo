@@ -194,9 +194,16 @@ func resolveTargets(req []hookTarget, registered []storage.Host, apps []storage.
 		}
 		appCount := 0
 		var app storage.CatalogApp
-		for _, a := range apps {
-			if a.AppID == item.ServiceName || a.Name == item.ServiceName {
-				app, appCount = a, appCount+1
+		for _, candidate := range apps {
+			if candidate.AppID == item.ServiceName {
+				app, appCount = candidate, appCount+1
+			}
+		}
+		if appCount == 0 {
+			for _, candidate := range apps {
+				if candidate.Name == item.ServiceName {
+					app, appCount = candidate, appCount+1
+				}
 			}
 		}
 		if appCount != 1 {
