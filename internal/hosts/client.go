@@ -268,7 +268,9 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 			return nil, &PairingHTTPError{Status: res.StatusCode, Code: failure.Code}
 		}
 		if strings.HasPrefix(path, "/v1/adapters/easytier/port-forwards") {
-			var failure struct { Code string `json:"code"` }
+			var failure struct {
+				Code string `json:"code"`
+			}
 			_ = json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure)
 			if failure.Code == "invalid_request" || failure.Code == "invalid_port_forward" ||
 				failure.Code == "driver_disabled" || failure.Code == "port_forward_failed" {
@@ -380,6 +382,6 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 // Error response bodies and arbitrary remote messages are never forwarded.
 type AdapterHTTPError struct {
 	Status int
-	Code string
+	Code   string
 }
 func (e *AdapterHTTPError) Error() string { return "EasyTier Agent adapter error: " + e.Code }

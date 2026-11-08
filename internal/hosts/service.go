@@ -166,42 +166,60 @@ func (s *Service) SetAdapter(ctx context.Context, id, name string, enabled bool)
 }
 
 type PortForwardChange struct {
-	ResourceID string `json:"resource_id"`
-	InstanceID string `json:"instance_id,omitempty"`
-	InstanceName string `json:"instance_name,omitempty"`
-	Protocol string `json:"protocol"`
-	Listen string `json:"listen"`
-	Destination string `json:"destination,omitempty"`
-	AllowPublicBind bool `json:"allow_public_bind,omitempty"`
+	ResourceID      string `json:"resource_id"`
+	InstanceID      string `json:"instance_id,omitempty"`
+	InstanceName    string `json:"instance_name,omitempty"`
+	Protocol        string `json:"protocol"`
+	Listen          string `json:"listen"`
+	Destination     string `json:"destination,omitempty"`
+	AllowPublicBind bool   `json:"allow_public_bind,omitempty"`
 }
 
 // EasyTierPortForwards proxies fixed read/write operations through the existing
 // pinned identity, encrypted pairing credential and controller authorization.
 func (s *Service) EasyTierPortForwards(ctx context.Context, hostID, method, instanceID, instanceName string, change *PortForwardChange) (json.RawMessage, error) {
 	h, err := s.hosts.Get(ctx, hostID)
-	if err != nil { return nil, err }
-	if h.AgentID == "" { return nil, errors.New("主机尚未配对") }
+	if err != nil {
+		return nil, err
+	}
+	if h.AgentID == "" {
+		return nil, errors.New("主机尚未配对")
+	}
 	token, err := s.hosts.Credentials(ctx, h)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	client, err := NewClient(h.Endpoint, h.AgentID, h.SPKISHA256)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	path := "/v1/adapters/easytier/port-forwards"
 	var body any
 	switch method {
 	case "GET":
 		query := url.Values{"resource_id": {"compose:easytier"}}
-		if instanceID != "" { query.Set("instance_id", instanceID) }
-		if instanceName != "" { query.Set("instance_name", instanceName) }
+		if instanceID != "" {
+			query.Set("instance_id", instanceID)
+		}
+		if instanceName != "" {
+			query.Set("instance_name", instanceName)
+		}
 		path += "?" + query.Encode()
 	case "POST", "DELETE":
-		if change == nil { return nil, errors.New("缺少端口转发请求") }
+		if change == nil {
+			return nil, errors.New("缺少端口转发请求")
+		}
 		body = change
 	default:
 		return nil, errors.New("不允许的端口转发操作")
 	}
 	raw, err := client.request(ctx, method, path, body, s.db.ControllerID(), token)
-	if err != nil { return nil, err }
-	var envelope struct{ AgentID string `json:"agent_id"` }
+	if err != nil {
+		return nil, err
+	}
+	var envelope struct {
+		AgentID string `json:"agent_id"`
+	}
 	if err := json.Unmarshal(raw, &envelope); err != nil || envelope.AgentID != h.AgentID {
 		return nil, errors.New("Agent 端口转发结果身份不匹配")
 	}
