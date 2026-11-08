@@ -37,6 +37,13 @@ test('EasyNetTopo cannot install, delete, or force update missing/external apps'
   }
 })
 
+test('EasyNetTopo Mac UI does not offer an unsupported update action', () => {
+  const permissions = getAppPermissions(easynettopo, row, 'macos')
+  assert.equal(permissions.showUpdate, true)
+  assert.equal(permissions.canUpdate, false)
+  assert.match(permissions.blockReason, /macOS/)
+})
+
 test('Other applications retain normal install and uninstall actions', () => {
   const other = { ...easynettopo, app_id: 'portainer' }
   const installed = getAppPermissions(other, { ...row, app_id: 'portainer' }, 'linux')
