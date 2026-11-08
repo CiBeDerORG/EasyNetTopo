@@ -2,7 +2,8 @@
 import { computed, ref, watch } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { formatPublishedPort, uniquePublishedPorts } from '../ports'
-import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort } from '../types'
+import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort, ExecutionTask } from '../types'
+import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   app: CatalogApp
@@ -11,6 +12,7 @@ const props = defineProps<{
   permissions: AppPermissions
   busy: boolean
   ports?: DockerPort[]
+  task?: ExecutionTask
 }>()
 
 defineEmits<{
@@ -53,6 +55,7 @@ const statusType = computed(() => {
 })
 const publishedPorts = computed(() => uniquePublishedPorts(props.ports))
 const resultLabel = computed(() => {
+  if (props.task) return ''
   if (!props.status?.result) return ''
   const action = ({ install: '安装', update: '更新', uninstall: '卸载', adopt: '接管' } as Record<string, string>)[props.status.action || ''] || '操作'
   const result = ({ running: '进行中', succeeded: '成功', failed: '失败', unknown: '结果未知' } as Record<string, string>)[props.status.result] || props.status.result
@@ -102,6 +105,16 @@ const resultLabel = computed(() => {
       </el-tag>
     </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
+    <div v-if="task" class="task-meta" role="status">
+      <template v-if="task.state === 'succeeded'">
+        最近任务：{{ formatTaskTime(task) }}
+      </template>
+      <template v-else>
+        <span class="task-line">{{ taskStateLabel(task.state) }} · {{ task.id }}</span>
+        <span class="task-line">触发来源：{{ taskSourceLabel(task.trigger_source) }}</span>
+        <span v-if="task.message" class="task-error">{{ task.message }}</span>
+      </template>
+    </div>
     <div class="product-bottom">
       <div class="app-actions">
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
@@ -180,6 +193,9 @@ button.restriction-icon { cursor: pointer; }
 .published-ports { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
 .ports-label { color: #82a8bf; font-size: 10px; }
 .published-ports :deep(.el-tag) { max-width: 100%; height: auto; padding: 2px 6px; white-space: normal; overflow-wrap: anywhere; font-size: 10px; }
+.task-meta { margin-top: 9px; color: #a8c6d9; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.task-line, .task-error { display: block; }
+.task-error { color: #f9b0a1; }
 .result-label { margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
 .product-bottom { margin-top: auto; border-top: 1px solid #243b50; padding-top: 12px; }
 .app-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
