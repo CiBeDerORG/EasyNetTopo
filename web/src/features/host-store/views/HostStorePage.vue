@@ -20,6 +20,7 @@ import {
   pairHost as pairHostApi,
   queueNativeAgentUpdate,
   refreshSource,
+  resolveInterruptedExecutionTask,
   updateHost
 } from '../api'
 import { appKey, getAppPermissions } from '../rules'
@@ -38,6 +39,7 @@ import type {
   AppConfig,
   CatalogApp,
   CatalogSource,
+  ExecutionTask,
   Host,
   HostHealthStatus
 } from '../types'
@@ -99,6 +101,7 @@ let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
 const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating)
 
 const hosts = data.hosts
+const executionTasks = data.tasks
 const sources = data.sources
 const selectedHost = data.selectedHost
 const rows = data.rows
@@ -310,9 +313,29 @@ function stateName(state: string) {
   } as Record<string, string>)[state] || state
 }
 
+async function resolveTask(task: ExecutionTask) {
+  if (task.state !== 'interrupted') return
+  try {
+    await ElMessageBox.confirm(
+      '请先在目标主机检查 Docker / Agent，确认本次更新脚本确实已经停止。此操作只将无法确认的任务标记为失败，不代表更新成功，并会允许后续排队任务继续执行。',
+      '确认解除主机任务阻塞',
+      { type: 'warning', confirmButtonText: '已核实，解除阻塞', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await resolveInterruptedExecutionTask(task.id)
+    await data.tasksQuery.refetch()
+    ElMessage.success('已关闭中断任务，后续队列可以继续执行。')
+  } catch (error) {
+    ElMessage.error('解除任务阻塞失败：' + errorMessage(error))
+  }
+}
+
 async function refreshAll() {
   autoLinkAttempts.clear()
-  const tasks: Promise<unknown>[] = [data.hostsQuery.refetch()]
+  const tasks: Promise<unknown>[] = [data.hostsQuery.refetch(), data.tasksQuery.refetch()]
   if (selectedHost.value?.agent_id) {
     tasks.push(data.snapshotQuery.refetch(), data.statusQuery.refetch())
   }
@@ -551,6 +574,11 @@ async function runAppAction(
         : { source_id: app.source_id, app_id: app.app_id }
     const accepted = await executeAppAction(host.id, action, payload)
     configDialogOpen.value = false
+    if (action === 'update' && accepted.accepted) {
+      ElMessage.info(app.name + ' 更新任务已加入队列，后台将自动执行。')
+      await data.tasksQuery.refetch()
+      return
+    }
     if (accepted.result === 'running') {
       pendingAction.value = { hostId: host.id, appKey: key, action, appName: app.name, errors: 0 }
       ElMessage.info(app.name + ' ' + actionName(action) + '请求已受理，正在等待 Agent 执行结果。')
@@ -675,6 +703,7 @@ async function logout() {
       <div class="main-layout">
         <HostListPane
           :hosts="hosts"
+          :tasks="executionTasks"
           :selected-host-id="selectedHostId"
           :selected-health-status="healthStatus"
           :refreshing="refreshing"
@@ -688,6 +717,7 @@ async function logout() {
         />
         <StorePane
           :host="selectedHost"
+          :tasks="executionTasks"
           :snapshot="snapshot"
           :docker-inventory="dockerInventory"
           :snapshot-loading="snapshotLoading"
@@ -707,6 +737,7 @@ async function logout() {
           @configure="openInstallConfig"
           @action="handleAppAction"
           @info="showAppInfo"
+          @resolve-task="resolveTask"
         />
       </div>
     </main>
