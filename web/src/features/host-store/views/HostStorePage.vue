@@ -99,6 +99,7 @@ let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
 const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating)
 
 const hosts = data.hosts
+const executionTasks = data.tasks
 const sources = data.sources
 const selectedHost = data.selectedHost
 const rows = data.rows
@@ -312,7 +313,7 @@ function stateName(state: string) {
 
 async function refreshAll() {
   autoLinkAttempts.clear()
-  const tasks: Promise<unknown>[] = [data.hostsQuery.refetch()]
+  const tasks: Promise<unknown>[] = [data.hostsQuery.refetch(), data.tasksQuery.refetch()]
   if (selectedHost.value?.agent_id) {
     tasks.push(data.snapshotQuery.refetch(), data.statusQuery.refetch())
   }
@@ -549,6 +550,11 @@ async function runAppAction(
         : { source_id: app.source_id, app_id: app.app_id }
     const accepted = await executeAppAction(host.id, action, payload)
     configDialogOpen.value = false
+    if (action === 'update' && accepted.accepted) {
+      ElMessage.info(app.name + ' 更新任务已加入队列，后台将自动执行。')
+      await data.tasksQuery.refetch()
+      return
+    }
     if (accepted.result === 'running') {
       pendingAction.value = { hostId: host.id, appKey: key, action, appName: app.name, errors: 0 }
       ElMessage.info(app.name + ' ' + actionName(action) + '请求已受理，正在等待 Agent 执行结果。')
@@ -673,6 +679,7 @@ async function logout() {
       <div class="main-layout">
         <HostListPane
           :hosts="hosts"
+          :tasks="executionTasks"
           :selected-host-id="selectedHostId"
           :selected-health-status="healthStatus"
           :refreshing="refreshing"
@@ -686,6 +693,7 @@ async function logout() {
         />
         <StorePane
           :host="selectedHost"
+          :tasks="executionTasks"
           :snapshot="snapshot"
           :docker-inventory="dockerInventory"
           :snapshot-loading="snapshotLoading"
