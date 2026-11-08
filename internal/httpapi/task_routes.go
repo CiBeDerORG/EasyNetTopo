@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"strings"
@@ -42,6 +43,76 @@ func taskRoutes(mux *http.ServeMux, db *storage.Store, runner *tasks.Service, ho
 			return
 		}
 		jsonReply(w, http.StatusOK, map[string]any{"tasks": result})
+	})
+	mux.HandleFunc("POST /api/v1/tasks/{id}/resolve", func(w http.ResponseWriter, r *http.Request) {
+		cookie, err := r.Cookie(authCookie)
+		if err != nil || !db.HasSession(r.Context(), cookie.Value) {
+			http.Error(w, "请先登录", http.StatusUnauthorized)
+			return
+		}
+		if r.Header.Get("X-ENT-Request") != "1" {
+			http.Error(w, "缺少同源请求标记", http.StatusForbidden)
+			return
+		}
+		if origin := r.Header.Get("Origin"); origin != "" {
+			parsed, err := url.Parse(origin)
+			if err != nil || !strings.EqualFold(parsed.Host, r.Host) ||
+				(parsed.Scheme != "http" && parsed.Scheme != "https") {
+				http.Error(w, "非法请求来源", http.StatusForbidden)
+				return
+			}
+		}
+		var req struct {
+			ConfirmStopped bool `json:"confirm_stopped"`
+		}
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024))
+		decoder.DisallowUnknownFields()
+		if r.Header.Get("Content-Type") != "application/json" || decoder.Decode(&req) != nil || !req.ConfirmStopped {
+			http.Error(w, "需要人工核实远端没有执行中的操作", http.StatusBadRequest)
+			return
+		}
+		var extra any
+		if !errors.Is(decoder.Decode(&extra), io.EOF) {
+			http.Error(w, "请求正文无效", http.StatusBadRequest)
+			return
+		}
+		all, err := runner.List(r.Context())
+		if err != nil {
+			http.Error(w, "无法查询任务", http.StatusServiceUnavailable)
+			return
+		}
+		var task *storage.Task
+		for i := range all {
+			if all[i].ID == r.PathValue("id") {
+				task = &all[i]
+				break
+			}
+		}
+		if task == nil || task.Type != "application" || task.State != "interrupted" {
+			http.Error(w, "该任务不是可处理的中断应用任务", http.StatusConflict)
+			return
+		}
+		raw, err := hostSvc.AppAction(r.Context(), task.HostID, "status", map[string]any{
+			"apps": []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
+		})
+		if err != nil {
+			http.Error(w, "无法核实 Agent 当前状态，禁止释放主机执行锁", http.StatusConflict)
+			return
+		}
+		var state struct {
+			Apps []struct {
+				Result string `json:"result"`
+			} `json:"apps"`
+		}
+		if json.Unmarshal(raw, &state) != nil || len(state.Apps) != 1 || state.Apps[0].Result == "running" {
+			http.Error(w, "Agent 状态仍在运行或未知，禁止释放主机执行锁", http.StatusConflict)
+			return
+		}
+		if err := runner.ResolveInterrupted(r.Context(), task.ID); err != nil {
+			http.Error(w, "无法完成任务解除", http.StatusConflict)
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]any{"resolved": true, "task_id": task.ID})
 	})
 	mux.HandleFunc("POST /api/hooks/deploy/update", func(w http.ResponseWriter, r *http.Request) {
 		secret := os.Getenv("EASYNETTOPO_HOOK_TOKEN")
