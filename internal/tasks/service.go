@@ -267,6 +267,58 @@ type nativeAgentBaseline struct {
 
 const nativeBaselinePrefix = "agent-baseline:"
 
+// 同一次 Release 重装不会改变 Commit。只要更新指令已受理，已配对
+// Agent 返回不同的进程启动标识，就表示更新后的服务已重启并恢复连接。
+func nativeAgentRestarted(before, after nativeAgentBaseline) bool {
+	if before.StartedAt == "" || after.StartedAt == "" || before.StartedAt == after.StartedAt {
+		return false
+	}
+	_, err := time.Parse(time.RFC3339Nano, after.StartedAt)
+	return err == nil
+}
+
+// 中断时旧版本任务会把基线覆盖成故障描述；使用任务实际启动时间
+// 作为兼容性证据，且必须由已配对 Agent 的实时快照证明进程在此之后启动。
+func nativeAgentRestartedAfterTask(task storage.Task, startedAt string) bool {
+	current, err := time.Parse(time.RFC3339Nano, startedAt)
+	if err != nil {
+		return false
+	}
+	started, err := time.Parse(time.RFC3339Nano, task.StartedAt)
+	return err == nil && current.After(started)
+}
+
+// ResolveNativeInterrupted 仅供已人工核实停止操作、并已通过身份验证
+// 取得实时 Agent 快照的请求使用；确认重启就补记成功，否则关闭为失败。
+// 无需查询 Docker 应用状态，原生 Agent 并不是一个容器应用。
+func (s *Service) ResolveNativeInterrupted(ctx context.Context, id, startedAt string) (bool, error) {
+	task, err := s.store.Get(ctx, id)
+	if err != nil {
+		return false, err
+	}
+	if task.Type != "application" || task.State != "interrupted" ||
+		task.SourceID != storage.NativeAgentSourceID || task.AppID != storage.NativeAgentAppID {
+		return false, errors.New("不是可处理的中断原生 Agent 任务")
+	}
+	if _, err := time.Parse(time.RFC3339Nano, startedAt); err != nil {
+		return false, errors.New("当前 Agent 启动标识无效")
+	}
+	restarted := false
+	if strings.HasPrefix(task.Message, nativeBaselinePrefix) {
+		var before nativeAgentBaseline
+		if json.Unmarshal([]byte(strings.TrimPrefix(task.Message, nativeBaselinePrefix)), &before) == nil {
+			restarted = nativeAgentRestarted(before, nativeAgentBaseline{StartedAt: startedAt})
+		}
+	}
+	if !restarted {
+		restarted = nativeAgentRestartedAfterTask(task, startedAt)
+	}
+	if restarted {
+		return true, s.store.SetState(ctx, task, "succeeded", "")
+	}
+	return false, s.store.ResolveInterrupted(ctx, id)
+}
+
 func (s *Service) nativeAgentSnapshot(hostID string) (nativeAgentBaseline, error) {
 	ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
 	defer cancel()
@@ -353,12 +405,8 @@ func (s *Service) monitorNativeAgent(task storage.Task) {
 			return
 		}
 		after, err := s.nativeAgentSnapshot(task.HostID)
-		if err == nil && after.StartedAt != before.StartedAt {
-			if after.Commit != "" && after.Commit != "unknown" && after.Commit != before.Commit {
-				s.set(task, "succeeded", "")
-			} else {
-				s.set(task, "interrupted", "Agent 已重启，但构建 Commit 未变化或不可验证；请核对 Release 和更新日志")
-			}
+		if err == nil && nativeAgentRestarted(before, after) {
+			s.set(task, "succeeded", "")
 			return
 		}
 		select {

@@ -92,6 +92,32 @@ func taskRoutes(mux *http.ServeMux, db *storage.Store, runner *tasks.Service, ho
 			http.Error(w, "该任务不是可处理的中断应用任务", http.StatusConflict)
 			return
 		}
+		if task.SourceID == storage.NativeAgentSourceID && task.AppID == storage.NativeAgentAppID {
+			// 原生 Agent 没有 Docker 应用状态；通过已配对身份获取实时启动标识。
+			raw, err := hostSvc.Query(r.Context(), task.HostID, "host")
+			if err != nil {
+				http.Error(w, "无法核实 Agent 当前状态，禁止释放主机执行锁", http.StatusConflict)
+				return
+			}
+			var snapshot struct {
+				StartedAt string `json:"agent_started_at"`
+			}
+			if json.Unmarshal(raw, &snapshot) != nil || snapshot.StartedAt == "" {
+				http.Error(w, "Agent 当前启动标识缺失，禁止释放主机执行锁", http.StatusConflict)
+				return
+			}
+			restarted, err := runner.ResolveNativeInterrupted(r.Context(), task.ID, snapshot.StartedAt)
+			if err != nil {
+				http.Error(w, "无法完成原生 Agent 任务解除", http.StatusConflict)
+				return
+			}
+			state := "failed"
+			if restarted {
+				state = "succeeded"
+			}
+			jsonReply(w, http.StatusOK, map[string]any{"resolved": true, "task_id": task.ID, "state": state})
+			return
+		}
 		raw, err := hostSvc.AppAction(r.Context(), task.HostID, "status", map[string]any{
 			"apps": []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
 		})
@@ -112,7 +138,7 @@ func taskRoutes(mux *http.ServeMux, db *storage.Store, runner *tasks.Service, ho
 			http.Error(w, "无法完成任务解除", http.StatusConflict)
 			return
 		}
-		jsonReply(w, http.StatusOK, map[string]any{"resolved": true, "task_id": task.ID})
+		jsonReply(w, http.StatusOK, map[string]any{"resolved": true, "task_id": task.ID, "state": "failed"})
 	})
 	mux.HandleFunc("POST /api/hooks/deploy/update", func(w http.ResponseWriter, r *http.Request) {
 		secret := os.Getenv("EASYNETTOPO_HOOK_TOKEN")

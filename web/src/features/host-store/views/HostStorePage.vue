@@ -315,9 +315,12 @@ function stateName(state: string) {
 
 async function resolveTask(task: ExecutionTask) {
   if (task.state !== 'interrupted') return
+  const nativeAgent = task.source_id === 'native' && task.app_id === 'easyhostagent'
   try {
     await ElMessageBox.confirm(
-      '请先在目标主机检查 Docker / Agent，确认本次更新脚本确实已经停止。此操作只将无法确认的任务标记为失败，不代表更新成功，并会允许后续排队任务继续执行。',
+      nativeAgent
+        ? '请先确认目标主机的原生更新任务已经停止。系统将通过已配对 Agent 的启动标识验证是否在本次任务后重启：已重启则标记成功；否则按人工核实关闭为失败，并解除后续任务阻塞。'
+        : '请先在目标主机检查 Docker / Agent，确认本次更新脚本确实已经停止。此操作只将无法确认的任务标记为失败，不代表更新成功，并会允许后续排队任务继续执行。',
       '确认解除主机任务阻塞',
       { type: 'warning', confirmButtonText: '已核实，解除阻塞', cancelButtonText: '取消' }
     )
@@ -325,9 +328,13 @@ async function resolveTask(task: ExecutionTask) {
     return
   }
   try {
-    await resolveInterruptedExecutionTask(task.id)
+    const result = await resolveInterruptedExecutionTask(task.id)
     await data.tasksQuery.refetch()
-    ElMessage.success('已关闭中断任务，后续队列可以继续执行。')
+    if (result.state === 'succeeded') {
+      ElMessage.success('已确认 Agent 重新启动并恢复连接，更新任务标记为成功，主机执行锁已释放。')
+    } else {
+      ElMessage.success('已关闭中断任务，后续队列可以继续执行。')
+    }
   } catch (error) {
     ElMessage.error('解除任务阻塞失败：' + errorMessage(error))
   }
