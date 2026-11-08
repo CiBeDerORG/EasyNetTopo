@@ -167,6 +167,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
       <div v-else-if="visibleApps.length || showNativeAgent" class="market-grid">
         <NativeAgentCard
           v-if="showNativeAgent"
+          :host-id="host.id"
           :software-root="snapshot?.software_root"
           :platform="snapshot?.platform"
           :task="agentTask"

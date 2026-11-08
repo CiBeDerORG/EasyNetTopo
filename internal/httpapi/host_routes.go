@@ -106,6 +106,57 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
+		if len(parts) == 2 && len(parts[0]) == 36 && parts[1] == "adapters" {
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, "GET")
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.Query(ctx, parts[0], "adapters")
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+			} else if err != nil {
+				jsonReply(w, 502, map[string]string{"code": "adapter_unavailable", "message": "Agent Driver 设置暂时不可用；可能需要先更新 Agent"})
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_, _ = w.Write(raw)
+			}
+			return
+		}
+		if len(parts) == 3 && len(parts[0]) == 36 && parts[1] == "adapters" {
+			if parts[2] != "easytier" {
+				http.NotFound(w, r)
+				return
+			}
+			if r.Method != http.MethodPut {
+				methodNotAllowed(w, "PUT")
+				return
+			}
+			if !mutation(w, r) {
+				return
+			}
+			var req struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if !decode(w, r, &req) || req.Enabled == nil {
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.SetAdapter(ctx, parts[0], parts[2], *req.Enabled)
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+			} else if err != nil {
+				jsonReply(w, 502, map[string]string{"code": "adapter_settings_failed", "message": "Driver 开关未保存，请核对 Agent 连接和版本"})
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_, _ = w.Write(raw)
+			}
+			return
+		}
 		// Only local host metadata is editable. No Agent identity, fingerprint or
 		// sealed credentials are accepted by this endpoint.
 		if len(parts) == 1 && len(parts[0]) == 36 {

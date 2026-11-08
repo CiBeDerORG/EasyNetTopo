@@ -1,12 +1,14 @@
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CopyDocument, Refresh, Download, Lightning } from '@element-plus/icons-vue'
+import { CopyDocument, Refresh, Download, Lightning, Setting } from '@element-plus/icons-vue'
 import nativeAgentIcon from '../../../assets/easyhostagent.svg'
-import type { AgentMaintenanceState, AgentUpdateAction, ExecutionTask } from '../types'
+import type { AdapterType, AgentMaintenanceState, AgentUpdateAction, ExecutionTask } from '../types'
+import { getAgentAdapters, setAgentAdapter } from '../api'
 import { formatTaskTime, taskActive, taskSourceLabel } from '../task-status'
 
 const props = defineProps<{
+  hostId: string
   softwareRoot?: string
   platform?: string
   task?: ExecutionTask
@@ -22,6 +24,42 @@ const emit = defineEmits<{
   update: [action: AgentUpdateAction]
   resolve: []
 }>()
+
+const settingsOpen = ref(false)
+const settingsLoading = ref(false)
+const settingsError = ref('')
+const settingDriver = ref('')
+const driverTypes = ref<AdapterType[]>([])
+
+async function openDriverSettings() {
+  settingsOpen.value = true
+  settingsLoading.value = true
+  settingsError.value = ''
+  try {
+    const data = await getAgentAdapters(props.hostId)
+    driverTypes.value = data.types || []
+  } catch {
+    driverTypes.value = []
+    settingsError.value = '无法读取 Agent Driver 设置，请检查连接或先升级 Agent。'
+  } finally {
+    settingsLoading.value = false
+  }
+}
+
+async function toggleDriver(type: string, enabled: boolean) {
+  if (settingDriver.value || !props.connected) return
+  settingDriver.value = type
+  settingsError.value = ''
+  try {
+    const data = await setAgentAdapter(props.hostId, type, enabled)
+    driverTypes.value = data.types || []
+    ElMessage.success(enabled ? 'Driver 已启用' : 'Driver 已关闭')
+  } catch {
+    settingsError.value = 'Driver 设置未保存，开关状态保持不变。'
+  } finally {
+    settingDriver.value = ''
+  }
+}
 
 const status = computed(() => {
   if (props.task && taskActive(props.task)) return (props.task.state === 'queued' ? '排队中' : '更新中') +
@@ -95,6 +133,9 @@ async function showInstallCommand() {
       和网络连接。
     </p>
     <div class="actions">
+      <el-button size="small" :disabled="!connected || !!maintenance || busy" @click="openDriverSettings">
+        <el-icon><Setting /></el-icon>设置
+      </el-button>
       <el-button v-if="task?.state === 'interrupted'" size="small" type="warning" @click="emit('resolve')">核实后解除阻塞</el-button>
       <el-button v-if="!paired" size="small" type="primary" @click="showInstallCommand">
         <el-icon><Download /></el-icon>安装
@@ -105,6 +146,23 @@ async function showInstallCommand() {
         @click="emit('update', 'force-update')"><el-icon><Lightning /></el-icon>强制更新</el-button>
     </div>
     <p class="foot"><el-icon><CopyDocument /></el-icon>更新指令受理后不会立即报告成功；重启后自动验证主机重新连接。</p>
+    <el-dialog v-model="settingsOpen" title="EasyHostAgent · Driver 设置" width="440px" append-to-body>
+      <p class="settings-description">为当前主机启用或关闭内置 Driver。关闭后 Agent 将拒绝对应适配器请求，不影响应用本身运行。</p>
+      <el-alert v-if="settingsError" :title="settingsError" type="error" show-icon :closable="false" class="settings-error" />
+      <div v-loading="settingsLoading" class="driver-list">
+        <div v-for="driver in driverTypes" :key="driver.type" class="driver-row">
+          <div>
+            <strong>{{ driver.type === 'easytier' ? 'EasyTier Driver' : driver.type }}</strong>
+            <p>适配器查询：{{ driver.capabilities.join('、') }}</p>
+          </div>
+          <el-switch :model-value="driver.enabled" :loading="settingDriver === driver.type"
+            :disabled="settingsLoading || !!settingDriver"
+            :aria-label="'切换 ' + driver.type + ' Driver'"
+            @change="toggleDriver(driver.type, $event === true)" />
+        </div>
+        <el-empty v-if="!settingsLoading && !driverTypes.length && !settingsError" description="当前 Agent 未提供 Driver" :image-size="70" />
+      </div>
+    </el-dialog>
   </article>
 </template>
 
@@ -117,4 +175,10 @@ h4{margin:0 0 5px;font-size:14px}.kind{color:#80a6c3;font-size:10px}.description
 .state{color:#e0bb77;font-size:12px}.state.online{color:#8ce4b4}.state.danger{color:#ff9d92}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:14px}.actions :deep(.el-button){margin:0}
 .foot{display:flex;align-items:center;gap:4px;color:#7f9ab4;font-size:10px;margin:10px 0 0;line-height:1.4}
 .diagnostic{color:#ffb5aa;font-size:11px;line-height:1.8;margin:9px 0}.diagnostic code{font-size:10px;color:#f2c9a6}
+ .settings-description{font-size:12px;color:#a0b5c6;line-height:1.7;margin:0 0 16px}
+ .settings-error{margin-bottom:12px}
+ .driver-list{min-height:48px}
+ .driver-row{display:flex;align-items:center;justify-content:space-between;gap:15px;padding:12px 0;border-bottom:1px solid #e5e8ef}
+ .driver-row strong{font-size:13px}
+ .driver-row p{margin:5px 0 0;color:#7c8d9f;font-size:11px}
 </style>

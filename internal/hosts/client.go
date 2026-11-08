@@ -362,5 +362,8 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 	if kind == "docker" {
 		return client.Inventory(ctx, controllerID, token)
 	}
+	if kind == "adapters" {
+		return client.request(ctx, http.MethodGet, "/v1/adapters/types", nil, controllerID, token)
+	}
 	return nil, errors.New("未知 Agent 查询类型")
 }
