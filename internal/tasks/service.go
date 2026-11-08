@@ -43,6 +43,10 @@ func (s *Service) List(ctx context.Context) ([]storage.Task, error) {
 	return s.store.ListLatest(ctx)
 }
 
+func (s *Service) ResolveInterrupted(ctx context.Context, id string) error {
+	return s.store.ResolveInterrupted(ctx, id)
+}
+
 func (s *Service) Start() {
 	s.wg.Add(1)
 	go func() {
