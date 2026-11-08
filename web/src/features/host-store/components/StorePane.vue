@@ -6,10 +6,12 @@ import NativeAgentCard from './NativeAgentCard.vue'
 import { appKey, getAppPermissions } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
-import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, Host, HostSnapshot } from '../types'
+import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, ExecutionTask, Host, HostSnapshot } from '../types'
+import { currentAppTask, currentHostTask, formatTaskTime, taskActive, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   host: Host | null
+  tasks: ExecutionTask[]
   snapshot: HostSnapshot | null
   dockerInventory?: DockerInventory
   snapshotLoading: boolean
@@ -31,6 +33,7 @@ defineEmits<{
   configure: [app: CatalogApp]
   action: [app: CatalogApp, action: AppAction]
   info: [app: CatalogApp]
+  'resolve-task': [task: ExecutionTask]
   'agent-update': [action: AgentUpdateAction]
 }>()
 
@@ -93,6 +96,17 @@ function appPorts(app: CatalogApp): DockerPort[] {
               <el-tag size="small" effect="dark" :type="agentState.type">{{ agentState.label }}</el-tag>
             </p>
           </div>
+        </div>
+        <div v-if="currentHostTask(tasks, host.id)" class="host-observed" role="status">
+          <template v-if="currentHostTask(tasks, host.id)?.state === 'succeeded'">
+            <span>最近任务</span>
+            <strong>{{ formatTaskTime(currentHostTask(tasks, host.id)!) }}</strong>
+          </template>
+          <template v-else>
+            <span>{{ taskStateLabel(currentHostTask(tasks, host.id)!.state) }}</span>
+            <strong>{{ currentHostTask(tasks, host.id)?.id }}</strong>
+            <span>{{ taskSourceLabel(currentHostTask(tasks, host.id)!.trigger_source) }}</span>
+          </template>
         </div>
         <div v-if="snapshot" class="host-observed">
           <span>最近采集</span>
@@ -166,13 +180,15 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :key="appKey(app)"
           :app="app"
           :status="statusByKey[appKey(app)]"
+          :task="currentAppTask(tasks, host.id, app.source_id, app.app_id)"
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
-          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting'"
+          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(currentAppTask(tasks, host.id, app.source_id, app.app_id))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
+          @resolve="$emit('resolve-task', currentAppTask(tasks, host.id, app.source_id, app.app_id)!)"
         />
       </div>
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
