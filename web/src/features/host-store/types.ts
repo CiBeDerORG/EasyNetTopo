@@ -14,6 +14,8 @@ export type HostHealthStatus = 'online' | 'checking' | 'error' | 'paired' | 'unp
 export type HostSnapshot = {
   agent_id: string
   agent_started_at?: string
+  agent_commit?: string
+  agent_version?: string
   hostname: string
   platform: string
   arch: string
