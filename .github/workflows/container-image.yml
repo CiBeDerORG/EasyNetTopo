@@ -3,6 +3,7 @@ name: EasyNetTopo Multi-Arch Container Image
 on:
   push:
     branches:
+      - main
       - feat/deploy-manifest-lifecycle
       - feat/macos-app-market-20261106
     paths:
@@ -26,7 +27,7 @@ concurrency:
 
 jobs:
   image:
-    if: github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,7 +52,7 @@ jobs:
           push: true
           provenance: true
           tags: |
-            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
+            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/main' && 'main' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
             ghcr.io/cibederorg/easynettopo:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/CiBeDerORG/EasyNetTopo
