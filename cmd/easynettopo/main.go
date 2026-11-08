@@ -17,6 +17,7 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/httpapi"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/tasks"
 	"golang.org/x/term"
 )
 
@@ -90,11 +91,27 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("初始化主机管理失败: %w", err)
 	}
-	server := &http.Server{Addr: listen, Handler: httpapi.NewHandlerWithHosts(webDir, db, catalogService, hostService), ReadHeaderTimeout: 5 * time.Second}
+	taskStore, err := storage.NewTaskStore(context.Background(), db)
+	if err != nil {
+		return fmt.Errorf("初始化任务存储失败: %w", err)
+	}
+	taskCtx, stopTasks := context.WithCancel(context.Background())
+	taskService, err := tasks.New(taskCtx, taskStore, catalogService, hostService)
+	if err != nil {
+		stopTasks()
+		return fmt.Errorf("初始化任务调度失败: %w", err)
+	}
+	taskService.Start()
+	defer func() {
+		stopTasks()
+		taskService.Wait()
+	}()
+	server := &http.Server{Addr: listen, Handler: httpapi.NewHandlerWithHosts(webDir, db, catalogService, hostService, taskService), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	go func() {
 		<-ctx.Done()
+		stopTasks()
 		cancelCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 		defer cancel()
 		if err := server.Shutdown(cancelCtx); err != nil {

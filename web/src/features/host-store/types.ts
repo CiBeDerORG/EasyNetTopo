@@ -105,7 +105,7 @@ export type ConfigField = {
   max_length?: number
 }
 export type AppConfig = { revision: string; config: ConfigField[] }
-export type AppActionResponse = { action?: string; result?: string; message?: string }
+export type AppActionResponse = { action?: string; result?: string; message?: string; accepted?: boolean; tasks?: ExecutionTask[] }
 export type AppPermissions = {
   showInstall: boolean
   canInstall: boolean
@@ -119,4 +119,20 @@ export type AppPermissions = {
   canForceUpdate: boolean
   grantRequired: boolean
   blockReason: string
+}
+
+export type ExecutionTask = {
+  id: string
+  parent_id?: string
+  type: 'host' | 'application'
+  host_id: string
+  source_id?: string
+  app_id?: string
+  action: string
+  trigger_source: string
+  state: 'queued' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'interrupted'
+  message?: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
 }
