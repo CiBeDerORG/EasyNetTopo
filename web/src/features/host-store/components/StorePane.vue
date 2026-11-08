@@ -188,7 +188,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
-          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(currentAppTask(tasks, host.id, app.source_id, app.app_id))"
+          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(currentAppTask(tasks, host.id, app.source_id, app.app_id))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
