@@ -100,7 +100,6 @@ const resultLabel = computed(() => {
       </el-tooltip>
     </div>
     <div v-if="publishedPorts.length && status?.managed" class="published-ports" aria-label="当前对外端口">
-      <span class="ports-label">对外端口</span>
       <el-tag v-for="(port, index) in publishedPorts" :key="index" size="small" effect="plain" type="success">
         {{ formatPublishedPort(port) }}
       </el-tag>
