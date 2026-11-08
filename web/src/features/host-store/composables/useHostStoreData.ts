@@ -1,6 +1,6 @@
 import { computed, type ComputedRef, type Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { getApps, getDockerInventory, getHostSnapshot, getHosts, getSources, getAppStatuses } from '../api'
+import { getApps, getDockerInventory, getHostSnapshot, getHosts, getSources, getAppStatuses, getExecutionTasks } from '../api'
 import { appKey } from '../rules'
 import type { AppStatus, CatalogApp } from '../types'
 
@@ -10,6 +10,13 @@ export function useHostStoreData(
   shouldPoll: ComputedRef<boolean>,
   agentRestarting: ComputedRef<boolean>
 ) {
+  const tasksQuery = useQuery({
+    queryKey: ['execution-tasks'],
+    queryFn: getExecutionTasks,
+    enabled: authenticated,
+    retry: 0,
+    refetchInterval: 2500
+  })
   const hostsQuery = useQuery({
     queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000
   })
@@ -20,6 +27,7 @@ export function useHostStoreData(
     queryKey: ['catalog-apps'], queryFn: getApps, enabled: authenticated, staleTime: 15_000
   })
 
+  const tasks = computed(() => tasksQuery.data.value || [])
   const hosts = computed(() => hostsQuery.data.value || [])
   const sources = computed(() => sourcesQuery.data.value || [])
   const catalogApps = computed(() => appsQuery.data.value || [])
@@ -67,7 +75,7 @@ export function useHostStoreData(
   })
 
   return {
-    hostsQuery, sourcesQuery, appsQuery, snapshotQuery, statusQuery, dockerQuery,
-    hosts, sources, catalogApps, selectedHost, rows, statusByKey, visibleApps
+    hostsQuery, tasksQuery, sourcesQuery, appsQuery, snapshotQuery, statusQuery, dockerQuery,
+    hosts, tasks, sources, catalogApps, selectedHost, rows, statusByKey, visibleApps
   }
 }
