@@ -1,12 +1,14 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { Box, Delete, Edit } from '@element-plus/icons-vue'
-import type { Host, HostHealthStatus } from '../types'
+import type { ExecutionTask, Host, HostHealthStatus } from '../types'
+import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   host: Host
   selected: boolean
   healthStatus: HostHealthStatus
+  task?: ExecutionTask
 }>()
 
 defineEmits<{
@@ -77,6 +79,16 @@ const statusType = computed(() => ({
         </el-tooltip>
       </div>
     </div>
+    <div v-if="task" class="host-task" role="status">
+      <template v-if="task.state === 'succeeded'">
+        最近任务：{{ formatTaskTime(task) }}
+      </template>
+      <template v-else>
+        <span class="host-task-title">{{ taskStateLabel(task.state) }} · {{ task.id }}</span>
+        <span class="host-task-source">{{ taskSourceLabel(task.trigger_source) }}</span>
+        <span v-if="task.message" class="host-task-message">{{ task.message }}</span>
+      </template>
+    </div>
   </article>
 </template>
 
@@ -121,6 +133,10 @@ const statusType = computed(() => ({
 .status-checking, .status-paired { background: var(--ent-amber); box-shadow: 0 0 10px #ffbf735c; }
 .status-error { background: var(--ent-red); box-shadow: 0 0 10px #ff788b66; }
 .status-unpaired { background: #8594a5; }
+.host-task { margin-top: 9px; color: #93b4ca; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
+.host-task-title { display: block; color: #e1e9f1; }
+.host-task-source, .host-task-message { display: block; }
+.host-task-message { color: #f8b2a8; }
 .host-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 10px; }
 .host-tags { display: flex; min-width: 0; align-items: center; gap: 5px; flex-wrap: wrap; }
 .host-ops { display: flex; flex: none; align-items: center; gap: 0; }
