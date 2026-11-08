@@ -4,6 +4,7 @@ on:
   push:
     branches:
       - main
+      - feat/async-host-app-tasks-20261108
       - feat/deploy-manifest-lifecycle
       - feat/macos-app-market-20261106
     paths:
@@ -27,7 +28,7 @@ concurrency:
 
 jobs:
   image:
-    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106'
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feat/async-host-app-tasks-20261108' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -52,8 +53,32 @@ jobs:
           push: true
           provenance: true
           tags: |
-            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/main' && 'main' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
+            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/main' && 'main' || github.ref == 'refs/heads/feat/async-host-app-tasks-20261108' && 'feat-async-host-app-tasks-20261108' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
             ghcr.io/cibederorg/easynettopo:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/CiBeDerORG/EasyNetTopo
             org.opencontainers.image.revision=${{ github.sha }}
+
+      - name: Trigger EasyNetTopo deploy Hook
+        if: success() && github.ref == 'refs/heads/main'
+        env:
+          HOOK_URL: http://49.235.163.195:7017/api/hooks/deploy/update
+          HOOK_TOKEN: ${{ secrets.EASYNETTOPO_HOOK_TOKEN }}
+          HOOK_TARGETS_JSON: ${{ vars.EASYNETTOPO_HOOK_TARGETS_JSON }}
+        run: |
+          set -euo pipefail
+          if [[ -z "${HOOK_TARGETS_JSON:-}" ]]; then
+            echo "::notice::EASYNETTOPO_HOOK_TARGETS_JSON is empty; skip deploy Hook."
+            exit 0
+          fi
+          if [[ -z "${HOOK_TOKEN:-}" ]]; then
+            echo "::error::Missing Actions secret EASYNETTOPO_HOOK_TOKEN."
+            exit 1
+          fi
+          jq -e 'type == "array" and length >= 1 and length <= 64' <<< "$HOOK_TARGETS_JSON" >/dev/null
+          payload="$(jq -cn --argjson targets "$HOOK_TARGETS_JSON" '{trigger_source:"github_actions",targets:$targets}')"
+          curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --max-time 30 \
+            -X POST "$HOOK_URL" \
+            -H "Authorization: Bearer $HOOK_TOKEN" \
+            -H "Content-Type: application/json" \
+            --data-binary "$payload"
