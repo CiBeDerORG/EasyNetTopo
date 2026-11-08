@@ -41,9 +41,10 @@ const statusByKey = computed(() => Object.fromEntries(props.rows.map(row => [app
 const installedCount = computed(() => props.rows.filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
 const runningCount = computed(() => props.rows.filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
 const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
+const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
-  if (props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
+  if (taskActive(agentTask.value) || props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
   if (props.agentMaintenance?.state === 'timeout') return {
     label: props.snapshotError ? '重连超时' : '更新未完成', type: 'danger' as const
   }
@@ -167,6 +168,8 @@ function appPorts(app: CatalogApp): DockerPort[] {
         <NativeAgentCard
           v-if="showNativeAgent"
           :software-root="snapshot?.software_root"
+          :platform="snapshot?.platform"
+          :task="agentTask"
           :connected="!!snapshot && !snapshotError"
           :paired="!!host.agent_id"
           :checking="snapshotLoading"
@@ -194,7 +197,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
 
       <p class="side-note">
-        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 的更新由独立 systemd 任务执行，短暂断联正常；状态未知或身份不匹配时禁止远程操作。
+        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 的更新由系统独立维护任务执行，短暂断联正常；状态未知或身份不匹配时禁止远程操作。
       </p>
     </div>
   </section>
