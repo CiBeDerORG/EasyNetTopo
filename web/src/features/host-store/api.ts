@@ -95,7 +95,7 @@ export async function getExecutionTasks() {
 }
 
 export function resolveInterruptedExecutionTask(id: string) {
-  return apiRequest<{ resolved: boolean; task_id: string }>(
+  return apiRequest<{ resolved: boolean; task_id: string; state: 'succeeded' | 'failed' }>(
     '/api/v1/tasks/' + encodeURIComponent(id) + '/resolve',
     { method: 'POST', body: { confirm_stopped: true } }
   )
