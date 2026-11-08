@@ -19,6 +19,7 @@ defineEmits<{
   configure: []
   action: [action: AppAction]
   info: []
+  resolve: []
 }>()
 
 const logoText = computed(() => props.app.name.slice(0, 2).toUpperCase())
@@ -115,6 +116,9 @@ const resultLabel = computed(() => {
         <span v-if="task.message" class="task-error">{{ task.message }}</span>
       </template>
     </div>
+    <el-button v-if="task?.state === 'interrupted'" size="small" type="warning" plain class="task-resolve" @click="$emit('resolve')">
+      核实远端已停止后解除阻塞
+    </el-button>
     <div class="product-bottom">
       <div class="app-actions">
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
@@ -193,6 +197,7 @@ button.restriction-icon { cursor: pointer; }
 .published-ports { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; margin-top: 9px; }
 .ports-label { color: #82a8bf; font-size: 10px; }
 .published-ports :deep(.el-tag) { max-width: 100%; height: auto; padding: 2px 6px; white-space: normal; overflow-wrap: anywhere; font-size: 10px; }
+.task-resolve { margin: 10px 0 0; white-space: normal; height: auto; }
 .task-meta { margin-top: 9px; color: #a8c6d9; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 .task-line, .task-error { display: block; }
 .task-error { color: #f9b0a1; }
