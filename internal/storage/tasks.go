@@ -32,6 +32,11 @@ type TaskTarget struct {
 	Action   string
 }
 
+// Native Agent 使用保留的目标标识，复用现有主机/应用任务表和串行队列。
+// 这不是应用源 ID，也不通过 Git 应用清单执行。
+const NativeAgentSourceID = "native"
+const NativeAgentAppID = "easyhostagent"
+
 type TaskStore struct{ db *sql.DB }
 
 func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
