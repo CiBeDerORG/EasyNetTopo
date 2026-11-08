@@ -97,10 +97,12 @@ func (s *Service) schedule() {
 	}
 }
 
-func (s *Service) set(task storage.Task, state, message string) {
+func (s *Service) set(task storage.Task, state, message string) bool {
 	if err := s.store.SetState(context.Background(), task, state, message); err != nil {
 		slog.Error("任务状态写入失败", "task_id", task.ID, "error", err)
+		return false
 	}
+	return true
 }
 
 func (s *Service) process(task storage.Task) {
@@ -112,7 +114,9 @@ func (s *Service) process(task storage.Task) {
 	if s.ctx.Err() != nil {
 		return
 	}
-	s.set(task, "preparing", "")
+	if !s.set(task, "preparing", "") {
+		return
+	}
 	pkg, err := s.catalog.BuildCandidateBundle(s.ctx, task.SourceID, task.AppID)
 	if err != nil {
 		s.fail(task, "当前应用来源不可用或清单验证失败")
@@ -132,15 +136,22 @@ func (s *Service) process(task storage.Task) {
 		return
 	}
 	// 先持久化 running，再发命令。失联或重启后绝不盲目重复执行有副作用的更新。
-	s.set(task, "running", "")
+	if !s.set(task, "running", "") {
+		return
+	}
 	raw, err := s.hosts.AppAction(s.ctx, task.HostID, "update", map[string]string{
 		"source_id": task.SourceID, "app_id": task.AppID, "bundle_sha256": pkg.SHA256,
 	})
 	if err != nil {
 		var agentErr *hosts.AppError
-		if errors.As(err, &agentErr) && agentErr.Status == http.StatusConflict {
-			// Agent 的现有主机级独占锁依然有效。未接受的任务返回队列重试。
-			s.set(task, "queued", "主机正在执行其他操作，等待重试")
+		if errors.As(err, &agentErr) {
+			if agentErr.Status == http.StatusConflict {
+				// Agent 的现有主机级独占锁依然有效。未接受的任务返回队列重试。
+				s.set(task, "queued", "主机正在执行其他操作，等待重试")
+			} else {
+				// 明确的业务拒绝并未启动脚本，不能无限等待一个不存在的任务。
+				s.fail(task, "Agent 拒绝应用更新请求")
+			}
 			return
 		}
 		// 请求可能已送达，但回应丢失；先用 Agent 实际状态核对，避免重复更新。
@@ -170,6 +181,7 @@ func (s *Service) monitor(task storage.Task, digest string) {
 	defer ticker.Stop()
 	// 启动后立即查一次，后续以固定间隔轮询，直到收到实际完成结果。
 	everSeenRunning := false
+	missingCount := 0
 	for {
 		if s.ctx.Err() != nil {
 			return
@@ -189,6 +201,7 @@ func (s *Service) monitor(task storage.Task, digest string) {
 				} `json:"apps"`
 			}
 			if json.Unmarshal(raw, &response) == nil {
+				matched := false
 				for _, row := range response.Apps {
 					if row.Source != task.SourceID || row.App != task.AppID || row.Action != "update" {
 						continue
@@ -196,6 +209,7 @@ func (s *Service) monitor(task storage.Task, digest string) {
 					if digest != "" && row.Digest != digest {
 						continue
 					}
+					matched = true
 					switch row.Result {
 					case "running":
 						everSeenRunning = true
@@ -214,6 +228,15 @@ func (s *Service) monitor(task storage.Task, digest string) {
 						s.set(task, "interrupted", "Agent 上次更新已中断，请人工确认")
 						return
 					}
+				}
+				if matched {
+					missingCount = 0
+				} else {
+					missingCount++
+				}
+				if missingCount >= 5 {
+					s.set(task, "interrupted", "无法在 Agent 中确认本次更新记录，请核对后处理")
+					return
 				}
 			}
 		}
