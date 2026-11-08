@@ -174,7 +174,6 @@ type PortForwardChange struct {
 	Destination     string `json:"destination,omitempty"`
 	AllowPublicBind bool   `json:"allow_public_bind,omitempty"`
 }
-
 // EasyTierPortForwards proxies fixed read/write operations through the existing
 // pinned identity, encrypted pairing credential and controller authorization.
 func (s *Service) EasyTierPortForwards(ctx context.Context, hostID, method, instanceID, instanceName string, change *PortForwardChange) (json.RawMessage, error) {

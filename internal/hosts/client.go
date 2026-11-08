@@ -384,4 +384,5 @@ type AdapterHTTPError struct {
 	Status int
 	Code   string
 }
+
 func (e *AdapterHTTPError) Error() string { return "EasyTier Agent adapter error: " + e.Code }
