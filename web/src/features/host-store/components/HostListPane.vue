@@ -2,10 +2,12 @@
 import { computed, ref } from 'vue'
 import { Plus, Refresh, Search, Setting } from '@element-plus/icons-vue'
 import HostCard from './HostCard.vue'
-import type { Host, HostHealthStatus } from '../types'
+import type { ExecutionTask, Host, HostHealthStatus } from '../types'
+import { currentHostTask } from '../task-status'
 
 const props = defineProps<{
   hosts: Host[]
+  tasks: ExecutionTask[]
   selectedHostId: string
   selectedHealthStatus: HostHealthStatus
   refreshing: boolean
@@ -68,6 +70,7 @@ const filteredHosts = computed(() => {
         v-for="host in filteredHosts"
         :key="host.id"
         :host="host"
+        :task="currentHostTask(tasks, host.id)"
         :selected="host.id === selectedHostId"
         :health-status="host.id === selectedHostId ? selectedHealthStatus : host.agent_id ? 'paired' : 'unpaired'"
         @select="$emit('select', $event.id)"
