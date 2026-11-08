@@ -10,6 +10,7 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/tasks"
 )
 
 // NewHandler 建立最小 HTTP 路由，业务写操作将在完成认证后单独开放。
@@ -21,7 +22,7 @@ func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service)
 	return NewHandlerWithHosts(webDir, db, catalogSvc, nil)
 }
 
-func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.Service, hostSvc *hosts.Service) http.Handler {
+func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.Service, hostSvc *hosts.Service, taskServices ...*tasks.Service) http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet {
@@ -43,8 +44,15 @@ func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.S
 		catalogRoutes(mux, db, catalogSvc, hostSvc != nil)
 	}
 
+	var taskSvc *tasks.Service
+	if len(taskServices) > 0 {
+		taskSvc = taskServices[0]
+	}
 	if hostSvc != nil {
-		hostRoutes(mux, db, hostSvc, catalogSvc)
+		hostRoutes(mux, db, hostSvc, catalogSvc, taskSvc)
+	}
+	if taskSvc != nil && hostSvc != nil && catalogSvc != nil {
+		taskRoutes(mux, db, taskSvc, hostSvc, catalogSvc)
 	}
 
 	// 没有声明的 /api 路由不能落入 SPA 回退逻辑。
