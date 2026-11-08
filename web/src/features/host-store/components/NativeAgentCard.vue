@@ -158,7 +158,7 @@ async function showInstallCommand() {
           <el-switch :model-value="driver.enabled" :loading="settingDriver === driver.type"
             :disabled="settingsLoading || !!settingDriver"
             :aria-label="'切换 ' + driver.type + ' Driver'"
-            @change="value => toggleDriver(driver.type, value === true)" />
+            @change="toggleDriver(driver.type, $event === true)" />
         </div>
         <el-empty v-if="!settingsLoading && !driverTypes.length && !settingsError" description="当前 Agent 未提供 Driver" :image-size="70" />
       </div>

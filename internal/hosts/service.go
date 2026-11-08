@@ -155,7 +155,9 @@ func (s *Service) SetAdapter(ctx context.Context, id, name string, enabled bool)
 	if err != nil {
 		return nil, err
 	}
-	var reply struct { AgentID string `json:"agent_id"` }
+	var reply struct {
+		AgentID string `json:"agent_id"`
+	}
 	if err := json.Unmarshal(raw, &reply); err != nil || reply.AgentID != h.AgentID {
 		return nil, errors.New("Agent Driver 响应身份不匹配")
 	}

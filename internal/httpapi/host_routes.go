@@ -137,7 +137,9 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			if !mutation(w, r) {
 				return
 			}
-			var req struct { Enabled *bool `json:"enabled"` }
+			var req struct {
+				Enabled *bool `json:"enabled"`
+			}
 			if !decode(w, r, &req) || req.Enabled == nil {
 				return
 			}
