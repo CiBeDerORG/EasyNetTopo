@@ -42,7 +42,10 @@ export function useHostStoreData(
     enabled: computed(() => authenticated.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
     retry: 0,
     staleTime: 10_000,
-    refetchInterval: computed(() => agentRestarting.value ? 3000 : false)
+    refetchInterval: computed(() => agentRestarting.value || tasks.value.some(task =>
+      task.host_id === selectedHostId.value && task.source_id === 'native' &&
+      task.app_id === 'easyhostagent' && ['queued', 'preparing', 'running'].includes(task.state)
+    ) ? 3000 : false)
   })
   const statusQuery = useQuery({
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),
