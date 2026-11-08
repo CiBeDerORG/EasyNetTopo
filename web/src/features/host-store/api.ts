@@ -1,5 +1,5 @@
 import { apiRequest } from '../../lib/api-client'
-import type { AppAction, AppActionResponse, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot } from './types'
+import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot } from './types'
 
 export function getAuthStatus() {
   return apiRequest<AuthStatus>('/api/v1/auth/status')
@@ -87,4 +87,9 @@ export function executeAppAction(hostId: string, action: AppAction, payload: App
     '/api/v1/hosts/' + encodeURIComponent(hostId) + '/apps/' + action,
     { method: 'POST', body: payload }
   )
+}
+
+export async function getExecutionTasks() {
+  const response = await apiRequest<{ tasks: ExecutionTask[] }>('/api/v1/tasks')
+  return response.tasks || []
 }
