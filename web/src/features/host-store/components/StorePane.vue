@@ -177,6 +177,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :maintenance="agentMaintenance"
           :busy="agentUpdateBusy"
           @update="$emit('agent-update', $event)"
+          @resolve="agentTask && $emit('resolve-task', agentTask)"
         />
         <AppCard
           v-for="app in visibleApps"
