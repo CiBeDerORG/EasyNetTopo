@@ -2,7 +2,7 @@
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Close } from '@element-plus/icons-vue'
+import { SwitchButton } from '@element-plus/icons-vue'
 import { formatApiError } from '../../../lib/api-client'
 import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
@@ -694,7 +694,7 @@ async function logout() {
           <span v-if="controllerId" class="controller-id">控制端 {{ controllerId.slice(0, 8) }}</span>
           <el-tooltip content="退出登录" placement="bottom">
             <el-button text circle aria-label="退出登录" @click="logout">
-              <el-icon><Close /></el-icon>
+              <el-icon><SwitchButton /></el-icon>
             </el-button>
           </el-tooltip>
         </div>
