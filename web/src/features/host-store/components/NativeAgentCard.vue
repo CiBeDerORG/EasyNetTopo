@@ -20,6 +20,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   update: [action: AgentUpdateAction]
+  resolve: []
 }>()
 
 const status = computed(() => {
@@ -82,7 +83,7 @@ async function showInstallCommand() {
     <p v-if="task && task.state === 'succeeded'" class="foot">最近自动更新：{{ formatTaskTime(task) }}</p>
     <p v-else-if="task" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message && (task.state === 'failed' || task.state === 'interrupted')"> · {{ task.message }}</span></p>
     <p v-if="maintenance?.state === 'timeout' || task?.state === 'interrupted'" class="diagnostic" role="alert">
-      超过 10 分钟仍未确认 Agent 完成重启并恢复连接，可能是更新失败、未重启或网络断联。请开发人员在主机检查：
+      本次更新结果尚未确认，可能是下载失败、未重启或网络断联。请先在目标主机核对更新任务已经停止，再人工解除阻塞：
       <template v-if="platform === 'macos'">
         <code>launchctl print gui/$(id -u)/org.cibeder.easyhostagent</code>、
         <code>deploy/state/easyhostagent-update.stderr.log</code>
@@ -94,6 +95,7 @@ async function showInstallCommand() {
       和网络连接。
     </p>
     <div class="actions">
+      <el-button v-if="task?.state === 'interrupted'" size="small" type="warning" @click="emit('resolve')">核实后解除阻塞</el-button>
       <el-button v-if="!paired" size="small" type="primary" @click="showInstallCommand">
         <el-icon><Download /></el-icon>安装
       </el-button>
