@@ -77,7 +77,7 @@ jobs:
           fi
           jq -e 'type == "array" and length >= 1 and length <= 64' <<< "$HOOK_TARGETS_JSON" >/dev/null
           payload="$(jq -cn --argjson targets "$HOOK_TARGETS_JSON" '{trigger_source:"github_actions",targets:$targets}')"
-          curl --fail-with-body --silent --show-error --retry 2 --retry-all-errors --max-time 30 \
+          curl --fail-with-body --silent --show-error --max-time 30 \
             -X POST "$HOOK_URL" \
             -H "Authorization: Bearer $HOOK_TOKEN" \
             -H "Content-Type: application/json" \
