@@ -45,7 +45,6 @@ func TestResolveHookTargetsRejectAmbiguous(t *testing.T) {
 	}
 }
 
-
 func TestResolveHookTargetsAcceptsNativeAgentWithoutCatalogEntry(t *testing.T) {
 	hosts := []storage.Host{{ID: "host", Name: "Mac mini", AgentID: "paired"}}
 	targets, err := resolveTargets([]hookTarget{{HostName: "Mac mini", ServiceName: "easyhostagent"}}, hosts, nil)
