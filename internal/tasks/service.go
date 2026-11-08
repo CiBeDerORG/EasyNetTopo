@@ -175,7 +175,7 @@ func (s *Service) monitor(task storage.Task, digest string) {
 			return
 		}
 		raw, err := s.hosts.AppAction(s.ctx, task.HostID, "status", map[string]any{
-			"apps": []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
+			"apps":            []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
 			"include_managed": false,
 		})
 		if err == nil {
