@@ -35,11 +35,13 @@
 EasyNetTopo 的多架构镜像发布工作流在 `main` 分支构建并推送成功后，可自动调用部署 Hook：
 
 - Hook URL：`http://49.235.163.195:7017/api/hooks/deploy/update`
-- Actions Secret：`EASYNETTOPO_HOOK_TOKEN`，值必须与 EasyNetTopo 服务端 `/software/deploy/.secrets` 中的同名配置一致（至少 32 个字符）。
+- Actions Secret：`EASYNETTOPO_HOOK_TOKEN`，值必须与 EasyNetTopo 服务端实际 `<SOFTWARE_ROOT>/deploy/.secrets` 中的同名配置一致（至少 32 个字符；macOS 常见 `/opt/software/deploy/.secrets`）。
 - Actions Variable：`EASYNETTOPO_HOOK_TARGETS_JSON`，填写 JSON 数组，例如：
   `[{"host_name":"Mac-mini","service_name":"easynettopo"},{"host_name":"Linux-server","service_name":"portainer"}]`。
 - 未配置目标数组时，工作流会提示并跳过 Hook；配置目标后，只有 `main` 镜像发布成功才会提交更新请求。
 
 Hook 只负责受理任务（HTTP 202），不代表远端更新已完成。任务状态由 EasyNetTopo 前端查看。
+
+**完整通用使用手册：** [应用关联与自动更新 Hook：配置、GitHub Actions、跨仓库接入及故障排查](docs/github-actions-deploy-hook.md)。
 
 **安全提醒：** 当前地址按部署方要求使用 HTTP。Bearer Token 会以明文经过网络，不应在不可信公网链路上使用；正式长期使用建议为该地址配置 HTTPS 反向代理，再将工作流 URL 改为 HTTPS。
