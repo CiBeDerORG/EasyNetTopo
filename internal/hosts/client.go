@@ -267,6 +267,14 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 			}
 			return nil, &PairingHTTPError{Status: res.StatusCode, Code: failure.Code}
 		}
+		if strings.HasPrefix(path, "/v1/adapters/easytier/port-forwards") {
+			var failure struct { Code string `json:"code"` }
+			_ = json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure)
+			if failure.Code == "invalid_request" || failure.Code == "invalid_port_forward" ||
+				failure.Code == "driver_disabled" || failure.Code == "port_forward_failed" {
+				return nil, &AdapterHTTPError{Status: res.StatusCode, Code: failure.Code}
+			}
+		}
 		if strings.HasPrefix(path, "/v1/apps/") {
 			var failure struct{ Code, Message string }
 			if json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure) == nil && (failure.Code == "app_action" || failure.Code == "app_status") {
@@ -367,3 +375,11 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 	}
 	return nil, errors.New("未知 Agent 查询类型")
 }
+
+// AdapterHTTPError returns only allowlisted errors from the paired Agent.
+// Error response bodies and arbitrary remote messages are never forwarded.
+type AdapterHTTPError struct {
+	Status int
+	Code string
+}
+func (e *AdapterHTTPError) Error() string { return "EasyTier Agent adapter error: " + e.Code }

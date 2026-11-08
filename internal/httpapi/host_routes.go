@@ -157,6 +157,55 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			}
 			return
 		}
+		if len(parts) == 4 && len(parts[0]) == 36 && parts[1] == "adapters" && parts[2] == "easytier" && parts[3] == "port-forwards" {
+			if r.Method != http.MethodGet && r.Method != http.MethodPost && r.Method != http.MethodDelete {
+				methodNotAllowed(w, "GET, POST, DELETE")
+				return
+			}
+			if r.Method != http.MethodGet && !mutation(w, r) {
+				return
+			}
+			var change *hosts.PortForwardChange
+			var instanceID, instanceName string
+			if r.Method == http.MethodGet {
+				q := r.URL.Query()
+				for key, values := range q {
+					if (key != "instance_id" && key != "instance_name") || len(values) != 1 {
+						jsonReply(w, 400, map[string]string{"code": "invalid_request", "message": "不支持的查询参数"})
+						return
+					}
+				}
+				instanceID, instanceName = q.Get("instance_id"), q.Get("instance_name")
+			} else {
+				change = &hosts.PortForwardChange{}
+				if !decode(w, r, change) {
+					return
+				}
+				if change.ResourceID != "compose:easytier" {
+					jsonReply(w, 400, map[string]string{"code": "invalid_request", "message": "只允许操作 EasyTier Compose 资源"})
+					return
+				}
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.EasyTierPortForwards(ctx, parts[0], r.Method, instanceID, instanceName, change)
+			switch {
+			case errors.Is(err, storage.ErrHostNotFound):
+				http.NotFound(w, r)
+			case err != nil:
+				var agentErr *hosts.AdapterHTTPError
+				if errors.As(err, &agentErr) && (agentErr.Status == 400 || agentErr.Status == 403 || agentErr.Status == 422) {
+					jsonReply(w, agentErr.Status, map[string]string{"code": agentErr.Code, "message": "EasyTier 端口转发操作被 Agent 拒绝"})
+				} else {
+					jsonReply(w, 502, map[string]string{"code": "adapter_unavailable", "message": "无法访问已配对主机上的 EasyTier Driver"})
+				}
+			default:
+				w.Header().Set("Content-Type", "application/json")
+				w.Header().Set("Cache-Control", "no-store")
+				_, _ = w.Write(raw)
+			}
+			return
+		}
 		// Only local host metadata is editable. No Agent identity, fingerprint or
 		// sealed credentials are accepted by this endpoint.
 		if len(parts) == 1 && len(parts[0]) == 36 {
