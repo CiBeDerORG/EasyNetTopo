@@ -3,7 +3,7 @@ import { computed, ref, watch } from 'vue'
 import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
 import { formatPublishedPort, uniquePublishedPorts } from '../ports'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort, ExecutionTask } from '../types'
-import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
+import { formatTaskTime, formatTaskTriggerTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   app: CatalogApp
@@ -114,6 +114,7 @@ const resultLabel = computed(() => {
         <span class="task-line">触发来源：{{ taskSourceLabel(task.trigger_source) }}</span>
         <span v-if="task.message" class="task-error">{{ task.message }}</span>
       </template>
+      <span class="task-line">触发时间：{{ formatTaskTriggerTime(task) }}</span>
     </div>
     <el-button v-if="task?.state === 'interrupted'" size="small" type="warning" plain class="task-resolve" @click="$emit('resolve')">
       核实远端已停止后解除阻塞

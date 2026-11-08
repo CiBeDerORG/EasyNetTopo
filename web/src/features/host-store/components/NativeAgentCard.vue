@@ -5,7 +5,7 @@ import { CopyDocument, Refresh, Download, Lightning, Setting } from '@element-pl
 import nativeAgentIcon from '../../../assets/easyhostagent.svg'
 import type { AdapterType, AgentMaintenanceState, AgentUpdateAction, ExecutionTask } from '../types'
 import { getAgentAdapters, setAgentAdapter } from '../api'
-import { formatTaskTime, taskActive, taskSourceLabel } from '../task-status'
+import { formatTaskTime, formatTaskTriggerTime, taskActive, taskSourceLabel } from '../task-status'
 
 const props = defineProps<{
   hostId: string
@@ -120,6 +120,7 @@ async function showInstallCommand() {
     <div class="state" :class="{ online: connected && !maintenance && !taskActive(task) && task?.state !== 'failed' && task?.state !== 'interrupted', danger: maintenance?.state === 'timeout' || task?.state === 'failed' || task?.state === 'interrupted' }">{{ status }}</div>
     <p v-if="task && task.state === 'succeeded'" class="foot">最近自动更新：{{ formatTaskTime(task) }}</p>
     <p v-else-if="task" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message && (task.state === 'failed' || task.state === 'interrupted')"> · {{ task.message }}</span></p>
+    <p v-if="task" class="foot">触发时间：{{ formatTaskTriggerTime(task) }}</p>
     <p v-if="maintenance?.state === 'timeout' || task?.state === 'interrupted'" class="diagnostic" role="alert">
       本次更新结果尚未确认，可能是下载失败、未重启或网络断联。请先在目标主机核对更新任务已经停止，再人工解除阻塞：
       <template v-if="platform === 'macos'">

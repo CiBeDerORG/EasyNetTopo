@@ -7,7 +7,7 @@ import { appKey, getAppPermissions } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
 import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, ExecutionTask, Host, HostSnapshot } from '../types'
-import { currentAppTask, currentHostTask, formatTaskTime, taskActive, taskSourceLabel, taskStateLabel } from '../task-status'
+import { currentAppTask, currentHostTask, formatTaskTime, formatTaskTriggerTime, taskActive, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   host: Host | null
@@ -108,6 +108,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
             <strong>{{ currentHostTask(tasks, host.id)?.id }}</strong>
             <span>{{ taskSourceLabel(currentHostTask(tasks, host.id)!.trigger_source) }}</span>
           </template>
+          <span>触发时间：{{ formatTaskTriggerTime(currentHostTask(tasks, host.id)!) }}</span>
         </div>
         <div v-if="snapshot" class="host-observed">
           <span>最近采集</span>

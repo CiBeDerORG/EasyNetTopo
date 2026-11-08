@@ -45,3 +45,9 @@ export function taskActive(task?: ExecutionTask): boolean {
 export function formatTaskTime(task: ExecutionTask): string {
   return new Date(task.finished_at || task.started_at || task.created_at).toLocaleString()
 }
+
+// 任务触发时间恒取创建时间，不能使用开始/完成时间替代。
+export function formatTaskTriggerTime(task: ExecutionTask): string {
+  const time = new Date(task.created_at)
+  return Number.isNaN(time.getTime()) ? '未知' : time.toLocaleString()
+}
