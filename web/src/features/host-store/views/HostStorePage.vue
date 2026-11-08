@@ -476,6 +476,7 @@ async function removeSource(source: CatalogSource) {
 }
 
 async function openInstallConfig(app: CatalogApp) {
+  if (app.app_id === 'easynettopo') return
   if (!selectedHost.value?.agent_id) {
     ElMessage.warning('请先选择并配对一台主机。')
     return
@@ -534,6 +535,7 @@ async function runAppAction(
   action: AppAction,
   install?: { revision: string; config: Record<string, string> }
 ) {
+  if (app.app_id === 'easynettopo' && action !== 'update') return
   const host = selectedHost.value
   if (!host?.agent_id) {
     ElMessage.warning('请先选择并配对一台主机。')
