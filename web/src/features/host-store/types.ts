@@ -120,3 +120,19 @@ export type AppPermissions = {
   grantRequired: boolean
   blockReason: string
 }
+
+export type ExecutionTask = {
+  id: string
+  parent_id?: string
+  type: 'host' | 'application'
+  host_id: string
+  source_id?: string
+  app_id?: string
+  action: string
+  trigger_source: string
+  state: 'queued' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'interrupted'
+  message?: string
+  created_at: string
+  started_at?: string
+  finished_at?: string
+}
