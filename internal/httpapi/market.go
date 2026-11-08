@@ -15,6 +15,12 @@ type marketRef struct {
 	App    string `json:"app_id"`
 }
 
+// EasyNetTopo 是控制端自身；保留后台自动关联所需的 adopt，
+// 但禁止从应用市场 API 绕过前端执行安装、卸载或强制更新。
+func marketActionAllowed(appID, action string) bool {
+	return appID != "easynettopo" || action == "update" || action == "adopt" || action == "status"
+}
+
 func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, service *hosts.Service, source *catalog.Service) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "需要 JSON", 415)
@@ -42,6 +48,10 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			http.Error(w, "无效的应用标识", 400)
 			return
 		}
+		if !marketActionAllowed(req.App, name) {
+			http.Error(w, "EasyNetTopo 仅支持更新", http.StatusForbidden)
+			return
+		}
 		body = req
 	case "install", "update", "adopt", "force_update":
 		var req struct {
@@ -51,6 +61,10 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 		}
 		if !decode(&req) || name != "install" && len(req.Config) != 0 {
 			http.Error(w, "无效的安装或更新参数", 400)
+			return
+		}
+		if !marketActionAllowed(req.App, name) {
+			http.Error(w, "EasyNetTopo 仅支持更新", http.StatusForbidden)
 			return
 		}
 		pkg, err := source.BuildCandidateBundle(ctx, req.Source, req.App)
