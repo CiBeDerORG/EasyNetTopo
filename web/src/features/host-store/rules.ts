@@ -39,8 +39,8 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
   // EasyNetTopo 是控制台本身：应用商店仅允许更新已安装的受管实例。
   // 不展示安装、卸载、强制更新入口，也不自动赋予外部容器更新权限。
   if (app.app_id === 'easynettopo') {
-    // 应用包使用 Linux/fnOS 原生脚本；Mac 更新仍需走已有的 deploy Mac 入口。
-    const supported = platform === 'linux' || platform === 'fnos'
+    // macOS 经 Agent 校验部署身份后复用已有 deploy macOS 更新入口。
+    const supported = platform === 'linux' || platform === 'fnos' || platform === 'macos'
     return {
       showInstall: false, canInstall: false,
       showUpdate: !!app.revision, canUpdate: supported && canUpdate,
@@ -49,7 +49,7 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
       showForceUpdate: false, canForceUpdate: false,
       grantRequired: false,
       blockReason: !supported && platform
-        ? 'EasyNetTopo 应用市场更新目前支持 Linux/fnOS；macOS 请通过 deploy 更新。'
+        ? 'EasyNetTopo 当前主机平台不受支持，请通过 deploy 更新。'
         : blockReason || (!managed ? 'EasyNetTopo 只支持更新已有受管安装，不提供安装或卸载。' : '')
     }
   }
