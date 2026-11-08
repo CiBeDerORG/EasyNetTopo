@@ -344,9 +344,9 @@ func (s *Service) monitorNativeAgent(task storage.Task) {
 		s.set(task, "interrupted", "Agent 更新前的状态记录损坏，需人工核对")
 		return
 	}
-	ticker := time.NewTicker(3*time.Second)
+	ticker := time.NewTicker(3 * time.Second)
 	defer ticker.Stop()
-	deadline := time.NewTimer(10*time.Minute)
+	deadline := time.NewTimer(10 * time.Minute)
 	defer deadline.Stop()
 	for {
 		if s.ctx.Err() != nil {
