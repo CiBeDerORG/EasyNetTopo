@@ -5,6 +5,7 @@ on:
     branches:
       - feat/deploy-manifest-lifecycle
       - feat/macos-app-market-20261106
+      - feat/async-host-app-tasks-20261108
     paths:
       - Dockerfile
       - .dockerignore
@@ -26,7 +27,7 @@ concurrency:
 
 jobs:
   image:
-    if: github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106'
+    if: github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' || github.ref == 'refs/heads/feat/macos-app-market-20261106' || github.ref == 'refs/heads/feat/async-host-app-tasks-20261108'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -51,7 +52,7 @@ jobs:
           push: true
           provenance: true
           tags: |
-            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
+            ghcr.io/cibederorg/easynettopo:${{ github.ref == 'refs/heads/feat/async-host-app-tasks-20261108' && 'feat-async-host-app-tasks-20261108' || github.ref == 'refs/heads/feat/deploy-manifest-lifecycle' && 'feat-deploy-manifest-lifecycle' || 'feat-macos-app-market-20261106' }}
             ghcr.io/cibederorg/easynettopo:sha-${{ github.sha }}
           labels: |
             org.opencontainers.image.source=https://github.com/CiBeDerORG/EasyNetTopo
