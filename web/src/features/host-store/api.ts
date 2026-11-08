@@ -93,3 +93,10 @@ export async function getExecutionTasks() {
   const response = await apiRequest<{ tasks: ExecutionTask[] }>('/api/v1/tasks')
   return response.tasks || []
 }
+
+export function resolveInterruptedExecutionTask(id: string) {
+  return apiRequest<{ resolved: boolean; task_id: string }>(
+    '/api/v1/tasks/' + encodeURIComponent(id) + '/resolve',
+    { method: 'POST', body: { confirm_stopped: true } }
+  )
+}
