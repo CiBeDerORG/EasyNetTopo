@@ -17,10 +17,10 @@ import (
 )
 
 type Service struct {
-	ctx    context.Context
-	store  *storage.TaskStore
+	ctx     context.Context
+	store   *storage.TaskStore
 	catalog *catalog.Service
-	hosts  *hosts.Service
+	hosts   *hosts.Service
 
 	mu      sync.Mutex
 	running map[string]bool
