@@ -260,3 +260,20 @@ func (s *TaskStore) RecoverPreparation(ctx context.Context) error {
 		WHERE type='application' AND state='preparing'`)
 	return err
 }
+
+func (s *TaskStore) Get(ctx context.Context, id string) (Task, error) {
+	return scanTask(s.db.QueryRowContext(ctx, "SELECT "+taskColumns+" FROM execution_tasks WHERE id=?", id))
+}
+
+// ResolveInterrupted 仅在管理员确认后把无法判定的远端任务关闭为失败。
+// 它不把未确认的部署伪造成成功；后续排队任务才可恢复。
+func (s *TaskStore) ResolveInterrupted(ctx context.Context, id string) error {
+	task, err := s.Get(ctx, id)
+	if err != nil {
+		return err
+	}
+	if task.Type != "application" || task.State != "interrupted" {
+		return errors.New("只有中断的应用任务可以人工关闭")
+	}
+	return s.SetState(ctx, task, "failed", "管理员确认远端已停止，关闭中断任务（未证明更新成功）")
+}
