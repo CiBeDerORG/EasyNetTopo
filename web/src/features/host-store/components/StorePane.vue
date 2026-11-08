@@ -33,6 +33,7 @@ defineEmits<{
   configure: [app: CatalogApp]
   action: [app: CatalogApp, action: AppAction]
   info: [app: CatalogApp]
+  'resolve-task': [task: ExecutionTask]
   'agent-update': [action: AgentUpdateAction]
 }>()
 
@@ -187,6 +188,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
+          @resolve="$emit('resolve-task', currentAppTask(tasks, host.id, app.source_id, app.app_id)!)"
         />
       </div>
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
