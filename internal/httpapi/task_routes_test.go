@@ -44,3 +44,16 @@ func TestResolveHookTargetsRejectAmbiguous(t *testing.T) {
 		t.Fatal("must reject unknown host")
 	}
 }
+
+
+func TestResolveHookTargetsAcceptsNativeAgentWithoutCatalogEntry(t *testing.T) {
+	hosts := []storage.Host{{ID: "host", Name: "Mac mini", AgentID: "paired"}}
+	targets, err := resolveTargets([]hookTarget{{HostName: "Mac mini", ServiceName: "easyhostagent"}}, hosts, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(targets) != 1 || targets[0].SourceID != storage.NativeAgentSourceID ||
+		targets[0].AppID != storage.NativeAgentAppID || targets[0].Action != "update" {
+		t.Fatalf("native Agent target: %+v", targets)
+	}
+}
