@@ -14,9 +14,14 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/tasks"
 )
 
-func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, catalogSvc *catalog.Service) {
+func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, catalogSvc *catalog.Service, taskServices ...*tasks.Service) {
+	var taskSvc *tasks.Service
+	if len(taskServices) > 0 {
+		taskSvc = taskServices[0]
+	}
 	authorize := func(w http.ResponseWriter, r *http.Request) bool {
 		c, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), c.Value) {
@@ -203,7 +208,12 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				methodNotAllowed(w, "POST")
 				return
 			}
-			if mutation(w, r) {
+			if !mutation(w, r) {
+				return
+			}
+			if taskSvc != nil && parts[2] == "update" {
+				enqueueManualUpdate(w, r, parts[0], taskSvc, catalogSvc)
+			} else {
 				appAction(w, r, parts[0], parts[2], service, catalogSvc)
 			}
 			return
