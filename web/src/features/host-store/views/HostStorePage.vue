@@ -20,6 +20,7 @@ import {
   pairHost as pairHostApi,
   queueNativeAgentUpdate,
   refreshSource,
+  resolveInterruptedExecutionTask,
   updateHost
 } from '../api'
 import { appKey, getAppPermissions } from '../rules'
@@ -38,6 +39,7 @@ import type {
   AppConfig,
   CatalogApp,
   CatalogSource,
+  ExecutionTask,
   Host,
   HostHealthStatus
 } from '../types'
@@ -309,6 +311,26 @@ function stateName(state: string) {
     missing: '容器缺失',
     external: '外部项目'
   } as Record<string, string>)[state] || state
+}
+
+async function resolveTask(task: ExecutionTask) {
+  if (task.state !== 'interrupted') return
+  try {
+    await ElMessageBox.confirm(
+      '请先在目标主机检查 Docker / Agent，确认本次更新脚本确实已经停止。此操作只将无法确认的任务标记为失败，不代表更新成功，并会允许后续排队任务继续执行。',
+      '确认解除主机任务阻塞',
+      { type: 'warning', confirmButtonText: '已核实，解除阻塞', cancelButtonText: '取消' }
+    )
+  } catch {
+    return
+  }
+  try {
+    await resolveInterruptedExecutionTask(task.id)
+    await data.tasksQuery.refetch()
+    ElMessage.success('已关闭中断任务，后续队列可以继续执行。')
+  } catch (error) {
+    ElMessage.error('解除任务阻塞失败：' + errorMessage(error))
+  }
 }
 
 async function refreshAll() {
@@ -713,6 +735,7 @@ async function logout() {
           @configure="openInstallConfig"
           @action="handleAppAction"
           @info="showAppInfo"
+          @resolve-task="resolveTask"
         />
       </div>
     </main>
