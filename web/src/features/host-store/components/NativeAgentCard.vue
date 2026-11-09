@@ -119,6 +119,7 @@ async function showInstallCommand() {
     <p class="description">自动关联已配对主机。更新由系统独立维护任务执行，服务会自动重启。</p>
     <div class="state" :class="{ online: connected && !maintenance && !taskActive(task) && task?.state !== 'failed' && task?.state !== 'interrupted', danger: maintenance?.state === 'timeout' || task?.state === 'failed' || task?.state === 'interrupted' }">{{ status }}</div>
     <p v-if="task && taskActive(task)" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message"> · {{ task.message }}</span></p>
+    <p v-if="task && !taskActive(task) && task.state !== 'succeeded'" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message && (task.state === 'failed' || task.state === 'interrupted')"> · {{ task.message }}</span></p>
     <p v-if="task && taskActive(task)" class="foot">触发时间：{{ formatTaskTriggerTime(task) }}</p>
     <p v-else-if="task" class="foot">最近任务时间：{{ formatTaskTime(task) }}</p>
     <p v-if="maintenance?.state === 'timeout' || task?.state === 'interrupted'" class="diagnostic" role="alert">
