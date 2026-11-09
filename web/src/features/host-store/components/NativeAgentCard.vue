@@ -118,9 +118,9 @@ async function showInstallCommand() {
     </div>
     <p class="description">自动关联已配对主机。更新由系统独立维护任务执行，服务会自动重启。</p>
     <div class="state" :class="{ online: connected && !maintenance && !taskActive(task) && task?.state !== 'failed' && task?.state !== 'interrupted', danger: maintenance?.state === 'timeout' || task?.state === 'failed' || task?.state === 'interrupted' }">{{ status }}</div>
-    <p v-if="task && task.state === 'succeeded'" class="foot">最近自动更新：{{ formatTaskTime(task) }}</p>
-    <p v-else-if="task" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message && (task.state === 'failed' || task.state === 'interrupted')"> · {{ task.message }}</span></p>
-    <p v-if="task" class="foot">触发时间：{{ formatTaskTriggerTime(task) }}</p>
+    <p v-if="task && taskActive(task)" class="foot">任务 {{ task.id }} · {{ taskSourceLabel(task.trigger_source) }}<span v-if="task.message"> · {{ task.message }}</span></p>
+    <p v-if="task && taskActive(task)" class="foot">触发时间：{{ formatTaskTriggerTime(task) }}</p>
+    <p v-else-if="task" class="foot">最近任务时间：{{ formatTaskTime(task) }}</p>
     <p v-if="maintenance?.state === 'timeout' || task?.state === 'interrupted'" class="diagnostic" role="alert">
       本次更新结果尚未确认，可能是下载失败、未重启或网络断联。请先在目标主机核对更新任务已经停止，再人工解除阻塞：
       <template v-if="platform === 'macos'">
