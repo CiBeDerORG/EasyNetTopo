@@ -198,6 +198,13 @@ func TestFieldPresentationMetadata(t *testing.T) {
 				{"key": "ROLE", "type": "string", "options": []any{map[string]any{"label": "A", "value": "a"}}, "visible_when": map[string]any{"field": "ROLE", "equals": "a"}},
 			},
 		},
+		{
+			name: "依赖隐藏选择字段",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "custom_input": false, "options": []any{map[string]any{"label": "A", "value": "a"}}},
+				{"key": "CHILD", "type": "string", "visible_when": map[string]any{"field": "ROLE", "equals": "a"}},
+			},
+		},
 	}
 	for _, tc := range invalidCases {
 		t.Run(tc.name, func(t *testing.T) {
