@@ -39,8 +39,8 @@ test('最近任务时间优先使用完成时间，其次开始时间，最后�
   const started = makeTask('failed', { finished_at: undefined })
   assert.equal(formatTaskTime(started), new Date(started.started_at).toLocaleString())
 
-  const queued = makeTask('cancelled', { started_at: undefined, finished_at: undefined })
-  assert.equal(formatTaskTime(queued), new Date(queued.created_at).toLocaleString())
+  const cancelled = makeTask('cancelled', { started_at: undefined, finished_at: undefined })
+  assert.equal(formatTaskTime(cancelled), new Date(cancelled.created_at).toLocaleString())
 })
 
 test('触发时间始终取创建时间，不受开始和完成时间影响', () => {
