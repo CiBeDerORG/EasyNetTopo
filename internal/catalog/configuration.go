@@ -229,7 +229,8 @@ func resolveConfiguration(raw []byte, resources []packagebuilder.Resource) ([]by
 	for _, f := range fields {
 		item := map[string]any{}
 		for k, v := range f {
-			if k != "custom_input" {
+			// options / visible_when 只属于控制端表单展示元数据，不进入 Deploy v1 语义校验视图。
+			if k != "custom_input" && k != "options" && k != "visible_when" {
 				item[k] = v
 			}
 		}
