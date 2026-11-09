@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
-import { validateAppConfig, appConfigInput } from '../validation'
+import { validateAppConfig, appConfigInput, isConfigFieldVisible } from '../validation'
 import type { CatalogApp, ConfigField } from '../types'
 
 const props = defineProps<{
@@ -18,11 +18,12 @@ const emit = defineEmits<{
 
 const values = ref<Record<string, string>>({})
 const errors = ref<Record<string, string>>({})
-const visibleFields = computed(() => props.fields.filter(field => field.custom_input !== false))
+const inputFields = computed(() => props.fields.filter(field => field.custom_input !== false))
+const visibleFields = computed(() => inputFields.value.filter(field => isConfigFieldVisible(field, values.value)))
 
 function resetValues() {
   errors.value = {}
-  values.value = Object.fromEntries(visibleFields.value.map(field => [
+  values.value = Object.fromEntries(inputFields.value.map(field => [
     field.key,
     String(field.default ?? '')
   ]))
@@ -31,13 +32,13 @@ watch(() => props.modelValue, open => { if (open) resetValues() })
 watch(() => props.fields, () => { if (props.modelValue) resetValues() }, { deep: true })
 watch(values, () => {
   if (Object.keys(errors.value).length > 0) {
-    errors.value = validateAppConfig(visibleFields.value, values.value)
+    errors.value = validateAppConfig(props.fields, values.value)
   }
 }, { deep: true })
 
 function submit() {
   if (props.saving) return
-  errors.value = validateAppConfig(visibleFields.value, values.value)
+  errors.value = validateAppConfig(props.fields, values.value)
   const firstError = Object.values(errors.value)[0]
   if (firstError) {
     ElMessage.warning('请检查安装配置：' + firstError)
@@ -58,6 +59,20 @@ function submit() {
           <el-option v-if="!field.required" label="未设置" value="" />
           <el-option label="是" value="true" />
           <el-option label="否" value="false" />
+        </el-select>
+        <el-select
+          v-else-if="field.options?.length"
+          v-model="values[field.key]"
+          :disabled="saving || field.editable === false"
+          class="full-width"
+          :placeholder="field.required ? '请选择' : '选填'"
+        >
+          <el-option
+            v-for="option in field.options"
+            :key="option.value"
+            :label="option.label"
+            :value="option.value"
+          />
         </el-select>
         <el-input
           v-else
