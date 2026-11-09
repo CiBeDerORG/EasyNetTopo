@@ -95,6 +95,8 @@ export type AgentMaintenanceState = { state: 'waiting' | 'timeout'; action: Agen
 export type AppAction = 'install' | 'update' | 'uninstall' | 'adopt' | 'force_update'
 export type ConfigField = {
   custom_input?: boolean
+  options?: Array<{ label: string; value: string }>
+  visible_when?: { field: string; equals: string }
   pattern?: string
   key: string
   type: string
