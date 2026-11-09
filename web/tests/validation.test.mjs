@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { validateAppConfig } from '../src/features/host-store/validation.ts'
+import { validateAppConfig, appConfigInput } from '../src/features/host-store/validation.ts'
 
 function field(key, type, extra = {}) {
   return { key, label: key, type, required: true, ...extra }
@@ -48,7 +48,6 @@ test('IPv4 地址格式和只读字段不会造成误判', () => {
 })
 
 test('页面禁止输入和只读字段不参与提交，默认允许编辑', async () => {
-  const { appConfigInput } = await import('../src/features/host-store/validation.ts')
   const fields = [
     { key: 'HIDDEN', type: 'string', required: true, custom_input: false },
     { key: 'READONLY', type: 'string', required: true, custom_input: true, editable: false },
@@ -58,6 +57,43 @@ test('页面禁止输入和只读字段不参与提交，默认允许编辑', as
   assert.deepEqual(validateAppConfig(fields, { EDITABLE: '值' }), {})
 })
 
+test('单选 options 校验值来源，条件字段只校验和提交当前角色可见项', () => {
+  const fields = [
+    field('ROLE', 'string', {
+      default: 'cloud',
+      options: [
+        { label: '云端配置中心', value: 'cloud' },
+        { label: '普通节点', value: 'intranet' }
+      ]
+    }),
+    field('WEB_API', 'string', {
+      required: true,
+      visible_when: { field: 'ROLE', equals: 'cloud' }
+    }),
+    field('CONFIG_SERVER', 'string', {
+      required: true,
+      visible_when: { field: 'ROLE', equals: 'intranet' }
+    })
+  ]
+
+  const cloud = { ROLE: 'cloud', WEB_API: 'http://example.test:7007', CONFIG_SERVER: '' }
+  assert.deepEqual(validateAppConfig(fields, cloud), {})
+  assert.deepEqual(appConfigInput(fields, cloud), {
+    ROLE: 'cloud',
+    WEB_API: 'http://example.test:7007'
+  })
+
+  const intranet = { ROLE: 'intranet', WEB_API: 'stale-value', CONFIG_SERVER: 'udp://example.test:7008/admin' }
+  assert.deepEqual(validateAppConfig(fields, intranet), {})
+  assert.deepEqual(appConfigInput(fields, intranet), {
+    ROLE: 'intranet',
+    CONFIG_SERVER: 'udp://example.test:7008/admin'
+  })
+
+  assert.ok(validateAppConfig(fields, { ROLE: 'cloud', WEB_API: '' }).WEB_API)
+  assert.ok(validateAppConfig(fields, { ROLE: 'intranet', CONFIG_SERVER: '' }).CONFIG_SERVER)
+  assert.ok(validateAppConfig(fields, { ROLE: 'unknown', WEB_API: 'http://example.test' }).ROLE)
+})
 test('number 与 Agent 保持整数契约，密钥空格原样保留', () => {
   assert.ok(validateAppConfig([{ key: 'COUNT', label: '数量', type: 'number', required: true }], { COUNT: '1.5' }).COUNT)
   assert.deepEqual(validateAppConfig([{ key: 'SECRET', type: 'secret', required: true }], { SECRET: ' ' }), {})
