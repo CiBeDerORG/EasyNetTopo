@@ -140,9 +140,20 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 	if err := ValidateManifestSemanticsV1(expanded, resources, envExample, secretsExample); err != nil {
 		return packagebuilder.Artifact{}, fmt.Errorf("Manifest 未通过 Deploy 跨文件语义校验: %w", err)
 	}
+
+	// Deploy 的 options / visible_when 是 EasyNetTopo 表单展示元数据。
+	// 保留 Artifact.Config 中的完整定义供 UI 使用，但打包给 Agent 前只移除这两个
+	// Agent 契约不包含的展示字段；其余运行配置字段及原始 app.yaml 均保持不变。
+	bundleResources := resources
+	if manifest.Version == 2 {
+		bundleResources, err = normalizeAgentConfigResources(applicationID, resources)
+		if err != nil {
+			return packagebuilder.Artifact{}, fmt.Errorf("无法将应用配置转换为 EasyHostAgent 契约: %w", err)
+		}
+	}
 	artifact, err := packagebuilder.Build(packagebuilder.Identity{
 		SourceID: sourceID, ApplicationID: applicationID, GitRevision: appRevision, ManifestSHA256: digest,
-	}, manifestRaw, resources)
+	}, manifestRaw, bundleResources)
 	artifact.Config = fields
 	artifact.SchemaVersion = manifest.Version
 	return artifact, err
