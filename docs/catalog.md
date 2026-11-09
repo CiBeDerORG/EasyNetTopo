@@ -14,6 +14,54 @@
 
 验证：`DEPLOY_CONTRACT_ROOT=<Deploy checkout> go test ./internal/catalog ./internal/hosts`；前端执行 `npm --prefix web test`、`npm --prefix web run build`。本地 Git 固定快照测试覆盖未提交修改不能改变安装包，真实设备安装须单独验收。
 
+### 清单驱动的单选与条件字段
+
+v2 的 `config.yaml` / `secrets.yaml` 字段定义支持两项通用展示元数据，EasyNetTopo 不按应用 ID 或字段键编写专用分支：
+
+```yaml
+fields:
+  - key: APP_ROLE
+    label: 运行角色
+    type: string
+    required: true
+    default: cloud
+    custom_input: true
+    editable: true
+    description: 选择当前运行角色
+    options:
+      - { label: 云端配置中心, value: cloud }
+      - { label: 普通节点, value: intranet }
+
+  - key: APP_WEB_URL
+    label: Web API 地址
+    type: string
+    required: true
+    default: ""
+    custom_input: true
+    editable: true
+    description: 仅云端角色需要
+    visible_when:
+      field: APP_ROLE
+      equals: cloud
+
+  - key: APP_CONFIG_SERVER
+    label: 远端配置中心
+    type: string
+    required: true
+    default: ""
+    custom_input: true
+    editable: true
+    description: 仅普通节点需要
+    visible_when:
+      field: APP_ROLE
+      equals: intranet
+```
+
+- `options`：字符串字段的单选项；`label` 仅用于展示，`value` 是提交给安装脚本的值。默认值必须属于已声明选项。
+- `visible_when`：只有指定单选字段当前值匹配 `equals` 时才显示该字段。条件依赖必须引用已声明、无条件显示的字符串单选字段及其合法选项值。
+- 页面会为所有可输入字段初始化默认值，但仅验证、展示并提交当前可见字段；切换选项后隐藏字段不会随安装请求提交。
+- 服务端会再次按同一清单规则拒绝隐藏、只读、未声明字段及非法选项值，不能依赖浏览器校验提供安全边界。
+- 普通字段不声明 `options` / `visible_when` 时维持原有文本、数字、布尔和密钥表单行为。
 ## 1. 实际入口
 
 管理员登录后通过 **Git 应用源** 输入来源名称、Git 地址和分支。添加操作仅登记 SQLite 元数据；点击“手动同步”时才由 Go 后端启动 Git CLI，不自动后台同步。
