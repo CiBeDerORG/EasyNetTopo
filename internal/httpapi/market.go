@@ -21,6 +21,47 @@ func marketActionAllowed(appID, action string) bool {
 	return appID != "easynettopo" || action == "update" || action == "adopt" || action == "status"
 }
 
+// catalogConfigFieldInputAllowed mirrors the manifest-driven form visibility rules at the API boundary.
+// The browser is not trusted to decide which conditional fields may be submitted.
+func catalogConfigFieldInputAllowed(key string, field map[string]any, fields map[string]map[string]any, config map[string]string) bool {
+	if field["custom_input"] == false || field["editable"] == false {
+		return false
+	}
+	if condition, ok := field["visible_when"].(map[string]any); ok {
+		dependencyKey, keyOK := condition["field"].(string)
+		expected, valueOK := condition["equals"].(string)
+		dependency, found := fields[dependencyKey]
+		if !keyOK || !valueOK || !found {
+			return false
+		}
+		actual, supplied := config[dependencyKey]
+		if !supplied {
+			actual, _ = dependency["default"].(string)
+		}
+		if actual != expected {
+			return false
+		}
+	}
+	if rawOptions, ok := field["options"].([]any); ok {
+		value, supplied := config[key]
+		if !supplied {
+			return false
+		}
+		matched := false
+		for _, rawOption := range rawOptions {
+			option, ok := rawOption.(map[string]any)
+			if ok && option["value"] == value {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return false
+		}
+	}
+	return true
+}
+
 func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, service *hosts.Service, source *catalog.Service) {
 	if r.Header.Get("Content-Type") != "application/json" {
 		http.Error(w, "需要 JSON", 415)
@@ -81,14 +122,15 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			return
 		}
 		if name == "install" {
-			allowed := map[string]bool{}
+			fieldsByKey := make(map[string]map[string]any, len(pkg.Config))
 			for _, field := range pkg.Config {
 				key, _ := field["key"].(string)
-				allowed[key] = field["custom_input"] != false && field["editable"] != false
+				fieldsByKey[key] = field
 			}
 			for key := range req.Config {
-				if !allowed[key] {
-					http.Error(w, "请求包含未声明、隐藏或只读的配置字段", 422)
+				field, exists := fieldsByKey[key]
+				if !exists || !catalogConfigFieldInputAllowed(key, field, fieldsByKey, req.Config) {
+					http.Error(w, "请求包含未声明、隐藏、只读或选项值无效的配置字段", 422)
 					return
 				}
 			}

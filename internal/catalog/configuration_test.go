@@ -138,6 +138,83 @@ func TestDeployRepositoryV2Contract(t *testing.T) {
 	}
 }
 
+func TestFieldPresentationMetadata(t *testing.T) {
+	role := map[string]any{
+		"key": "APP_ROLE", "type": "string", "default": "cloud",
+		"options": []any{
+			map[string]any{"label": "Cloud", "value": "cloud"},
+			map[string]any{"label": "Intranet", "value": "intranet"},
+		},
+	}
+	cloud := map[string]any{
+		"key": "CLOUD_URL", "type": "string",
+		"visible_when": map[string]any{"field": "APP_ROLE", "equals": "cloud"},
+	}
+	intranet := map[string]any{
+		"key": "INTRANET_URL", "type": "string",
+		"visible_when": map[string]any{"field": "APP_ROLE", "equals": "intranet"},
+	}
+	if err := validateFieldPresentation([]map[string]any{role, cloud, intranet}); err != nil {
+		t.Fatalf("合法的通用条件字段应通过：%v", err)
+	}
+
+	invalidCases := []struct {
+		name   string
+		fields []map[string]any
+	}{
+		{
+			name: "重复选项值",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "options": []any{
+					map[string]any{"label": "A", "value": "same"},
+					map[string]any{"label": "B", "value": "same"},
+				}},
+			},
+		},
+		{
+			name: "默认值不属于选项",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "default": "other", "options": []any{
+					map[string]any{"label": "A", "value": "a"},
+				}},
+			},
+		},
+		{
+			name: "引用未知字段",
+			fields: []map[string]any{
+				{"key": "CHILD", "type": "string", "visible_when": map[string]any{"field": "MISSING", "equals": "x"}},
+			},
+		},
+		{
+			name: "条件值不在选项中",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "options": []any{map[string]any{"label": "A", "value": "a"}}},
+				{"key": "CHILD", "type": "string", "visible_when": map[string]any{"field": "ROLE", "equals": "missing"}},
+			},
+		},
+		{
+			name: "条件依赖自身",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "options": []any{map[string]any{"label": "A", "value": "a"}}, "visible_when": map[string]any{"field": "ROLE", "equals": "a"}},
+			},
+		},
+		{
+			name: "依赖隐藏选择字段",
+			fields: []map[string]any{
+				{"key": "ROLE", "type": "string", "custom_input": false, "options": []any{map[string]any{"label": "A", "value": "a"}}},
+				{"key": "CHILD", "type": "string", "visible_when": map[string]any{"field": "ROLE", "equals": "a"}},
+			},
+		},
+	}
+	for _, tc := range invalidCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if err := validateFieldPresentation(tc.fields); err == nil {
+				t.Fatal("非法的表单展示元数据被接受")
+			}
+		})
+	}
+}
+
 func TestConfigurationSchemasRejectUnsupportedControls(t *testing.T) {
 	raw, resources, _, _ := independentConfigurationFixture(t)
 	for _, bad := range []string{
