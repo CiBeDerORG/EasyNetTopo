@@ -18,11 +18,11 @@ type agentFieldContract struct {
 	CustomInput        *bool `yaml:"custom_input"`
 	GeneratedByScript  bool  `yaml:"generated_by_script"`
 	Required           bool
-	Editable            *bool
-	Default             *string
+	Editable           *bool
+	Default            *string
 	Minimum, Maximum   *int
-	MinLength          *int   `yaml:"min_length"`
-	MaxLength          *int   `yaml:"max_length"`
+	MinLength          *int `yaml:"min_length"`
+	MaxLength          *int `yaml:"max_length"`
 	Pattern            string
 }
 
