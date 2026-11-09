@@ -17,6 +17,11 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
+type activeTask struct {
+	id     string
+	cancel context.CancelFunc
+}
+
 type Service struct {
 	ctx     context.Context
 	store   *storage.TaskStore
@@ -25,6 +30,7 @@ type Service struct {
 
 	mu      sync.Mutex
 	running map[string]bool
+	active  map[string]activeTask
 	wg      sync.WaitGroup
 }
 
@@ -33,11 +39,28 @@ func New(ctx context.Context, store *storage.TaskStore, catalogSvc *catalog.Serv
 		return nil, err
 	}
 	return &Service{ctx: ctx, store: store, catalog: catalogSvc, hosts: hostSvc,
-		running: make(map[string]bool)}, nil
+		running: make(map[string]bool), active: make(map[string]activeTask)}, nil
+}
+
+func taskTargetKey(hostID, sourceID, appID string) string {
+	return hostID + "\x00" + sourceID + "\x00" + appID
 }
 
 func (s *Service) Enqueue(ctx context.Context, trigger string, targets []storage.TaskTarget) ([]storage.Task, error) {
-	return s.store.Enqueue(ctx, trigger, targets)
+	created, err := s.store.Enqueue(ctx, trigger, targets)
+	if err != nil {
+		return nil, err
+	}
+	// 先由存储事务把旧任务标记为 cancelled，再中止对应的本地 Worker。
+	// 只按主机和应用完整标识取消，不影响同主机其他应用或其他主机。
+	s.mu.Lock()
+	for _, target := range targets {
+		if active, ok := s.active[taskTargetKey(target.HostID, target.SourceID, target.AppID)]; ok {
+			active.cancel()
+		}
+	}
+	s.mu.Unlock()
+	return created, nil
 }
 
 func (s *Service) List(ctx context.Context) ([]storage.Task, error) {
@@ -104,53 +127,100 @@ func (s *Service) schedule() {
 
 func (s *Service) set(task storage.Task, state, message string) bool {
 	if err := s.store.SetState(context.Background(), task, state, message); err != nil {
+		if errors.Is(err, storage.ErrTaskSuperseded) {
+			return false
+		}
 		slog.Error("任务状态写入失败", "task_id", task.ID, "error", err)
 		return false
 	}
 	return true
 }
 
+func (s *Service) taskActive(task storage.Task) bool {
+	current, err := s.store.Get(context.Background(), task.ID)
+	if err != nil {
+		return false
+	}
+	switch current.State {
+	case "queued", "preparing", "running":
+		return true
+	default:
+		return false
+	}
+}
+
 func (s *Service) process(task storage.Task) {
+	taskCtx, cancel := context.WithCancel(s.ctx)
+	key := taskTargetKey(task.HostID, task.SourceID, task.AppID)
+	s.mu.Lock()
+	if s.active == nil {
+		s.active = make(map[string]activeTask)
+	}
+	s.active[key] = activeTask{id: task.ID, cancel: cancel}
+	s.mu.Unlock()
+	defer func() {
+		cancel()
+		s.mu.Lock()
+		if active, ok := s.active[key]; ok && active.id == task.ID {
+			delete(s.active, key)
+		}
+		s.mu.Unlock()
+	}()
+
+	if taskCtx.Err() != nil || !s.taskActive(task) {
+		return
+	}
 	if task.SourceID == storage.NativeAgentSourceID && task.AppID == storage.NativeAgentAppID {
-		s.processNativeAgent(task)
+		s.processNativeAgent(taskCtx, task)
 		return
 	}
 	// running 任务可能在控制端重启前已下发。只恢复状态轮询，不重复执行更新。
 	if task.State == "running" {
-		s.monitor(task, "")
+		s.monitor(taskCtx, task, "")
 		return
 	}
-	if s.ctx.Err() != nil {
+	if taskCtx.Err() != nil || !s.set(task, "preparing", "") {
 		return
 	}
-	if !s.set(task, "preparing", "") {
-		return
-	}
-	pkg, err := s.catalog.BuildCandidateBundle(s.ctx, task.SourceID, task.AppID)
+	pkg, err := s.catalog.BuildCandidateBundle(taskCtx, task.SourceID, task.AppID)
 	if err != nil {
-		s.fail(task, "当前应用来源不可用或清单验证失败")
+		s.fail(taskCtx, task, "当前应用来源不可用或清单验证失败")
 		return
 	}
-	if err := s.hosts.RequireManifestVersion(s.ctx, task.HostID, pkg.SchemaVersion); err != nil {
-		s.fail(task, "目标 Agent 不支持该应用清单，或连接不可用")
+	if taskCtx.Err() != nil || !s.taskActive(task) {
 		return
 	}
-	if _, err := s.hosts.CacheBundle(s.ctx, task.HostID, pkg.SHA256, pkg.ZIP); err != nil {
-		if s.ctx.Err() == nil {
-			s.fail(task, "向目标主机传送更新包失败")
+	if err := s.hosts.RequireManifestVersion(taskCtx, task.HostID, pkg.SchemaVersion); err != nil {
+		s.fail(taskCtx, task, "目标 Agent 不支持该应用清单，或连接不可用")
+		return
+	}
+	if taskCtx.Err() != nil || !s.taskActive(task) {
+		return
+	}
+	if _, err := s.hosts.CacheBundle(taskCtx, task.HostID, pkg.SHA256, pkg.ZIP); err != nil {
+		if taskCtx.Err() == nil && s.taskActive(task) {
+			s.fail(taskCtx, task, "向目标主机传送更新包失败")
 		}
 		return
 	}
-	if s.ctx.Err() != nil {
+	if taskCtx.Err() != nil || !s.taskActive(task) {
 		return
 	}
 	// 先持久化 running，再发命令。失联或重启后绝不盲目重复执行有副作用的更新。
 	if !s.set(task, "running", "") {
 		return
 	}
-	raw, err := s.hosts.AppAction(s.ctx, task.HostID, "update", map[string]string{
+	if taskCtx.Err() != nil || !s.taskActive(task) {
+		return
+	}
+	raw, err := s.hosts.AppAction(taskCtx, task.HostID, "update", map[string]string{
 		"source_id": task.SourceID, "app_id": task.AppID, "bundle_sha256": pkg.SHA256,
 	})
+	// 新任务可能在请求期间替代本任务。Agent 已受理的远端脚本无法撤回，
+	// 但本地 Worker 必须停止；最新任务会受 Agent 独占锁保护并在旧操作结束后重试。
+	if taskCtx.Err() != nil || !s.taskActive(task) {
+		return
+	}
 	if err != nil {
 		var agentErr *hosts.AppError
 		if errors.As(err, &agentErr) {
@@ -159,7 +229,7 @@ func (s *Service) process(task storage.Task) {
 				s.set(task, "queued", "主机正在执行其他操作，等待重试")
 			} else {
 				// 明确的业务拒绝并未启动脚本，不能无限等待一个不存在的任务。
-				s.fail(task, "Agent 拒绝应用更新请求")
+				s.fail(taskCtx, task, "Agent 拒绝应用更新请求")
 			}
 			return
 		}
@@ -176,29 +246,32 @@ func (s *Service) process(task storage.Task) {
 			return
 		}
 	}
-	s.monitor(task, pkg.SHA256)
+	s.monitor(taskCtx, task, pkg.SHA256)
 }
 
-func (s *Service) fail(task storage.Task, reason string) {
-	if s.ctx.Err() == nil {
+func (s *Service) fail(ctx context.Context, task storage.Task, reason string) {
+	if ctx.Err() == nil && s.taskActive(task) {
 		s.set(task, "failed", reason)
 	}
 }
 
-func (s *Service) monitor(task storage.Task, digest string) {
+func (s *Service) monitor(ctx context.Context, task storage.Task, digest string) {
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	// 启动后立即查一次，后续以固定间隔轮询，直到收到实际完成结果。
 	everSeenRunning := false
 	missingCount := 0
 	for {
-		if s.ctx.Err() != nil {
+		if ctx.Err() != nil || !s.taskActive(task) {
 			return
 		}
-		raw, err := s.hosts.AppAction(s.ctx, task.HostID, "status", map[string]any{
+		raw, err := s.hosts.AppAction(ctx, task.HostID, "status", map[string]any{
 			"apps":            []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
 			"include_managed": false,
 		})
+		if ctx.Err() != nil || !s.taskActive(task) {
+			return
+		}
 		if err == nil {
 			var response struct {
 				Apps []struct {
@@ -251,7 +324,7 @@ func (s *Service) monitor(task storage.Task, digest string) {
 		}
 		// 主机暂时离线不是更新失败。持续轮询，保证同一主机不会运行下一条任务。
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 		}
@@ -319,8 +392,8 @@ func (s *Service) ResolveNativeInterrupted(ctx context.Context, id, startedAt st
 	return false, s.store.ResolveInterrupted(ctx, id)
 }
 
-func (s *Service) nativeAgentSnapshot(hostID string) (nativeAgentBaseline, error) {
-	ctx, cancel := context.WithTimeout(s.ctx, 8*time.Second)
+func (s *Service) nativeAgentSnapshot(parent context.Context, hostID string) (nativeAgentBaseline, error) {
+	ctx, cancel := context.WithTimeout(parent, 8*time.Second)
 	defer cancel()
 	raw, err := s.hosts.Query(ctx, hostID, "host")
 	if err != nil {
@@ -333,22 +406,25 @@ func (s *Service) nativeAgentSnapshot(hostID string) (nativeAgentBaseline, error
 	return snap, nil
 }
 
-func (s *Service) processNativeAgent(task storage.Task) {
+func (s *Service) processNativeAgent(ctx context.Context, task storage.Task) {
 	if task.State == "running" {
-		s.monitorNativeAgent(task)
+		s.monitorNativeAgent(ctx, task)
 		return
 	}
-	if s.ctx.Err() != nil || !s.set(task, "preparing", "") {
+	if ctx.Err() != nil || !s.taskActive(task) || !s.set(task, "preparing", "") {
 		return
 	}
-	before, err := s.nativeAgentSnapshot(task.HostID)
+	before, err := s.nativeAgentSnapshot(ctx, task.HostID)
 	if err != nil {
-		s.fail(task, "无法读取 Agent 更新前状态")
+		s.fail(ctx, task, "无法读取 Agent 更新前状态")
+		return
+	}
+	if ctx.Err() != nil || !s.taskActive(task) {
 		return
 	}
 	baseline, err := json.Marshal(before)
 	if err != nil {
-		s.fail(task, "无法准备 Agent 更新前状态")
+		s.fail(ctx, task, "无法准备 Agent 更新前状态")
 		return
 	}
 	// 先持久化 running 和基线，再下发一次固定的 Release 强制更新指令。
@@ -357,9 +433,15 @@ func (s *Service) processNativeAgent(task storage.Task) {
 	if !s.set(task, "running", task.Message) {
 		return
 	}
-	ctx, cancel := context.WithTimeout(s.ctx, 12*time.Second)
-	raw, err := s.hosts.NativeAgentUpdate(ctx, task.HostID, "force-update")
+	if ctx.Err() != nil || !s.taskActive(task) {
+		return
+	}
+	updateCtx, cancel := context.WithTimeout(ctx, 12*time.Second)
+	raw, err := s.hosts.NativeAgentUpdate(updateCtx, task.HostID, "force-update")
 	cancel()
+	if ctx.Err() != nil || !s.taskActive(task) {
+		return
+	}
 	if err != nil {
 		if errors.Is(err, hosts.ErrAgentUpdateBusy) {
 			s.set(task, "queued", "Agent 正在执行其他操作，等待重试")
@@ -368,7 +450,7 @@ func (s *Service) processNativeAgent(task storage.Task) {
 		if errors.Is(err, hosts.ErrAgentUpdateUnsupported) ||
 			errors.Is(err, hosts.ErrAgentUpdateEnvironment) ||
 			errors.Is(err, hosts.ErrAgentUpdateUnauthorized) {
-			s.fail(task, "目标 Agent 拒绝原生更新，请核对版本、配对和部署环境")
+			s.fail(ctx, task, "目标 Agent 拒绝原生更新，请核对版本、配对和部署环境")
 			return
 		}
 		s.set(task, "interrupted", "Agent 更新请求是否已受理无法确认；禁止自动重发")
@@ -382,10 +464,13 @@ func (s *Service) processNativeAgent(task storage.Task) {
 		s.set(task, "interrupted", "Agent 原生更新回执与请求不匹配")
 		return
 	}
-	s.monitorNativeAgent(task)
+	s.monitorNativeAgent(ctx, task)
 }
 
-func (s *Service) monitorNativeAgent(task storage.Task) {
+func (s *Service) monitorNativeAgent(ctx context.Context, task storage.Task) {
+	if !s.taskActive(task) {
+		return
+	}
 	if !strings.HasPrefix(task.Message, nativeBaselinePrefix) {
 		s.set(task, "interrupted", "无法恢复更新前的 Agent 启动信息，需人工核对")
 		return
@@ -401,16 +486,19 @@ func (s *Service) monitorNativeAgent(task storage.Task) {
 	deadline := time.NewTimer(10 * time.Minute)
 	defer deadline.Stop()
 	for {
-		if s.ctx.Err() != nil {
+		if ctx.Err() != nil || !s.taskActive(task) {
 			return
 		}
-		after, err := s.nativeAgentSnapshot(task.HostID)
+		after, err := s.nativeAgentSnapshot(ctx, task.HostID)
+		if ctx.Err() != nil || !s.taskActive(task) {
+			return
+		}
 		if err == nil && nativeAgentRestarted(before, after) {
 			s.set(task, "succeeded", "")
 			return
 		}
 		select {
-		case <-s.ctx.Done():
+		case <-ctx.Done():
 			return
 		case <-deadline.C:
 			s.set(task, "interrupted", "10 分钟内未确认 Agent 新版本重启，请检查原生更新日志")
