@@ -151,7 +151,6 @@ func TestNativeAgentAndAppShareHostQueue(t *testing.T) {
 	}
 }
 
-
 func TestEnqueueLatestWinsOnlyForSameHostAndApp(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "latest-wins.db"))
