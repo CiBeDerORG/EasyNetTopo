@@ -13,21 +13,17 @@ import (
 // Keep this shape aligned with EasyHostAgent/internal/market.field.
 // KnownFields(true) reproduces the Agent's strict decoding behavior.
 type agentFieldContract struct {
-	Key               string  `yaml:"key"`
-	Type              string  `yaml:"type"`
-	Target            string  `yaml:"target"`
-	Label             string  `yaml:"label"`
-	Description       string  `yaml:"description"`
-	CustomInput       *bool   `yaml:"custom_input"`
-	GeneratedByScript bool    `yaml:"generated_by_script"`
-	Required          bool    `yaml:"required"`
-	Editable          *bool   `yaml:"editable"`
-	Default           *string `yaml:"default"`
-	Minimum           *int    `yaml:"minimum"`
-	Maximum           *int    `yaml:"maximum"`
-	MinLength         *int    `yaml:"min_length"`
-	MaxLength         *int    `yaml:"max_length"`
-	Pattern           string  `yaml:"pattern"`
+	Key, Type, Target  string
+	Label, Description string
+	CustomInput        *bool `yaml:"custom_input"`
+	GeneratedByScript  bool  `yaml:"generated_by_script"`
+	Required           bool
+	Editable            *bool
+	Default             *string
+	Minimum, Maximum   *int
+	MinLength          *int   `yaml:"min_length"`
+	MaxLength          *int   `yaml:"max_length"`
+	Pattern            string
 }
 
 func TestNormalizeAgentConfigResources(t *testing.T) {
