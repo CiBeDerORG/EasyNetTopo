@@ -127,6 +127,9 @@ func validateFieldPresentation(fields []map[string]any) error {
 			if _, chained := dependency["visible_when"]; chained {
 				return errors.New("visible_when 依赖字段不能再依赖其他条件")
 			}
+			if dependency["custom_input"] == false {
+				return errors.New("visible_when 不能依赖隐藏的选择字段")
+			}
 			if dependency["type"] != "string" {
 				return errors.New("visible_when 只能依赖字符串单选字段")
 			}
