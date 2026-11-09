@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 )
 
@@ -39,31 +40,84 @@ const NativeAgentAppID = "easyhostagent"
 
 type TaskStore struct{ db *sql.DB }
 
+var ErrTaskSuperseded = errors.New("任务已被更新任务替代")
+
 func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
+	if _, err := store.db.ExecContext(ctx, `CREATE TABLE IF NOT EXISTS execution_tasks (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL CHECK(type IN ('host','application')),
+		host_id TEXT NOT NULL,
+		source_id TEXT NOT NULL DEFAULT '',
+		app_id TEXT NOT NULL DEFAULT '',
+		action TEXT NOT NULL,
+		trigger_source TEXT NOT NULL,
+		state TEXT NOT NULL CHECK(state IN ('queued','preparing','running','succeeded','failed','interrupted','cancelled')),
+		message TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		started_at TEXT NOT NULL DEFAULT '',
+		finished_at TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return nil, fmt.Errorf("初始化任务表: %w", err)
+	}
+	if err := migrateTaskCancellationState(ctx, store.db); err != nil {
+		return nil, fmt.Errorf("迁移任务取消状态: %w", err)
+	}
 	for _, query := range []string{
-		`CREATE TABLE IF NOT EXISTS execution_tasks (
-			id TEXT PRIMARY KEY,
-			parent_id TEXT NOT NULL DEFAULT '',
-			type TEXT NOT NULL CHECK(type IN ('host','application')),
-			host_id TEXT NOT NULL,
-			source_id TEXT NOT NULL DEFAULT '',
-			app_id TEXT NOT NULL DEFAULT '',
-			action TEXT NOT NULL,
-			trigger_source TEXT NOT NULL,
-			state TEXT NOT NULL CHECK(state IN ('queued','preparing','running','succeeded','failed','interrupted')),
-			message TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL,
-			started_at TEXT NOT NULL DEFAULT '',
-			finished_at TEXT NOT NULL DEFAULT ''
-		)`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_tasks_queue ON execution_tasks(host_id,type,state,created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_tasks_parent ON execution_tasks(parent_id)`,
 	} {
 		if _, err := store.db.ExecContext(ctx, query); err != nil {
-			return nil, fmt.Errorf("初始化任务表: %w", err)
+			return nil, fmt.Errorf("初始化任务索引: %w", err)
 		}
 	}
 	return &TaskStore{db: store.db}, nil
+}
+
+// 旧版本任务表的 CHECK 约束不包含 cancelled；SQLite 需要重建表才能扩展状态集合。
+func migrateTaskCancellationState(ctx context.Context, db *sql.DB) error {
+	var schema string
+	if err := db.QueryRowContext(ctx, `SELECT sql FROM sqlite_master WHERE type='table' AND name='execution_tasks'`).Scan(&schema); err != nil {
+		return err
+	}
+	if strings.Contains(schema, "'cancelled'") {
+		return nil
+	}
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if _, err := tx.ExecContext(ctx, `ALTER TABLE execution_tasks RENAME TO execution_tasks_legacy`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `CREATE TABLE execution_tasks (
+		id TEXT PRIMARY KEY,
+		parent_id TEXT NOT NULL DEFAULT '',
+		type TEXT NOT NULL CHECK(type IN ('host','application')),
+		host_id TEXT NOT NULL,
+		source_id TEXT NOT NULL DEFAULT '',
+		app_id TEXT NOT NULL DEFAULT '',
+		action TEXT NOT NULL,
+		trigger_source TEXT NOT NULL,
+		state TEXT NOT NULL CHECK(state IN ('queued','preparing','running','succeeded','failed','interrupted','cancelled')),
+		message TEXT NOT NULL DEFAULT '',
+		created_at TEXT NOT NULL,
+		started_at TEXT NOT NULL DEFAULT '',
+		finished_at TEXT NOT NULL DEFAULT ''
+	)`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `INSERT INTO execution_tasks
+		(id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at)
+		SELECT id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at
+		FROM execution_tasks_legacy`); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `DROP TABLE execution_tasks_legacy`); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 // Enqueue 原子地保存主机父任务及其全部应用子任务。
@@ -98,6 +152,9 @@ func (s *TaskStore) Enqueue(ctx context.Context, trigger string, targets []TaskT
 			continue
 		}
 		seen[key] = true
+		if err := cancelSupersededTasks(ctx, tx, target, stamp); err != nil {
+			return nil, fmt.Errorf("取消同一应用的旧更新任务: %w", err)
+		}
 		parentID, ok := parents[target.HostID]
 		if !ok {
 			id, e := uuid()
@@ -204,12 +261,12 @@ func (s *TaskStore) SetState(ctx context.Context, task Task, state, message stri
 		return errors.New("只能直接更新应用任务")
 	}
 	switch state {
-	case "queued", "preparing", "running", "succeeded", "failed", "interrupted":
+	case "queued", "preparing", "running", "succeeded", "failed", "interrupted", "cancelled":
 	default:
 		return errors.New("未知任务状态")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	finished := state == "succeeded" || state == "failed" || state == "interrupted"
+	finished := state == "succeeded" || state == "failed" || state == "interrupted" || state == "cancelled"
 	tx, err := s.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
@@ -219,31 +276,59 @@ func (s *TaskStore) SetState(ctx context.Context, task Task, state, message stri
 	if finished {
 		finishAt = now
 	}
-	_, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?, message=?,
+	result, err := tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?, message=?,
 		started_at=CASE WHEN started_at='' AND ? IN ('preparing','running') THEN ? ELSE started_at END,
-		finished_at=CASE WHEN ?='' THEN '' ELSE ? END WHERE id=?`,
+		finished_at=CASE WHEN ?='' THEN '' ELSE ? END WHERE id=? AND state!='cancelled'`,
 		state, message, state, now, finishAt, finishAt, task.ID)
 	if err != nil {
 		return err
 	}
-	var total, done, failures, interruptions, active int
-	err = tx.QueryRowContext(ctx, `SELECT COUNT(*),
-		COALESCE(SUM(CASE WHEN state IN ('succeeded','failed','interrupted') THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN state='interrupted' THEN 1 ELSE 0 END),0),
-		COALESCE(SUM(CASE WHEN state IN ('running','preparing') THEN 1 ELSE 0 END),0)
-		FROM execution_tasks WHERE parent_id=?`, task.ParentID).
-		Scan(&total, &done, &failures, &interruptions, &active)
+	affected, err := result.RowsAffected()
 	if err != nil {
 		return err
 	}
+	if affected == 0 {
+		var current string
+		if err := tx.QueryRowContext(ctx, `SELECT state FROM execution_tasks WHERE id=?`, task.ID).Scan(&current); err != nil {
+			return err
+		}
+		if current == "cancelled" {
+			return ErrTaskSuperseded
+		}
+		return errors.New("任务状态已变化，拒绝覆盖")
+	}
+	if err := updateParentSummary(ctx, tx, task.ParentID, now); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
+// 更新任务父记录的汇总状态；cancelled 子任务也属于已结束任务。
+func updateParentSummary(ctx context.Context, tx *sql.Tx, parentID, now string) error {
+	var total, done, failures, interruptions, cancellations, active int
+	err := tx.QueryRowContext(ctx, `SELECT COUNT(*),
+		COALESCE(SUM(CASE WHEN state IN ('succeeded','failed','interrupted','cancelled') THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN state='failed' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN state='interrupted' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN state='cancelled' THEN 1 ELSE 0 END),0),
+		COALESCE(SUM(CASE WHEN state IN ('running','preparing') THEN 1 ELSE 0 END),0)
+		FROM execution_tasks WHERE parent_id=?`, parentID).
+		Scan(&total, &done, &failures, &interruptions, &cancellations, &active)
+	if err != nil {
+		return err
+	}
+	if total == 0 {
+		return nil
+	}
 	parentState, parentFinished := "queued", ""
-	if total > 0 && done == total {
+	if done == total {
 		parentState = "succeeded"
 		if interruptions > 0 {
 			parentState = "interrupted"
 		} else if failures > 0 {
 			parentState = "failed"
+		} else if cancellations > 0 {
+			parentState = "cancelled"
 		}
 		parentFinished = now
 	} else if active > 0 || done > 0 {
@@ -252,11 +337,56 @@ func (s *TaskStore) SetState(ctx context.Context, task Task, state, message stri
 	_, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?,
 		started_at=CASE WHEN started_at='' AND ?='running' THEN ? ELSE started_at END,
 		finished_at=? WHERE id=?`,
-		parentState, parentState, now, parentFinished, task.ParentID)
+		parentState, parentState, now, parentFinished, parentID)
+	return err
+}
+
+// 新任务只替换同一主机、同一应用源和 app_id 的未结束更新任务。
+// interrupted 不会自动取消：远端执行结果未知时，仍必须保留主机安全阻塞。
+func cancelSupersededTasks(ctx context.Context, tx *sql.Tx, target TaskTarget, now string) error {
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_id FROM execution_tasks
+		WHERE type='application' AND host_id=? AND source_id=? AND app_id=? AND action=?
+		AND state IN ('queued','preparing','running')`,
+		target.HostID, target.SourceID, target.AppID, target.Action)
 	if err != nil {
 		return err
 	}
-	return tx.Commit()
+	parentIDs := make([]string, 0)
+	seen := make(map[string]bool)
+	for rows.Next() {
+		var parentID string
+		if err := rows.Scan(&parentID); err != nil {
+			rows.Close()
+			return err
+		}
+		if parentID != "" && !seen[parentID] {
+			seen[parentID] = true
+			parentIDs = append(parentIDs, parentID)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if len(parentIDs) == 0 {
+		return nil
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_tasks
+		SET state='cancelled', message='已被更新任务替代', finished_at=?
+		WHERE type='application' AND host_id=? AND source_id=? AND app_id=? AND action=?
+		AND state IN ('queued','preparing','running')`,
+		now, target.HostID, target.SourceID, target.AppID, target.Action); err != nil {
+		return err
+	}
+	for _, parentID := range parentIDs {
+		if err := updateParentSummary(ctx, tx, parentID, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 // RecoverPreparation 仅回滚尚未向 Agent 发出更新命令的准备阶段。

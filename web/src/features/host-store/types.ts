@@ -134,7 +134,7 @@ export type ExecutionTask = {
   app_id?: string
   action: string
   trigger_source: string
-  state: 'queued' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'interrupted'
+  state: 'queued' | 'preparing' | 'running' | 'succeeded' | 'failed' | 'interrupted' | 'cancelled'
   message?: string
   created_at: string
   started_at?: string

@@ -26,7 +26,8 @@ export function taskStateLabel(state: ExecutionTask['state']): string {
     running: '执行中',
     succeeded: '完成',
     failed: '执行失败',
-    interrupted: '任务中断'
+    interrupted: '任务中断',
+    cancelled: '已被新任务替代'
   } as Record<ExecutionTask['state'], string>)[state]
 }
 
