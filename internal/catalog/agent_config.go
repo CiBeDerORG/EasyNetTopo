@@ -41,6 +41,12 @@ func normalizeAgentConfigResources(applicationID string, resources []packagebuil
 			if !ok {
 				return nil, errors.New("配置字段必须为对象")
 			}
+			// EasyHostAgent has no conditional-visibility contract. The control
+			// plane enforces required inputs for visible fields; conditional fields
+			// must be optional in the Agent's unconditional runtime definition.
+			if _, conditional := field["visible_when"]; conditional {
+				field["required"] = false
+			}
 			// These keys are presentation-only and are intentionally not part of
 			// EasyHostAgent's strict runtime field contract.
 			delete(field, "options")

@@ -76,6 +76,9 @@ func TestNormalizeAgentConfigResources(t *testing.T) {
 	if _, ok := sourceFields[1].(map[string]any)["visible_when"]; !ok {
 		t.Fatal("原始表单定义丢失 visible_when")
 	}
+	if sourceFields[1].(map[string]any)["required"] != true {
+		t.Fatal("原始 Deploy 表单的必填规则不应被改写")
+	}
 
 	var runtime struct {
 		Fields []agentFieldContract `yaml:"fields"`
@@ -93,12 +96,12 @@ func TestNormalizeAgentConfigResources(t *testing.T) {
 	}
 	role, port := runtime.Fields[0], runtime.Fields[1]
 	if role.Key != "EASYTIER_ROLE" || role.Default == nil || *role.Default != "cloud" ||
-		role.CustomInput == nil || !*role.CustomInput || role.Editable == nil || !*role.Editable {
+		role.CustomInput == nil || !*role.CustomInput || role.Editable == nil || !*role.Editable || !role.Required {
 		t.Fatalf("角色运行配置字段丢失: %+v", role)
 	}
 	if port.Key != "EASYTIER_WEB_PORT" || port.Default == nil || *port.Default != "7007" ||
-		port.CustomInput == nil || !*port.CustomInput || port.Editable == nil || !*port.Editable {
-		t.Fatalf("条件字段的运行配置字段丢失: %+v", port)
+		port.CustomInput == nil || !*port.CustomInput || port.Editable == nil || !*port.Editable || port.Required {
+		t.Fatalf("条件字段未转换为 Agent 可处理的可选字段: %+v", port)
 	}
 	for _, raw := range normalized[:2] {
 		if strings.Contains(string(raw.Content), "options:") || strings.Contains(string(raw.Content), "visible_when:") {

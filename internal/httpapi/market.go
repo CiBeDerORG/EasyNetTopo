@@ -21,26 +21,35 @@ func marketActionAllowed(appID, action string) bool {
 	return appID != "easynettopo" || action == "update" || action == "adopt" || action == "status"
 }
 
+// catalogConfigFieldVisible resolves only declarative visibility conditions.
+// Missing selector input falls back to its declared default, matching the form.
+func catalogConfigFieldVisible(field map[string]any, fields map[string]map[string]any, config map[string]string) bool {
+	raw, exists := field["visible_when"]
+	if !exists {
+		return true
+	}
+	condition, ok := raw.(map[string]any)
+	if !ok {
+		return false
+	}
+	dependencyKey, keyOK := condition["field"].(string)
+	expected, valueOK := condition["equals"].(string)
+	dependency, found := fields[dependencyKey]
+	if !keyOK || !valueOK || !found {
+		return false
+	}
+	actual, supplied := config[dependencyKey]
+	if !supplied {
+		actual, _ = dependency["default"].(string)
+	}
+	return actual == expected
+}
+
 // catalogConfigFieldInputAllowed mirrors the manifest-driven form visibility rules at the API boundary.
 // The browser is not trusted to decide which conditional fields may be submitted.
 func catalogConfigFieldInputAllowed(key string, field map[string]any, fields map[string]map[string]any, config map[string]string) bool {
-	if field["custom_input"] == false || field["editable"] == false {
+	if field["custom_input"] == false || field["editable"] == false || !catalogConfigFieldVisible(field, fields, config) {
 		return false
-	}
-	if condition, ok := field["visible_when"].(map[string]any); ok {
-		dependencyKey, keyOK := condition["field"].(string)
-		expected, valueOK := condition["equals"].(string)
-		dependency, found := fields[dependencyKey]
-		if !keyOK || !valueOK || !found {
-			return false
-		}
-		actual, supplied := config[dependencyKey]
-		if !supplied {
-			actual, _ = dependency["default"].(string)
-		}
-		if actual != expected {
-			return false
-		}
 	}
 	if rawOptions, ok := field["options"].([]any); ok {
 		value, supplied := config[key]
@@ -60,6 +69,23 @@ func catalogConfigFieldInputAllowed(key string, field map[string]any, fields map
 		}
 	}
 	return true
+}
+
+// catalogRequiredConfigFieldMissing checks required inputs that are visible and editable.
+// Conditional fields hidden for the selected role are intentionally omitted from the Agent contract.
+func catalogRequiredConfigFieldMissing(fields map[string]map[string]any, config map[string]string) string {
+	for key, field := range fields {
+		if field["required"] != true || field["custom_input"] == false || field["editable"] == false {
+			continue
+		}
+		if !catalogConfigFieldVisible(field, fields, config) {
+			continue
+		}
+		if value, supplied := config[key]; !supplied || value == "" {
+			return key
+		}
+	}
+	return ""
 }
 
 func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, service *hosts.Service, source *catalog.Service) {
@@ -133,6 +159,10 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 					http.Error(w, "请求包含未声明、隐藏、只读或选项值无效的配置字段", 422)
 					return
 				}
+			}
+			if missing := catalogRequiredConfigFieldMissing(fieldsByKey, req.Config); missing != "" {
+				http.Error(w, "请求缺少可见必填配置字段: "+missing, 422)
+				return
 			}
 		}
 		if _, err = service.CacheBundle(ctx, hostID, pkg.SHA256, pkg.ZIP); err != nil {
