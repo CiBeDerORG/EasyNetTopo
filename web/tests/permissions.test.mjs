@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getAppPermissions } from '../src/features/host-store/rules.ts'
+import { canRecoverFailedUninstall, getAppPermissions, recoveredUninstallStatus } from '../src/features/host-store/rules.ts'
 
 const easynettopo = {
   source_id: 'source', app_id: 'easynettopo', name: 'EasyNetTopo',
@@ -61,4 +61,25 @@ test('Other applications retain normal install and uninstall actions', () => {
   assert.equal(installed.showUninstall, true)
   const missing = getAppPermissions(other, undefined, 'linux')
   assert.equal(missing.showInstall, true)
+})
+
+test('卸载失败仅在完整的远端 Docker 清单确认资源不存在时恢复卡片', () => {
+  const app = { ...easynettopo, app_id: 'demo' }
+  const failed = {
+    source_id: 'source', app_id: 'demo', managed: true, allowed: true,
+    state: 'missing', action: 'uninstall', result: 'failed', message: '退出码 1'
+  }
+  const inventory = { agent_id: 'a', observed_at: '', status: 'ok', complete: true, resources: [] }
+  assert.equal(canRecoverFailedUninstall(failed, inventory, 'demo'), true)
+  const restored = recoveredUninstallStatus(failed)
+  assert.equal(restored.state, 'not_installed')
+  assert.equal(restored.managed, false)
+  assert.equal(restored.result, undefined)
+  assert.equal(restored.message, undefined)
+  assert.equal(getAppPermissions(app, restored).canInstall, true)
+  assert.equal(canRecoverFailedUninstall({ ...failed, state: 'running' }, inventory, 'demo'), false)
+  assert.equal(canRecoverFailedUninstall(failed, { ...inventory, complete: false }, 'demo'), false)
+  assert.equal(canRecoverFailedUninstall(failed, { ...inventory, resources: [
+    { kind: 'compose_project', name: 'demo', resource_id: 'x', state: 'stopped', managed: true }
+  ] }, 'demo'), false)
 })

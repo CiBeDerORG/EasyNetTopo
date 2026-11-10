@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Box, CircleCheck, Download, TrendCharts } from '@element-plus/icons-vue'
 import AppCard from './AppCard.vue'
 import NativeAgentCard from './NativeAgentCard.vue'
-import { appKey, getAppPermissions } from '../rules'
+import { appKey, canRecoverFailedUninstall, getAppPermissions, recoveredUninstallStatus } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
 import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, ExecutionTask, Host, HostSnapshot } from '../types'
@@ -12,6 +12,7 @@ import { currentAppTask, currentHostTask, formatTaskTime, formatTaskTriggerTime,
 const props = defineProps<{
   host: Host | null
   tasks: ExecutionTask[]
+  recoveredUninstallCards: string[]
   snapshot: HostSnapshot | null
   dockerInventory?: DockerInventory
   snapshotLoading: boolean
@@ -37,9 +38,18 @@ defineEmits<{
   'agent-update': [action: AgentUpdateAction]
 }>()
 
-const statusByKey = computed(() => Object.fromEntries(props.rows.map(row => [appKey(row), row])))
-const installedCount = computed(() => props.rows.filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
-const runningCount = computed(() => props.rows.filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
+function recovered(row: AppStatus): boolean {
+  return !!props.host &&
+    props.recoveredUninstallCards.includes(props.host.id + '|' + appKey(row)) &&
+    canRecoverFailedUninstall(row, props.dockerInventory, row.app_id)
+}
+const statusByKey = computed<Record<string, AppStatus>>(() => Object.fromEntries(props.rows.map(row =>
+  [appKey(row), recovered(row) ? recoveredUninstallStatus(row) : row]
+)))
+const installedCount = computed(() => Object.values(statusByKey.value)
+  .filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
+const runningCount = computed(() => Object.values(statusByKey.value)
+  .filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
 const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
@@ -66,6 +76,16 @@ const visibleApps = computed(() => props.apps.filter(app => {
   if (props.filter === 'update') return permissions.canUpdate
   return true
 }))
+function cardTask(app: CatalogApp): ExecutionTask | undefined {
+  if (!props.host) return undefined
+  const task = currentAppTask(props.tasks, props.host.id, app.source_id, app.app_id)
+  // 只隐藏已核实资源不存在的历史记录，不隐藏活跃或中断任务。
+  if (task && !taskActive(task) && task.state !== 'interrupted') {
+    const original = props.rows.find(row => appKey(row) === appKey(app))
+    if (original && recovered(original)) return undefined
+  }
+  return task
+}
 function sourceName(id: string) {
   return props.sources.find(source => source.id === id)?.name || id
 }
@@ -186,15 +206,15 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :key="appKey(app)"
           :app="app"
           :status="statusByKey[appKey(app)]"
-          :task="currentAppTask(tasks, host.id, app.source_id, app.app_id)"
+          :task="cardTask(app)"
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
-          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(currentAppTask(tasks, host.id, app.source_id, app.app_id))"
+          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
-          @resolve="$emit('resolve-task', currentAppTask(tasks, host.id, app.source_id, app.app_id)!)"
+          @resolve="cardTask(app) && $emit('resolve-task', cardTask(app)!)"
         />
       </div>
       <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />

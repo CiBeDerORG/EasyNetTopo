@@ -1,4 +1,4 @@
-import type { AppPermissions, AppRef, AppStatus, CatalogApp } from './types'
+import type { AppPermissions, AppRef, AppStatus, CatalogApp, DockerInventory } from './types'
 
 export const appKey = (app: AppRef) => app.source_id + '/' + app.app_id
 export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = ''): AppPermissions {
@@ -58,5 +58,24 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
     showInstall, canInstall, showUpdate, canUpdate, showUninstall, canUninstall,
     showAdopt, canAdopt, showForceUpdate: canForceUpdate,
     canForceUpdate, grantRequired, blockReason
+  }
+}
+
+
+// 卸载脚本失败不代表资源已删除；必须由完整的 Docker 清单验证无受管容器。
+export function canRecoverFailedUninstall(
+  status: AppStatus | undefined, inventory: DockerInventory | undefined, appId: string
+): boolean {
+  if (!status || status.external || (status.state !== 'not_installed' && status.state !== 'missing')) return false
+  if (!inventory?.complete) return false
+  return !inventory.resources.some(resource =>
+    resource.kind === 'compose_project' &&
+    (resource.compose_project === appId || resource.name === appId))
+}
+
+export function recoveredUninstallStatus(status: AppStatus): AppStatus {
+  return {
+    ...status, managed: false, external: false, state: 'not_installed',
+    action: undefined, result: undefined, message: undefined, blocked_reason: undefined
   }
 }

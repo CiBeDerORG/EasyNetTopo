@@ -67,20 +67,26 @@ const locationLabel = computed(() => {
 </template>
 
 <style scoped>
-.node-details { padding: 10px 22px; cursor: auto; }
+.node-details { padding: 16px 22px 20px; cursor: auto; color: var(--ent-text); background: var(--ent-detail-bg); }
+.node-details .attribute-toolbar strong { color: var(--ent-detail-accent); font-size: 14px; }
+.node-details .node-detail { background: var(--ent-detail-section); border: 1px solid var(--ent-detail-line); border-radius: 10px; padding: 13px 15px; }
+.node-details .attributes-detail { background: var(--ent-detail-attributes); border-color: var(--ent-detail-line); }
 .attribute-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
-.attributes-detail { padding-bottom: 16px; margin-bottom: 16px !important; border-bottom: 1px solid var(--ent-line-soft); }
+.attributes-detail { margin-bottom: 14px !important; }
 .node-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 20px; margin: 0; }
 .node-detail div { min-width: 0; }
-.node-detail dt, .connection-note, h3 span { color: #8bacca; font-size: 12px; }
-.node-detail dd { margin: 4px 0 0; overflow-wrap: anywhere; }
+.node-detail dt, .connection-note, h3 span { color: var(--ent-detail-label); font-size: 12px; }
+.node-detail dt { font-weight: 550; }
+.node-detail dd { margin: 5px 0 0; overflow-wrap: anywhere; color: var(--ent-detail-value); font-weight: 600; }
 .connections { margin-top: 18px; }
 h3 { margin: 0; font-size: 14px; }
 .connection-list { display: grid; gap: 10px; }
-.connection-item { padding: 12px; border: 1px solid var(--ent-line-soft); border-radius: 8px; }
+.connection-item { padding: 12px; border: 1px solid var(--ent-detail-line); border-radius: 10px; background: var(--ent-detail-section); }
+.connection-item .connection-detail { background: transparent; border: 0; padding: 0; }
 .connection-heading { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.connection-heading strong { color: var(--ent-detail-accent); }
 @media (max-width: 760px) {
-  .node-details { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid #28435c; }
+  .node-details { margin-top: 14px; padding: 14px; border-top: 2px solid var(--ent-detail-accent); border-radius: 10px; }
   .node-detail { grid-template-columns: minmax(0, 1fr); }
 }
 </style>
