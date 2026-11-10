@@ -34,8 +34,11 @@ export function networkRows(value: unknown, capability: string) {
       const pair = record(value), route = record(pair.route), peer = record(pair.peer)
       const connections = list(peer.conns).map(record).filter(conn => !conn.is_closed)
       const stats = connections.map(conn => record(conn.stats))
-      const latency = stats.map(stat => Number(stat.latency_us)).filter(Number.isFinite)
-      return { instance: instance.name, id: display(route.peer_id ?? peer.peer_id), hostname: display(route.hostname), ip: ipv4(route.ipv4_addr), subnets: list(route.proxy_cidrs).map(display).join('、') || '—', version: display(route.version), nextHop: display(route.next_hop_peer_id), cost: display(route.cost), connection: connections.length ? '直连' : '未报告直连', protocol: [...new Set(connections.map(conn => display(record(conn.tunnel).tunnel_type)))].join('、') || '—', latency: latency.length ? (Math.min(...latency) / 1000).toFixed(2) + ' ms' : '—', rx: stats.length ? stats.reduce((sum, stat) => sum + Number(stat.rx_bytes || 0), 0).toLocaleString() + ' B' : '—', tx: stats.length ? stats.reduce((sum, stat) => sum + Number(stat.tx_bytes || 0), 0).toLocaleString() + ' B' : '—' }
+      const latency = stats.map(stat => Number(stat.latency_us)).filter(value => Number.isFinite(value) && value > 0)
+      const pathLatency = Number(route.path_latency)
+      const bestLatency = latency.length ? Math.min(...latency) / 1000 :
+        route.path_latency != null && Number.isFinite(pathLatency) && pathLatency > 0 ? pathLatency : null
+      return { instance: instance.name, id: display(route.peer_id ?? peer.peer_id), hostname: display(route.hostname), ip: ipv4(route.ipv4_addr), subnets: list(route.proxy_cidrs).map(display).join('、') || '—', version: display(route.version), nextHop: display(route.next_hop_peer_id), cost: display(route.cost), connection: connections.length ? '直连' : '未报告直连', protocol: [...new Set(connections.map(conn => display(record(conn.tunnel).tunnel_type)))].join('、') || '—', latency: bestLatency == null ? '—' : bestLatency.toFixed(2) + ' ms', rx: stats.length ? stats.reduce((sum, stat) => sum + Number(stat.rx_bytes || 0), 0).toLocaleString() + ' B' : '—', tx: stats.length ? stats.reduce((sum, stat) => sum + Number(stat.tx_bytes || 0), 0).toLocaleString() + ' B' : '—' }
     })
   })
 }
