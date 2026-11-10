@@ -31,7 +31,7 @@ test('魔改版节点清单：入口、路由与直连信息合并在同一列�
     { route: { hostname: 'OWRT', peer_id: 2, ipv4_addr: '10.0.0.2', cost: 1 }, peer: {
       peer_id: 2, conns: [{ stats: { latency_us: 1800 }, tunnel: { tunnel_type: 'udp' } }]
     } },
-    { route: { hostname: '远端节点', peer_id: 3, ipv4_addr: '10.0.0.3', cost: 3 } }
+    { route: { hostname: '远端节点', peer_id: 3, ipv4_addr: '10.0.0.3', cost: 3, path_latency: 24.5 } }
   ] }
   const rows = mergedNetworkRows(node, route)
   assert.equal(rows.length, 3, '本机节点不应被重复列为路由')
@@ -44,6 +44,7 @@ test('魔改版节点清单：入口、路由与直连信息合并在同一列�
   assert.equal(direct?.latency, '1.80 ms')
   assert.equal(relay?.routeLabel, '中继 · 开销 3')
   assert.equal(relay?.protocol, '—')
+  assert.equal(relay?.latency, '24.50 ms')
   assert.equal(relay?.connection, '未报告直连')
 })
 
