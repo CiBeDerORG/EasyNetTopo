@@ -26,8 +26,9 @@ import {
   updateHost,
   setNetworkEntry
 } from '../api'
-import { appKey, getAppPermissions } from '../rules'
+import { appKey, canRecoverFailedUninstall, getAppPermissions } from '../rules'
 import { useHostStoreData } from '../composables/useHostStoreData'
+import { currentAppTask, taskActive } from '../task-status'
 import SidebarNav from '../components/SidebarNav.vue'
 import HostListPane from '../components/HostListPane.vue'
 import StorePane from '../components/StorePane.vue'
@@ -142,6 +143,40 @@ const refreshing = computed(() =>
   data.statusQuery.isFetching.value
 )
 const pendingKey = computed(() => pendingAction.value?.appKey || '')
+
+// 仅保存当前浏览器已核实无资源的卡片显示偏好，不删除服务端任务审计记录。
+const recoveredStorageKey = 'easynettopo-recovered-uninstall-cards'
+function loadRecoveredUninstalls(): string[] {
+  try {
+    const value: unknown = JSON.parse(localStorage.getItem(recoveredStorageKey) || '[]')
+    return Array.isArray(value) ? value.filter((item): item is string =>
+      typeof item === 'string' && item.length <= 300).slice(-256) : []
+  } catch { return [] }
+}
+const recoveredUninstallCards = ref<string[]>(loadRecoveredUninstalls())
+function setRecovered(hostId: string, key: string, enabled: boolean) {
+  const marker = hostId + '|' + key
+  const next = recoveredUninstallCards.value.filter(item => item !== marker)
+  if (enabled) next.push(marker)
+  recoveredUninstallCards.value = next.slice(-256)
+  try { localStorage.setItem(recoveredStorageKey, JSON.stringify(recoveredUninstallCards.value)) }
+  catch { /* 本地存储不可用时保留本次会话状态 */ }
+}
+async function recoverFailedUninstall(hostId: string, app: CatalogApp): Promise<boolean> {
+  const [statusResult, dockerResult] = await Promise.allSettled([
+    data.statusQuery.refetch(), data.dockerQuery.refetch()
+  ])
+  if (hostId !== selectedHostId.value ||
+      statusResult.status !== 'fulfilled' || statusResult.value.isError ||
+      dockerResult.status !== 'fulfilled' || dockerResult.value.isError) return false
+  const row = statusResult.value.data?.find(item => appKey(item) === appKey(app))
+  const inventory = dockerResult.value.data
+  const task = currentAppTask(data.tasks.value, hostId, app.source_id, app.app_id)
+  if (task && (taskActive(task) || task.state === 'interrupted')) return false
+  if (!canRecoverFailedUninstall(row, inventory, app.app_id)) return false
+  setRecovered(hostId, appKey(app), true)
+  return true
+}
 
 const addHostOpen = ref(false)
 const addHostSaving = ref(false)
@@ -271,7 +306,7 @@ watch(selectedHostId, () => {
   configDialogOpen.value = false
 })
 
-watch(() => data.statusQuery.data.value, result => {
+watch(() => data.statusQuery.data.value, async result => {
   const job = pendingAction.value
   if (!job || job.hostId !== selectedHostId.value || !result) return
   const row = result.find(item => appKey(item) === job.appKey)
@@ -282,7 +317,13 @@ watch(() => data.statusQuery.data.value, result => {
   // 安装/更新脚本执行结束后重新采集 Docker 端口映射，供卡片和资源抽屉共用。
   void data.dockerQuery.refetch()
   if (row.result === 'failed') {
-    ElMessage.error(job.appName + ' ' + actionName(job.action) + '失败：' + (row.message || '请检查 Agent 执行状态'))
+    const app = data.catalogApps.value.find(item => appKey(item) === job.appKey)
+    const restored = job.action === 'uninstall' && app
+      ? await recoverFailedUninstall(job.hostId, app) : false
+    if (restored) ElMessage.warning(job.appName + ' 卸载失败，但确认远端已无应用资源；卡片已恢复待安装状态')
+    else ElMessage.error(job.appName + ' ' + actionName(job.action) + '失败：' +
+      (row.message || '请检查 Agent 执行状态') +
+      (job.action === 'uninstall' ? '；仍有资源或状态未核实，已保留实际安装信息' : ''))
   } else if (row.result === 'unknown') {
     ElMessage.warning(job.appName + ' 操作结果未知，请核对目标主机实际状态')
   } else if (row.result === 'succeeded' &&
@@ -592,6 +633,7 @@ async function runAppAction(
     return
   }
   const key = appKey(app)
+  setRecovered(host.id, key, false)
   actionBusyKey.value = key
   try {
     const payload = action === 'install' && install
@@ -606,6 +648,13 @@ async function runAppAction(
       await data.tasksQuery.refetch()
       return
     }
+    if (action === 'uninstall' && accepted.result === 'failed') {
+      const restored = await recoverFailedUninstall(host.id, app)
+      ElMessage.warning(restored
+        ? app.name + ' 卸载失败，但远端资源已不存在；已清理卡片旧任务并恢复待安装'
+        : app.name + ' 卸载失败，远端资源仍存在或状态未确认；保留真实状态和失败信息')
+      return
+    }
     if (accepted.result === 'running') {
       pendingAction.value = { hostId: host.id, appKey: key, action, appName: app.name, errors: 0 }
       ElMessage.info(app.name + ' ' + actionName(action) + '请求已受理，正在等待 Agent 执行结果。')
@@ -617,8 +666,11 @@ async function runAppAction(
     await data.statusQuery.refetch()
     if (accepted.result === 'succeeded') await data.dockerQuery.refetch()
   } catch (error) {
-    ElMessage.error(app.name + ' ' + actionName(action) + '失败：' + errorMessage(error))
-    await data.statusQuery.refetch()
+    const restored = action === 'uninstall' && await recoverFailedUninstall(host.id, app)
+    if (restored) ElMessage.warning(app.name + ' 卸载指令失败，但远端已确认无应用资源；卡片已恢复待安装')
+    else ElMessage.error(app.name + ' ' + actionName(action) + '失败：' + errorMessage(error) +
+      (action === 'uninstall' ? '；资源仍存在或状态未确认，保留实际状态' : ''))
+    if (action !== 'uninstall') await data.statusQuery.refetch()
   } finally {
     actionBusyKey.value = ''
   }
@@ -753,6 +805,7 @@ async function logout() {
         <StorePane
           :host="selectedHost"
           :tasks="executionTasks"
+          :recovered-uninstall-cards="recoveredUninstallCards"
           :snapshot="snapshot"
           :docker-inventory="dockerInventory"
           :snapshot-loading="snapshotLoading"
