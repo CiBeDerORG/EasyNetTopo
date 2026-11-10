@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref, watch } from 'vue'
+import { mercatorWorldSize, projectMercator, unprojectMercator } from './map-mercator'
 
 const props = defineProps<{ latitude: number | null; longitude: number | null }>()
 const emit = defineEmits<{ select: [point: { latitude: number; longitude: number }] }>()
@@ -8,23 +9,15 @@ const size = ref({ width: 600, height: 300 })
 const center = ref({ latitude: 30, longitude: 110 })
 const zoom = ref(4)
 const tileSize = 256
-const MAX_LAT = 85.05112878
 let observer: ResizeObserver | null = null
 let drag: { x: number; y: number; cx: number; cy: number; moved: boolean } | null = null
 
-function world(): number { return tileSize * Math.pow(2, zoom.value) }
+function world(): number { return mercatorWorldSize(zoom.value) }
 function project(latitude: number, longitude: number) {
-  const lat = Math.max(-MAX_LAT, Math.min(MAX_LAT, latitude)) * Math.PI / 180
-  return {
-    x: (longitude + 180) / 360 * world(),
-    y: (1 - Math.log(Math.tan(lat) + 1 / Math.cos(lat)) / Math.PI) / 2 * world()
-  }
+  return projectMercator(latitude, longitude, zoom.value)
 }
 function unproject(x: number, y: number) {
-  const length = world()
-  const latitude = Math.atan(Math.sinh(Math.PI * (1 - 2 * Math.max(0, Math.min(length, y)) / length))) * 180 / Math.PI
-  const longitude = ((x / length * 360 + 180) % 360 + 360) % 360 - 180
-  return { latitude: Number(latitude.toFixed(6)), longitude: Number(longitude.toFixed(6)) }
+  return unprojectMercator(x, y, zoom.value)
 }
 const tiles = computed(() => {
   const { x: cx, y: cy } = project(center.value.latitude, center.value.longitude)
