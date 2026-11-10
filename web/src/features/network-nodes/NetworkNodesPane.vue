@@ -293,7 +293,25 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
 </template>
 
 <style scoped>
-.network-pane { margin: 24px; padding: 24px; min-width: 0; border: 1px solid var(--ent-line-soft); border-radius: 16px; background: #0e1c2e; }
+/* 工作区本身禁止溢出，网络节点页需要独立滚动，展开详情才能完整查看。 */
+.network-pane {
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  margin: 24px;
+  padding: 24px;
+  overflow: auto;
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
+  scrollbar-width: thin;
+  scrollbar-color: #456a83 #0e1c2e;
+  border: 1px solid var(--ent-line-soft);
+  border-radius: 16px;
+  background: #0e1c2e;
+}
+.network-pane::-webkit-scrollbar { width: 10px; height: 10px; }
+.network-pane::-webkit-scrollbar-thumb { background: #456a83; border-radius: 8px; }
+.network-pane::-webkit-scrollbar-track { background: #0e1c2e; }
 .candidate-ip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 .candidate-ip code { color: #8ccffc; }
 .editor-note { font-size: 12px; color: #8bacca; line-height: 1.5; }
@@ -310,7 +328,7 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
 .node-name { font-weight: 650; }
 .node-meta { margin-top: 5px; color: #8bacca; font-size: 12px; overflow-wrap: anywhere; }
 .node-flags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
-.network-desktop-table { container-type: inline-size; }
+.network-desktop-table { width: 100%; max-width: 100%; container-type: inline-size; }
 :deep(.el-table__expanded-cell) { padding: 0; }
 /* 列表可横向滚动，展开详情始终适配可见宽度。 */
 :deep(.el-table__expanded-cell .node-details) { width: 100cqw; box-sizing: border-box; position: sticky; left: 0; }
