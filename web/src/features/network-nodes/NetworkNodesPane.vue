@@ -98,7 +98,14 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
             </template>
           </el-table-column>
           <el-table-column prop="cidr" label="虚拟 IPv4" min-width="150" />
-          <el-table-column prop="routeLabel" label="连接路径" min-width="145" />
+          <el-table-column label="入口实例 / 网络路由" min-width="185">
+            <template #default="{ row }">
+              <div class="route-cell">
+                <el-tag size="small" :type="row.kind === '入口实例' ? 'success' : 'info'">{{ row.kind }}</el-tag>
+                <span>{{ row.routeLabel }}</span>
+              </div>
+            </template>
+          </el-table-column>
           <el-table-column prop="protocol" label="连接协议" min-width="110" />
           <el-table-column prop="latency" label="路径延迟" min-width="105" />
           <el-table-column prop="subnets" label="代理网段" min-width="165" show-overflow-tooltip />
@@ -114,8 +121,8 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
                 <div><dt>直连延迟</dt><dd>{{ row.directLatency }}</dd></div>
                 <div><dt>累计接收</dt><dd>{{ row.rx }}</dd></div>
                 <div><dt>累计发送</dt><dd>{{ row.tx }}</dd></div>
-                <div v-if="row.publicIP !== '—'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
-                <div v-if="row.listeners !== '—'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
+                <div v-if="row.kind === '入口实例'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
+                <div v-if="row.kind === '入口实例'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
               </dl>
             </template>
           </el-table-column>
@@ -129,7 +136,7 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
             @keydown.space.prevent="toggleKey(row.key)">
             <div class="network-node-title">
               <strong>{{ row.hostname }}</strong>
-              <span class="network-node-chevron">{{ expandedKeys.includes(row.key) ? '收起详情' : '展开详情' }}</span>
+              <el-tag size="small" :type="row.kind === '入口实例' ? 'success' : 'info'">{{ row.kind }}</el-tag>
             </div>
             <div class="node-meta" :title="row.instanceID">{{ row.instance }} · {{ row.id }}</div>
             <div class="network-node-ip">{{ row.cidr }}</div>
@@ -146,8 +153,8 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
               <div><dt>直连延迟</dt><dd>{{ row.directLatency }}</dd></div>
               <div><dt>累计接收</dt><dd>{{ row.rx }}</dd></div>
               <div><dt>累计发送</dt><dd>{{ row.tx }}</dd></div>
-              <div v-if="row.publicIP !== '—'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
-              <div v-if="row.listeners !== '—'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
+              <div v-if="row.kind === '入口实例'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
+              <div v-if="row.kind === '入口实例'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
             </dl>
           </article>
         </div>
@@ -170,7 +177,7 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
 .node-meta { margin-top: 5px; color: #8bacca; font-size: 12px; overflow-wrap: anywhere; }
 :deep(.network-desktop-table .el-table__row) { cursor: pointer; }
 :deep(.network-desktop-table .el-table__row:hover > td) { background: var(--el-fill-color-light); }
-.network-node-chevron { color: #8bacca; font-size: 12px; flex-shrink: 0; }
+.route-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .network-node-card { cursor: pointer; }
 .network-node-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
 .node-detail-mobile { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid #28435c; }
