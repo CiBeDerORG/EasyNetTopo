@@ -9,6 +9,9 @@ import './styles/global.css'
 import App from './App.vue'
 import { router } from './app/router'
 import { queryClient } from './app/query-client'
+import { initializeTheme } from './stores/theme'
+
+initializeTheme()
 
 const app = createApp(App)
 

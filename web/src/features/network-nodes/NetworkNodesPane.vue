@@ -186,7 +186,10 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
         empty-text="当前没有匹配的网络节点" stripe class="network-desktop-table">
           <el-table-column label="节点" min-width="155">
             <template #default="{ row }">
-              <div class="node-name">{{ getAttributes(row)?.alias || row.hostname }}</div>
+              <div class="node-heading">
+                <span class="node-name">{{ getAttributes(row)?.alias || row.hostname }}</span>
+                <el-tag v-if="getAttributes(row)?.has_public_ip" size="small" type="success" effect="dark">公网</el-tag>
+              </div>
               <div v-if="getAttributes(row)?.alias" class="node-meta">原主机名：{{ row.hostname }}</div>
               <div v-if="getAttributes(row)?.has_public_ip" class="node-meta">公网：{{ getAttributes(row)?.public_ip || '已标记，IP 待补充' }}</div>
               <div v-if="row.flags.length" class="node-flags">
@@ -201,6 +204,13 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
             </template>
           </el-table-column>
           <el-table-column prop="cidr" label="虚拟 IPv4" min-width="150" />
+          <el-table-column label="对端候选公网 IP" min-width="170" show-overflow-tooltip>
+            <template #default="{ row }">
+              <span class="candidate-value" :class="{ 'is-empty': !row.candidatePublicIP }">
+                {{ row.candidatePublicIP || '—' }}
+              </span>
+            </template>
+          </el-table-column>
           <el-table-column label="入口实例 / 网络路由" min-width="185">
             <template #default="{ row }">
               <div class="route-cell">
@@ -230,7 +240,7 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
             @keydown.space.prevent="toggleKey(row.key)">
             <div class="network-node-title">
               <strong>{{ getAttributes(row)?.alias || row.hostname }}</strong>
-              <el-tag v-if="getAttributes(row)?.has_public_ip" size="small" type="success">公网 IP</el-tag>
+              <el-tag v-if="getAttributes(row)?.has_public_ip" size="small" type="success" effect="dark">公网</el-tag>
               <el-tag size="small" :type="row.kind === '入口实例' ? 'success' : 'info'">{{ row.kind }}</el-tag>
             </div>
             <div class="node-meta" :title="row.instanceID">{{ row.instance }} · {{ row.id }}</div>
@@ -238,6 +248,7 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
               <el-tag v-for="flag in row.flags" :key="flag" size="small" type="info">{{ flag }}</el-tag>
             </div>
             <div class="network-node-ip">{{ row.cidr }}</div>
+            <div class="network-node-candidate">对端候选公网 IP：<strong>{{ row.candidatePublicIP || '—' }}</strong></div>
             <div class="network-node-details">
               <span>{{ row.routeLabel }}</span><span>{{ row.protocol }}</span><span>{{ row.latency }}</span>
             </div>
@@ -304,14 +315,14 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
   overscroll-behavior: contain;
   scrollbar-gutter: stable;
   scrollbar-width: thin;
-  scrollbar-color: #456a83 #0e1c2e;
+  scrollbar-color: var(--ent-scroll-thumb) var(--ent-panel);
   border: 1px solid var(--ent-line-soft);
   border-radius: 16px;
-  background: #0e1c2e;
+  background: var(--ent-panel);
 }
 .network-pane::-webkit-scrollbar { width: 10px; height: 10px; }
-.network-pane::-webkit-scrollbar-thumb { background: #456a83; border-radius: 8px; }
-.network-pane::-webkit-scrollbar-track { background: #0e1c2e; }
+.network-pane::-webkit-scrollbar-thumb { background: var(--ent-scroll-thumb); border-radius: 8px; }
+.network-pane::-webkit-scrollbar-track { background: var(--ent-panel); }
 .candidate-ip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
 .candidate-ip code { color: #8ccffc; }
 .editor-note { font-size: 12px; color: #8bacca; line-height: 1.5; }
@@ -325,15 +336,20 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
 .entry-select { min-width: 180px; }
 .network-alert { margin-top: 12px; }
 .network-summary { display: flex; justify-content: space-between; gap: 12px; margin: 12px 0; color: #8bacca; font-size: 12px; }
-.node-name { font-weight: 650; }
+.node-heading { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.node-name { font-weight: 740; color: var(--ent-text); }
+.candidate-value { color: var(--ent-data-highlight); font-weight: 650; font-variant-numeric: tabular-nums; }
+.candidate-value.is-empty { color: var(--ent-dim); font-weight: 400; }
+.network-node-candidate { margin-top: 6px; color: var(--ent-muted); font-size: 12px; }
+.network-node-candidate strong { color: var(--ent-data-highlight); font-weight: 650; }
 .node-meta { margin-top: 5px; color: #8bacca; font-size: 12px; overflow-wrap: anywhere; }
 .node-flags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
-.network-desktop-table { width: 100%; max-width: 100%; container-type: inline-size; }
-:deep(.el-table__expanded-cell) { padding: 0; }
+.network-desktop-table { width: 100%; max-width: 100%; container-type: inline-size; --el-table-bg-color: var(--ent-node-row); --el-table-tr-bg-color: var(--ent-node-row); --el-table-row-hover-bg-color: var(--ent-node-row-hover); }
+:deep(.el-table__expanded-cell) { padding: 0; background: var(--ent-detail-bg) !important; box-shadow: inset 4px 0 0 var(--ent-detail-accent); }
 /* 列表可横向滚动，展开详情始终适配可见宽度。 */
 :deep(.el-table__expanded-cell .node-details) { width: 100cqw; box-sizing: border-box; position: sticky; left: 0; }
 :deep(.network-desktop-table .el-table__row) { cursor: pointer; }
-:deep(.network-desktop-table .el-table__row:hover > td) { background: var(--el-fill-color-light); }
+:deep(.network-desktop-table .el-table__row:hover > td) { background: var(--ent-node-row-hover) !important; }
 .route-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .network-node-card { cursor: pointer; }
 .network-node-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
@@ -346,7 +362,7 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
   .network-desktop-table { display: none; }
   .network-mobile-empty { display: block; padding: 24px; text-align: center; color: #8bacca; }
   .network-mobile-list { display: grid; gap: 10px; }
-  .network-node-card { min-width: 0; padding: 13px; border: 1px solid #28435c; border-radius: 12px; background: #11263c; }
+  .network-node-card { min-width: 0; padding: 13px; border: 1px solid var(--ent-line); border-radius: 12px; background: var(--ent-node-row); }
   .network-node-title, .network-node-details { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
   .network-node-title strong { overflow-wrap: anywhere; }
   .network-node-ip { margin: 10px 0; font-family: ui-monospace, monospace; }

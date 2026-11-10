@@ -1,7 +1,7 @@
 .el-dialog, .el-drawer, .el-message-box {
-  border: 1px solid #35516a !important;
+  border: 1px solid var(--ent-line) !important;
   border-radius: 16px !important;
-  background: linear-gradient(160deg, #13253a, #0a1828) !important;
+  background: var(--ent-dialog-bg, linear-gradient(160deg, #13253a, #0a1828)) !important;
   box-shadow: 0 25px 80px rgb(0 0 0 / 55%) !important;
 }
 .el-dialog__header, .el-drawer__header {
@@ -16,8 +16,8 @@
 .el-dialog__body, .el-drawer__body { color: var(--ent-text); padding: 20px 22px !important; }
 .el-dialog__footer { border-top: 1px solid #254157; padding: 14px 22px !important; }
 .el-input__wrapper, .el-textarea__inner, .el-select__wrapper {
-  background: #0a1729 !important;
-  box-shadow: 0 0 0 1px #31516a inset !important;
+  background: var(--ent-input-bg, #0a1729) !important;
+  box-shadow: 0 0 0 1px var(--ent-input-border, #31516a) inset !important;
 }
 .el-input__inner, .el-textarea__inner, .el-select__selected-item { color: var(--ent-text) !important; }
 .el-form-item__label { color: #99b5cd !important; }

@@ -81,6 +81,9 @@ const controllerQuery = useQuery({
   retry: 0
 })
 const controllerId = computed(() => controllerQuery.data.value?.controller_id || '')
+function changeThemeMode(value: string) {
+  if (value === 'system' || value === 'light' || value === 'dark') ui.setThemeMode(value)
+}
 
 const selectedHostId = computed(() => ui.selectedHostId)
 const pendingAction = ref<{
@@ -715,6 +718,12 @@ async function logout() {
           <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : '主机商店' }}</h1></div>
         </div>
         <div class="topbar-actions">
+          <el-select class="theme-switcher" aria-label="页面主题" :model-value="ui.themeMode"
+            size="small" @update:model-value="changeThemeMode">
+            <el-option label="跟随系统" value="system" />
+            <el-option label="浅色模式" value="light" />
+            <el-option label="深色模式" value="dark" />
+          </el-select>
           <span v-if="controllerId" class="controller-id">控制端 {{ controllerId.slice(0, 8) }}</span>
           <el-tooltip content="退出登录" placement="bottom">
             <el-button text circle aria-label="退出登录" @click="logout">
@@ -852,16 +861,14 @@ async function logout() {
   min-height: 0;
   flex-direction: column;
   overflow: hidden;
-  background:
-    radial-gradient(ellipse at 88% 0%, #14325356, transparent 37%),
-    linear-gradient(180deg, #0b1726, #07111f 75%);
+  background: var(--ent-workspace-gradient);
 }
 .workspace::before {
   position: absolute;
   pointer-events: none;
   inset: 0;
   opacity: .2;
-  background-image: linear-gradient(#1e4967 1px, transparent 1px), linear-gradient(90deg, #1e4967 1px, transparent 1px);
+  background-image: linear-gradient(var(--ent-grid-line) 1px, transparent 1px), linear-gradient(90deg, var(--ent-grid-line) 1px, transparent 1px);
   background-size: 36px 36px;
   mask-image: linear-gradient(to bottom, #000, transparent 68%);
   content: '';
@@ -875,7 +882,7 @@ async function logout() {
   gap: 20px;
   padding: 0 27px;
   border-bottom: 1px solid #24384c;
-  background: #0c1728af;
+  background: var(--ent-topbar-bg);
   backdrop-filter: blur(14px);
 }
 .crumb { display: flex; align-items: center; gap: 10px; color: #7f9eba; font-size: 12px; letter-spacing: .2px; }
@@ -884,6 +891,7 @@ async function logout() {
 .title-square { width: 3px; height: 24px; border-radius: 10px; background: var(--ent-cyan); box-shadow: 0 0 12px #49e6eacc; }
 .page-title h1 { margin: 0; font-size: 22px; font-weight: 750; letter-spacing: .4px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
+.theme-switcher { width: 120px; flex: none; }
 .controller-id { color: var(--ent-dim); font-size: 10px; }
 .topbar-actions :deep(.el-button) { color: #9ab6cf; }
 .main-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: var(--ent-host-pane-width) minmax(0, 1fr); }
