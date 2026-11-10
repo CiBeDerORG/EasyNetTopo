@@ -2,6 +2,7 @@ export type AuthStatus = { initialized: boolean; authenticated: boolean }
 export type ControllerInfo = { controller_id: string }
 
 export type Host = {
+  network_entry?: boolean
   id: string
   name: string
   endpoint: string

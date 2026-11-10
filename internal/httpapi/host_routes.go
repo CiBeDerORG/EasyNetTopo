@@ -106,6 +106,57 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
+		if len(parts) == 2 && len(parts[0]) == 36 && parts[1] == "network-entry" {
+			if r.Method != http.MethodPut {
+				methodNotAllowed(w, "PUT")
+				return
+			}
+			if !mutation(w, r) {
+				return
+			}
+			var req struct {
+				Enabled *bool `json:"enabled"`
+			}
+			if !decode(w, r, &req) {
+				return
+			}
+			if req.Enabled == nil {
+				http.Error(w, "必须指定入口状态", 400)
+				return
+			}
+			h, err := service.SetNetworkEntry(r.Context(), parts[0], *req.Enabled)
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+			} else if errors.Is(err, storage.ErrHostBinding) {
+				http.Error(w, "请先配对主机 Agent", 409)
+			} else if err != nil {
+				http.Error(w, "组网入口保存失败", 503)
+			} else {
+				jsonReply(w, 200, h)
+			}
+			return
+		}
+		if len(parts) == 3 && len(parts[0]) == 36 && parts[1] == "network" {
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, "GET")
+				return
+			}
+			if parts[2] != "node" && parts[2] != "peer" && parts[2] != "route" {
+				http.NotFound(w, r)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 12*time.Second)
+			defer cancel()
+			raw, err := service.NetworkData(ctx, parts[0], parts[2])
+			if errors.Is(err, storage.ErrHostNotFound) {
+				http.NotFound(w, r)
+			} else if err != nil {
+				jsonReply(w, 502, map[string]string{"message": "网络数据读取失败，请检查组网入口、Agent 的 EasyTier Driver 开关及容器运行状态"})
+			} else {
+				jsonReply(w, 200, raw)
+			}
+			return
+		}
 		if len(parts) == 2 && len(parts[0]) == 36 && parts[1] == "adapters" {
 			if r.Method != http.MethodGet {
 				methodNotAllowed(w, "GET")

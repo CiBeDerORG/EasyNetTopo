@@ -1,4 +1,6 @@
 <script setup lang="ts">
+import { useRoute } from 'vue-router'
+import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -21,7 +23,8 @@ import {
   queueNativeAgentUpdate,
   refreshSource,
   resolveInterruptedExecutionTask,
-  updateHost
+  updateHost,
+  setNetworkEntry
 } from '../api'
 import { appKey, getAppPermissions } from '../rules'
 import { useHostStoreData } from '../composables/useHostStoreData'
@@ -44,6 +47,8 @@ import type {
   HostHealthStatus
 } from '../types'
 
+const route = useRoute()
+const isNetworkPage = computed(() => route.path === '/network-nodes')
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
 const authQuery = useQuery({
@@ -383,6 +388,18 @@ async function submitNewHost(payload: { name: string; endpoint: string }) {
   }
 }
 
+const networkSaving = ref(false)
+async function toggleNetworkEntry(host: Host) {
+  if (networkSaving.value) return
+  networkSaving.value = true
+  try {
+    await setNetworkEntry(host.id, !host.network_entry)
+    await queryClient.invalidateQueries({ queryKey: ['hosts'] })
+    ElMessage.success(host.network_entry ? '已取消组网入口' : '已设为组网入口，可在网络节点菜单查看数据')
+  } catch (error) { ElMessage.error(errorMessage(error)) }
+  finally { networkSaving.value = false }
+}
+
 async function saveHost(payload: { name: string; endpoint: string }) {
   const host = editorHost.value
   if (!host) return
@@ -694,8 +711,8 @@ async function logout() {
     <main class="workspace">
       <header class="topbar">
         <div>
-          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> 主机商店</div>
-          <div class="page-title"><span class="title-square"></span><h1>主机商店</h1></div>
+          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : '主机商店' }}</div>
+          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : '主机商店' }}</h1></div>
         </div>
         <div class="topbar-actions">
           <span v-if="controllerId" class="controller-id">控制端 {{ controllerId.slice(0, 8) }}</span>
@@ -707,7 +724,8 @@ async function logout() {
         </div>
       </header>
 
-      <div class="main-layout">
+      <NetworkNodesPane v-if="isNetworkPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
+      <div v-else class="main-layout">
         <HostListPane
           :hosts="hosts"
           :tasks="executionTasks"
@@ -721,6 +739,7 @@ async function logout() {
           @edit="openEditor"
           @docker="openDocker"
           @delete="removeHost"
+          @network="toggleNetworkEntry"
         />
         <StorePane
           :host="selectedHost"

@@ -17,12 +17,13 @@ var ErrHostNotFound = errors.New("主机不存在")
 var ErrHostBinding = errors.New("主机已绑定其他 Agent 或身份指纹")
 
 type Host struct {
-	ID         string `json:"id"`
-	Name       string `json:"name"`
-	Endpoint   string `json:"endpoint"`
-	AgentID    string `json:"agent_id"`
-	SPKISHA256 string `json:"spki_sha256"`
-	PairedAt   string `json:"paired_at,omitempty"`
+	NetworkEntry bool   `json:"network_entry"`
+	ID           string `json:"id"`
+	Name         string `json:"name"`
+	Endpoint     string `json:"endpoint"`
+	AgentID      string `json:"agent_id"`
+	SPKISHA256   string `json:"spki_sha256"`
+	PairedAt     string `json:"paired_at,omitempty"`
 }
 type HostStore struct {
 	store *Store
@@ -32,6 +33,7 @@ type HostStore struct {
 func NewHostStore(ctx context.Context, db *Store) (*HostStore, error) {
 	for _, stmt := range []string{
 		"CREATE TABLE IF NOT EXISTS hosts(id TEXT PRIMARY KEY,name TEXT NOT NULL,endpoint TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '',spki_sha256 TEXT NOT NULL DEFAULT '',token_sealed BLOB,paired_at TEXT NOT NULL DEFAULT '')",
+		"CREATE TABLE IF NOT EXISTS network_entries(host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_binding ON hosts(agent_id) WHERE agent_id <> ''",
 	} {
 		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
@@ -86,7 +88,7 @@ func (s *HostStore) Create(ctx context.Context, name, endpoint string) (Host, er
 	return Host{ID: id, Name: name, Endpoint: endpoint}, err
 }
 func (s *HostStore) List(ctx context.Context) ([]Host, error) {
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at FROM hosts ORDER BY name,id")
+	rows, err := s.store.db.QueryContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at,EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id) FROM hosts ORDER BY name,id")
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +96,7 @@ func (s *HostStore) List(ctx context.Context) ([]Host, error) {
 	result := make([]Host, 0)
 	for rows.Next() {
 		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt); err != nil {
+		if err := rows.Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry); err != nil {
 			return nil, err
 		}
 		result = append(result, h)
@@ -103,8 +105,8 @@ func (s *HostStore) List(ctx context.Context) ([]Host, error) {
 }
 func (s *HostStore) Get(ctx context.Context, id string) (Host, error) {
 	var h Host
-	err := s.store.db.QueryRowContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at FROM hosts WHERE id=?", id).
-		Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt)
+	err := s.store.db.QueryRowContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at,EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id) FROM hosts WHERE id=?", id).
+		Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry)
 	if errors.Is(err, sql.ErrNoRows) {
 		return Host{}, ErrHostNotFound
 	}
@@ -212,4 +214,24 @@ func (s *HostStore) Credentials(ctx context.Context, h Host) (string, error) {
 		return "", errors.New("主机凭据校验失败")
 	}
 	return string(plaintext), nil
+}
+
+// SetNetworkEntry 只保存采集入口标记，不改变远端网络和配对凭据。
+func (s *HostStore) SetNetworkEntry(ctx context.Context, id string, enabled bool) (Host, error) {
+	h, err := s.Get(ctx, id)
+	if err != nil {
+		return Host{}, err
+	}
+	if enabled && h.AgentID == "" {
+		return Host{}, ErrHostBinding
+	}
+	if enabled {
+		_, err = s.store.db.ExecContext(ctx, "INSERT OR IGNORE INTO network_entries(host_id) VALUES(?)", id)
+	} else {
+		_, err = s.store.db.ExecContext(ctx, "DELETE FROM network_entries WHERE host_id=?", id)
+	}
+	if err != nil {
+		return Host{}, err
+	}
+	return s.Get(ctx, id)
 }

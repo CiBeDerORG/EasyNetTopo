@@ -109,3 +109,7 @@ export function resolveInterruptedExecutionTask(id: string) {
     { method: 'POST', body: { confirm_stopped: true } }
   )
 }
+
+export function setNetworkEntry(id: string, enabled: boolean) {
+  return apiRequest<Host>('/api/v1/hosts/' + encodeURIComponent(id) + '/network-entry', { method: 'PUT', body: { enabled } })
+}

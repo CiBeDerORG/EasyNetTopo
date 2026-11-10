@@ -225,3 +225,28 @@ func (s *Service) EasyTierPortForwards(ctx context.Context, hostID, method, inst
 	}
 	return raw, nil
 }
+
+func (s *Service) SetNetworkEntry(ctx context.Context, id string, enabled bool) (storage.Host, error) {
+	return s.hosts.SetNetworkEntry(ctx, id, enabled)
+}
+
+// NetworkData 复用已配对 Agent，只读固定能力；不接受远端地址或命令。
+func (s *Service) NetworkData(ctx context.Context, id, capability string) (json.RawMessage, error) {
+	switch capability {
+	case "node", "peer", "route":
+	default:
+		return nil, errors.New("不支持的网络查询")
+	}
+	h, err := s.hosts.Get(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if !h.NetworkEntry {
+		return nil, errors.New("主机未设为组网入口")
+	}
+	raw, err := s.Query(ctx, id, "easytier/"+capability)
+	if err != nil {
+		return nil, err
+	}
+	return filterNetworkData(raw)
+}

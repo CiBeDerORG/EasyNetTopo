@@ -46,3 +46,18 @@
 CI 中的模拟 Agent 不能代替真实 Linux/FnOS 主机，真实配对、Agent 自签身份与现有 HTTP Handler 的互操作仍需在已授权环境下验证。
 
 **未完成**：应用包上传、Agent 持久化任务与脚本执行信任策略、Sub2API 安装、Docker 资源写操作。当前商店展示仅预览，也不能把普通外部 Docker 容器自动视为 EasyNetTopo 受管资源。
+
+## 组网入口与网络节点
+
+主机列表中，已配对主机可点击“设为组网入口”，再次点击可取消。入口标记保存在控制端 SQLite，刷新页面或重启后保留；删除主机时同步删除标记。设置入口不会更改 EasyTier 配置、路由或中继策略，也不自动打开 Agent 的 Driver。
+
+左侧“网络节点”（`/network-nodes`）可选择入口，查看入口网络实例、对等节点和网络路由，包括虚拟 IPv4、代理网段、版本、下一跳及直连连接累计流量、延迟。页面每 15 秒刷新当前视图，支持手动刷新和搜索。读取失败时保留并明确标记上次成功数据，不把失败当作设备离线或网络为空。
+
+前提：入口主机上的 EasyHostAgent 已启用 EasyTier Driver，官方 EasyTier Compose 容器正在运行，CLI/RPC 可用。数据通过既有配对授权采集，不连接公开 RPC、不使用 Web 账号密码。当前展示入口可见的网络数据，不含魔改版本的历史资产、设备发现和管理操作。
+
+接口：
+
+- `PUT /api/v1/hosts/{id}/network-entry`：JSON `{"enabled":true}`，要求管理员会话及同源请求标记；只有已配对主机可以启用。
+- `GET /api/v1/hosts/{id}/network/{node|peer|route}`：仅查询登记入口上的 `compose:easytier`；校验 Agent 身份，通过字段白名单排除官方节点结果中的完整配置和密钥。
+
+实现参考：原 [EasyTier 资产页面](https://github.com/CiBeDerORG/EasyTier/blob/feat/automation-center/easytier-web/frontend/src/components/NodeAssetsPage.vue) 的入口上下文、切换与错误状态；数据契约使用官方 v2.6.4 的 `easytier-cli -v -o json` 单实例及多实例输出。页面自动刷新不能替代真实设备连通性验收。

@@ -3,6 +3,7 @@ import HostStorePage from '../features/host-store/views/HostStorePage.vue'
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/host-store' },
+  { path: '/network-nodes', name: 'network-nodes', component: HostStorePage },
   { path: '/host-store', name: 'host-store', component: HostStorePage },
   { path: '/:pathMatch(.*)*', redirect: '/host-store' }
 ]

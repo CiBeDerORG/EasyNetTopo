@@ -77,6 +77,28 @@ func TestHostAPIAuthorizationAndRegistration(t *testing.T) {
 	} else if !strings.Contains(got.Body.String(), "invalid_pairing_input") {
 		t.Fatal("输入校验异常没有明确错误码")
 	}
+	entryPath := "/api/v1/hosts/" + id + "/network-entry"
+	for _, tc := range []struct {
+		body       string
+		auth, csrf bool
+		status     int
+	}{
+		{`{"enabled":true}`, false, true, 401},
+		{`{"enabled":true}`, true, false, 403},
+		{`{}`, true, true, 400},
+		{`{"enabled":true}`, true, true, 409},
+		{`{"enabled":false}`, true, true, 200},
+	} {
+		if got := req("PUT", entryPath, tc.body, tc.auth, tc.csrf); got.Code != tc.status {
+			t.Fatalf("入口权限或参数错误：%d，期望 %d", got.Code, tc.status)
+		}
+	}
+	if got := req("GET", "/api/v1/hosts/"+id+"/network/node", "", false, false); got.Code != 401 {
+		t.Fatal("网络读取缺少鉴权")
+	}
+	if got := req("GET", "/api/v1/hosts/"+id+"/network/config", "", true, false); got.Code != 404 {
+		t.Fatal("暴露了配置读取")
+	}
 	// 编辑和删除是需要管理员登录及同源请求标记的本地操作。
 	editPath := "/api/v1/hosts/" + id
 	payload := `{"name":"新 fnOS","endpoint":"http://host.docker.internal:7018"}`

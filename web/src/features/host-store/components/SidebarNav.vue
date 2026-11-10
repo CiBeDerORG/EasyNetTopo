@@ -1,7 +1,10 @@
 <script setup lang="ts">
-import { ArrowLeft, HomeFilled } from '@element-plus/icons-vue'
+import { ArrowLeft, HomeFilled, Connection } from '@element-plus/icons-vue'
 
 defineProps<{ collapsed: boolean }>()
+import { useRoute, useRouter } from 'vue-router'
+const route = useRoute()
+const router = useRouter()
 defineEmits<{ toggle: [] }>()
 </script>
 
@@ -47,9 +50,14 @@ defineEmits<{ toggle: [] }>()
 
     <nav class="sidebar-menu">
       <el-tooltip content="主机商店" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" aria-current="page">
+        <button class="nav-item" type="button" :aria-current="route.path === '/host-store' ? 'page' : undefined" @click="router.push('/host-store')">
           <el-icon><HomeFilled /></el-icon>
           <span>主机商店</span>
+        </button>
+      </el-tooltip>
+      <el-tooltip content="网络节点" placement="right" :disabled="!collapsed">
+        <button class="nav-item" type="button" :aria-current="route.path === '/network-nodes' ? 'page' : undefined" @click="router.push('/network-nodes')">
+          <el-icon><Connection /></el-icon><span>网络节点</span>
         </button>
       </el-tooltip>
     </nav>
@@ -130,6 +138,7 @@ defineEmits<{ toggle: [] }>()
   color: #d7f7ff;
   text-align: left;
 }
+.nav-item:not([aria-current="page"]) { background: transparent; box-shadow: none; border-color: transparent; color: #8bacca; }
 .nav-item .el-icon { color: #62e1f1; font-size: 21px; }
 .nav-item span { overflow: hidden; font-size: 13px; font-weight: 680; white-space: nowrap; }
 .is-collapsed .brand { justify-content: center; padding-inline: 0; }

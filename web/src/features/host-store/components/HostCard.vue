@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Box, Delete, Edit } from '@element-plus/icons-vue'
+import { Box, Delete, Edit, Connection } from '@element-plus/icons-vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
@@ -16,6 +16,7 @@ defineEmits<{
   edit: [host: Host]
   docker: [host: Host]
   delete: [host: Host]
+  network: [host: Host]
 }>()
 
 const statusLabel = computed(() => ({
@@ -59,9 +60,13 @@ const statusType = computed(() => ({
     <div class="host-bottom">
       <div class="host-tags">
         <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+        <el-tag v-if="host.network_entry" size="small" type="success">组网入口</el-tag>
         <el-tag v-if="host.agent_id" size="small" effect="plain" type="info">Agent</el-tag>
       </div>
-      <div class="host-ops" @click.stop>
+      <div class="host-ops" @click.stop @keydown.stop>
+        <el-tooltip :content="host.network_entry ? '取消组网入口' : '设为组网入口'" placement="top">
+          <el-button text circle size="small" :aria-label="host.network_entry ? '取消组网入口' : '设为组网入口'" :disabled="!host.agent_id" @click="$emit('network', host)"><el-icon><Connection /></el-icon></el-button>
+        </el-tooltip>
         <el-tooltip content="编辑主机" placement="top">
           <el-button text circle size="small" aria-label="编辑主机" @click="$emit('edit', host)">
             <el-icon><Edit /></el-icon>
@@ -137,7 +142,7 @@ const statusType = computed(() => ({
 .host-task-title { display: block; color: #e1e9f1; }
 .host-task-source, .host-task-message { display: block; }
 .host-task-message { color: #f8b2a8; }
-.host-bottom { display: flex; align-items: center; justify-content: space-between; gap: 6px; margin-top: 10px; }
+.host-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 10px; }
 .host-tags { display: flex; min-width: 0; align-items: center; gap: 5px; flex-wrap: wrap; }
 .host-ops { display: flex; flex: none; align-items: center; gap: 0; }
 .host-ops :deep(.el-button) { width: 27px; height: 27px; margin: 0; color: #82acc4; }

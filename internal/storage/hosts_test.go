@@ -177,3 +177,64 @@ func TestUpdatePairedHostPreservesCredentials(t *testing.T) {
 		t.Fatalf("不存在的主机不应被自动创建: %v", err)
 	}
 }
+
+func TestNetworkEntryPersistenceAndRemoval(t *testing.T) {
+	ctx := context.Background()
+	path := filepath.Join(t.TempDir(), "app.db")
+	db, err := Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hosts, err := NewHostStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	h, err := hosts.Create(ctx, "yun", "http://127.0.0.1:7018")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = hosts.SetNetworkEntry(ctx, h.ID, true); !errors.Is(err, ErrHostBinding) {
+		t.Fatal("未配对主机不能设为入口")
+	}
+	if err = hosts.SavePairing(ctx, h, "agent", strings.Repeat("a", 64), strings.Repeat("b", 64)); err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		if _, err = hosts.SetNetworkEntry(ctx, h.ID, true); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err = db.Close(); err != nil {
+		t.Fatal(err)
+	}
+	db, err = Open(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hosts, err = NewHostStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	all, err := hosts.List(ctx)
+	if err != nil || len(all) != 1 || !all[0].NetworkEntry {
+		t.Fatalf("入口未持久化: %v", err)
+	}
+	token, err := hosts.Credentials(ctx, all[0])
+	if err != nil || token != strings.Repeat("b", 64) {
+		t.Fatal("入口设置改变了凭据")
+	}
+	if _, err = hosts.SetNetworkEntry(ctx, h.ID, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err = hosts.SetNetworkEntry(ctx, h.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if err = hosts.Delete(ctx, h.ID); err != nil {
+		t.Fatal(err)
+	}
+	var count int
+	if err = db.db.QueryRow("SELECT COUNT(*) FROM network_entries").Scan(&count); err != nil || count != 0 {
+		t.Fatal("删除主机后残留入口")
+	}
+}
