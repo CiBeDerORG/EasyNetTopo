@@ -1,11 +1,30 @@
 <script setup lang="ts">
+import { computed } from 'vue'
 import type { NetworkRow } from './data'
+import type { NodeAttributes } from './attributes'
 
-defineProps<{ row: NetworkRow }>()
+const props = defineProps<{ row: NetworkRow; attributes?: NodeAttributes }>()
+defineEmits<{ edit: [] }>()
+const locationLabel = computed(() => {
+  const item = props.attributes?.location
+  return item ? [item.country, item.province, item.city, item.county].filter(Boolean).join(' · ') || '未设置' : '未设置'
+})
 </script>
 
 <template>
   <div class="node-details" @click.stop @keydown.stop>
+    <div class="attribute-toolbar">
+      <strong>节点属性</strong>
+      <el-button size="small" :disabled="row.id === '—'" @click.stop="$emit('edit')">编辑节点属性</el-button>
+    </div>
+    <dl class="node-detail attributes-detail">
+      <div><dt>节点别名</dt><dd>{{ attributes?.alias || '未设置' }}</dd></div>
+      <div><dt>是否有公网 IP</dt><dd>{{ attributes ? (attributes.has_public_ip ? '是' : '否') : '未确认' }}</dd></div>
+      <div><dt>已保存公网 IP</dt><dd>{{ attributes?.public_ip || '—' }}</dd></div>
+      <div><dt>对端候选公网 IP</dt><dd>{{ row.candidatePublicIP || '—' }}</dd></div>
+      <div><dt>节点位置</dt><dd>{{ locationLabel }}</dd></div>
+      <div><dt>经纬度</dt><dd>{{ attributes?.location.latitude == null ? '—' : attributes.location.latitude + ', ' + attributes.location.longitude }}</dd></div>
+    </dl>
     <dl class="node-detail">
       <div><dt>节点 ID</dt><dd>{{ row.id }}</dd></div>
       <div><dt>实例 ID</dt><dd>{{ row.instanceID }}</dd></div>
@@ -49,6 +68,8 @@ defineProps<{ row: NetworkRow }>()
 
 <style scoped>
 .node-details { padding: 10px 22px; cursor: auto; }
+.attribute-toolbar { display: flex; justify-content: space-between; align-items: center; gap: 12px; margin-bottom: 14px; }
+.attributes-detail { padding-bottom: 16px; margin-bottom: 16px !important; border-bottom: 1px solid var(--ent-line-soft); }
 .node-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 20px; margin: 0; }
 .node-detail div { min-width: 0; }
 .node-detail dt, .connection-note, h3 span { color: #8bacca; font-size: 12px; }

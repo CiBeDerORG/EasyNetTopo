@@ -199,3 +199,20 @@ test('默认连接缺失或关闭时回退，零丢包率按 Protobuf 默认值�
   assert.equal(row.connections[0].rx, '—')
   assert.deepEqual(row.flags, [])
 })
+
+test('从对端直连地址提取公网 IPv4 候选，排除内网及保留地址', () => {
+  const rows = mergedNetworkRows({
+    node_info: { ...yun.node_info, network_name: 'my-network' },
+    peer_routes: [{ route: { hostname: 'server', peer_id: 99, cost: 1 }, peer: {
+      conns: [{ tunnel: { tunnel_type: 'udp', remote_addr: { url: 'udp://8.8.8.8:11010' } } }]
+    } }]
+  })
+  assert.equal(rows[1].candidatePublicIP, '8.8.8.8')
+  assert.equal(rows[1].networkKey, 'network:my-network')
+  assert.equal(mergedNetworkRows({
+    node_info: yun.node_info,
+    peer_routes: [{ route: { peer_id: 9 }, peer: { conns: [
+      { tunnel: { remote_addr: { url: 'udp://192.168.1.1:11010' } } }
+    ] } }]
+  })[1].candidatePublicIP, '')
+})

@@ -68,6 +68,39 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 		}
 		return true
 	}
+	// 人工节点属性独立于路由数据与 Agent；定时刷新不覆盖保存内容。
+	mux.HandleFunc("/api/v1/network-nodes/attributes", func(w http.ResponseWriter, r *http.Request) {
+		if !authorize(w, r) {
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			attrs, err := db.ListNodeAttributes(r.Context())
+			if err != nil {
+				jsonReply(w, 503, map[string]string{"code": "storage_unavailable", "message": "读取节点属性失败"})
+				return
+			}
+			jsonReply(w, 200, map[string]any{"attributes": attrs})
+		case http.MethodPut:
+			if !mutation(w, r) {
+				return
+			}
+			var attr storage.NodeAttributes
+			if !decode(w, r, &attr) {
+				return
+			}
+			saved, err := db.SaveNodeAttributes(r.Context(), attr)
+			if errors.Is(err, storage.ErrInvalidNodeAttributes) {
+				jsonReply(w, 400, map[string]string{"code": "invalid_node_attributes", "message": "节点属性、位置或公网 IP 格式不正确"})
+			} else if err != nil {
+				jsonReply(w, 503, map[string]string{"code": "storage_unavailable", "message": "保存节点属性失败"})
+			} else {
+				jsonReply(w, 200, saved)
+			}
+		default:
+			methodNotAllowed(w, "GET, PUT")
+		}
+	})
 	mux.HandleFunc("/api/v1/hosts", func(w http.ResponseWriter, r *http.Request) {
 		if !authorize(w, r) {
 			return

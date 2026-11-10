@@ -56,6 +56,7 @@ func Open(path string) (*Store, error) {
 		"CREATE TABLE IF NOT EXISTS administrators(id INTEGER PRIMARY KEY CHECK(id=1),username TEXT UNIQUE NOT NULL,password_hash TEXT NOT NULL)",
 		"CREATE TABLE IF NOT EXISTS sessions(token_hash TEXT PRIMARY KEY,expires_at INTEGER NOT NULL)",
 		"CREATE INDEX IF NOT EXISTS sessions_expiry ON sessions(expires_at)",
+		"CREATE TABLE IF NOT EXISTS network_node_attributes(network_key TEXT NOT NULL,peer_id TEXT NOT NULL,alias TEXT NOT NULL DEFAULT '',has_public_ip INTEGER NOT NULL DEFAULT 0,public_ip TEXT NOT NULL DEFAULT '',country TEXT NOT NULL DEFAULT '',province TEXT NOT NULL DEFAULT '',city TEXT NOT NULL DEFAULT '',county TEXT NOT NULL DEFAULT '',latitude REAL,longitude REAL,updated_at TEXT NOT NULL,PRIMARY KEY(network_key,peer_id))",
 	}
 	for _, q := range queries {
 		if _, err = db.Exec(q); err != nil {
