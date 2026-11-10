@@ -36,8 +36,8 @@ const attributesQuery = useQuery({
   queryKey: ['network-node-attributes'], queryFn: listNodeAttributes,
   enabled: computed(() => entries.value.length > 0), retry: 0
 })
-const attributesByKey = computed(() => new Map((attributesQuery.data.value?.attributes || [])
-  .map(attr => [attr.network_key + '|' + attr.peer_id, attr])))
+const attributesByKey = computed(() => new Map<string, NodeAttributes>((attributesQuery.data.value?.attributes || [])
+  .map(attr => [attr.network_key + '|' + attr.peer_id, attr] as const)))
 function networkScope(row: NetworkRow): string {
   return row.networkKey.startsWith('instance:') ? 'entry:' + hostId.value + ':' + row.networkKey : row.networkKey
 }

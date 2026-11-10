@@ -34,7 +34,9 @@ type NodeAttributes struct {
 
 func (s *Store) ListNodeAttributes(ctx context.Context) ([]NodeAttributes, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT network_key,peer_id,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude FROM network_node_attributes ORDER BY network_key,peer_id`)
-	if err != nil { return nil, err }
+	if err != nil {
+		return nil, err
+	}
 	defer rows.Close()
 	result := make([]NodeAttributes, 0)
 	for rows.Next() {
@@ -42,9 +44,17 @@ func (s *Store) ListNodeAttributes(ctx context.Context) ([]NodeAttributes, error
 		var lat, lng sql.NullFloat64
 		if err := rows.Scan(&attr.NetworkKey, &attr.PeerID, &attr.Alias, &attr.HasPublicIP, &attr.PublicIP,
 			&attr.Location.Country, &attr.Location.Province, &attr.Location.City, &attr.Location.County,
-			&lat, &lng); err != nil { return nil, err }
-		if lat.Valid { value := lat.Float64; attr.Location.Latitude = &value }
-		if lng.Valid { value := lng.Float64; attr.Location.Longitude = &value }
+			&lat, &lng); err != nil {
+			return nil, err
+		}
+		if lat.Valid {
+			value := lat.Float64
+			attr.Location.Latitude = &value
+		}
+		if lng.Valid {
+			value := lng.Float64
+			attr.Location.Longitude = &value
+		}
 		result = append(result, attr)
 	}
 	return result, rows.Err()
@@ -56,14 +66,18 @@ func normalizeNodeAttributes(attr *NodeAttributes) error {
 	attr.Alias = strings.TrimSpace(attr.Alias)
 	attr.PublicIP = strings.TrimSpace(attr.PublicIP)
 	for _, value := range []string{attr.NetworkKey, attr.PeerID} {
-		if value == "" || value == "—" { return ErrInvalidNodeAttributes }
+		if value == "" || value == "—" {
+			return ErrInvalidNodeAttributes
+		}
 	}
 	if len(attr.NetworkKey) > 256 || len(attr.PeerID) > 128 || len([]rune(attr.Alias)) > 100 {
 		return ErrInvalidNodeAttributes
 	}
 	for _, field := range []*string{&attr.Location.Country, &attr.Location.Province, &attr.Location.City, &attr.Location.County} {
 		*field = strings.TrimSpace(*field)
-		if len([]rune(*field)) > 120 { return ErrInvalidNodeAttributes }
+		if len([]rune(*field)) > 120 {
+			return ErrInvalidNodeAttributes
+		}
 	}
 	if (attr.Location.Latitude == nil) != (attr.Location.Longitude == nil) {
 		return ErrInvalidNodeAttributes
@@ -74,7 +88,9 @@ func normalizeNodeAttributes(attr *NodeAttributes) error {
 		*attr.Location.Longitude < -180 || *attr.Location.Longitude > 180) {
 		return ErrInvalidNodeAttributes
 	}
-	if !attr.HasPublicIP { attr.PublicIP = "" }
+	if !attr.HasPublicIP {
+		attr.PublicIP = ""
+	}
 	if attr.PublicIP != "" {
 		ip, err := netip.ParseAddr(attr.PublicIP)
 		if err != nil || !ip.IsGlobalUnicast() || ip.IsPrivate() || ip.IsLoopback() || ip.IsLinkLocalUnicast() {
@@ -86,7 +102,9 @@ func normalizeNodeAttributes(attr *NodeAttributes) error {
 }
 
 func (s *Store) SaveNodeAttributes(ctx context.Context, attr NodeAttributes) (NodeAttributes, error) {
-	if err := normalizeNodeAttributes(&attr); err != nil { return NodeAttributes{}, err }
+	if err := normalizeNodeAttributes(&attr); err != nil {
+		return NodeAttributes{}, err
+	}
 	_, err := s.db.ExecContext(ctx, `INSERT INTO network_node_attributes
 		(network_key,peer_id,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude,updated_at)
 		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)

@@ -72,7 +72,7 @@ export function publicIPv4Candidate(value: unknown): string {
     try { host = new URL(raw).hostname } catch { return '' }
   }
   const parts = host.split('.')
-  if (parts.length !== 4 || parts.some(part => !/^\\d{1,3}$/.test(part) || Number(part) > 255)) return ''
+  if (parts.length !== 4 || parts.some(part => !/^\d{1,3}$/.test(part) || Number(part) > 255)) return ''
   const [a, b, c] = parts.map(Number)
   if (a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) ||
       (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
