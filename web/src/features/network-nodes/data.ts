@@ -11,6 +11,7 @@ export type NetworkRow = {
   protocol: string; latency: string; directLatency: string; rx: string; tx: string
   publicIP: string; listeners: string; natType: string; loss: string
   flags: string[]; connections: ConnectionRow[]
+  networkKey: string; candidatePublicIP: string
 }
 
 export function record(value: unknown): RecordValue {
@@ -57,6 +58,32 @@ export function instances(value: unknown): NetworkInstance[] {
   const info = record(result.node_info || result)
   const id = display(info.inst_id)
   return [{ id, name: instanceLabel(info.network_name, id), result }]
+}
+// 位置和手工属性须按组网作用域与节点 ID 关联，不能按临时路由行 key 保存。
+function networkKey(instance: NetworkInstance): string {
+  const name = display(record(instance.result.node_info).network_name)
+  return name !== '—' ? 'network:' + name : 'instance:' + instance.id
+}
+// 对端连接地址可能是中继节点地址，以下只提取公网 IPv4 候选供用户确认。
+export function publicIPv4Candidate(value: unknown): string {
+  const raw = typeof value === 'string' ? value : ''
+  let host = raw
+  if (raw.includes('://')) {
+    try { host = new URL(raw).hostname } catch { return '' }
+  }
+  const parts = host.split('.')
+  if (parts.length !== 4 || parts.some(part => !/^\\d{1,3}$/.test(part) || Number(part) > 255)) return ''
+  const [a, b, c] = parts.map(Number)
+  if (a === 0 || a === 10 || a === 127 || a >= 224 || (a === 100 && b >= 64 && b <= 127) ||
+      (a === 169 && b === 254) || (a === 172 && b >= 16 && b <= 31) ||
+      (a === 192 && (b === 168 || (b === 0 && (c === 0 || c === 2 || c === 88)))) ||
+      (a === 198 && (b === 18 || b === 19 || (b === 51 && c === 100))) ||
+      (a === 203 && b === 0 && c === 113)) return ''
+  return parts.map(Number).join('.')
+}
+function peerPublicIP(conns: ConnectionRow[]): string {
+  const ordered = [...conns].sort((a, b) => Number(b.isDefault) - Number(a.isDefault))
+  return ordered.map(conn => publicIPv4Candidate(conn.remoteAddress)).find(Boolean) || ''
 }
 function subnets(value: unknown): string {
   return list(value).map(display).filter(item => item !== '—').join('、') || '—'
@@ -160,7 +187,8 @@ function routeRows(instance: NetworkInstance): NetworkRow[] {
       : costValue != null && costValue > 1 ? '中继 · 开销 ' + cost
       : '路由可见'
     return {
-      key: '', kind: '网络路由',
+      key: '', kind: '网络路由', networkKey: networkKey(instance),
+      candidatePublicIP: peerPublicIP(details),
       instance: instance.name,
       instanceID: instance.id,
       id,
@@ -189,7 +217,9 @@ function localRow(instance: NetworkInstance): NetworkRow {
   const node = record(instance.result.node_info || instance.result)
   if (!Object.keys(node).length) throw new Error('EasyTier route 返回结构无效：缺少 node_info')
   return {
-    key: '', kind: '入口实例', routeLabel: '本机实例', connection: '本机',
+    key: '', kind: '入口实例', networkKey: networkKey(instance),
+    candidatePublicIP: list(record(node.stun_info).public_ip).map(publicIPv4Candidate).find(Boolean) || '',
+    routeLabel: '本机实例', connection: '本机',
     protocol: '—', latency: '—', directLatency: '—', nextHop: '—', cost: '—', rx: '—', tx: '—',
     loss: '—', connections: [], natType: natType(node.stun_info), flags: nodeFlags(node.feature_flag),
     instance: instance.name,
