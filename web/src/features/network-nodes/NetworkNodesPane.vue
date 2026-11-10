@@ -3,7 +3,8 @@ import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
-import { mergedNetworkRows } from './data'
+import { mergedNetworkRows, type NetworkRow } from './data'
+import NetworkNodeDetails from './NetworkNodeDetails.vue'
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -34,7 +35,7 @@ const rows = computed(() => {
   const keyword = search.value.trim().toLocaleLowerCase()
   return (query.data.value || []).filter(row =>
     !keyword || Object.entries(row).some(([key, value]) =>
-      key !== 'key' && String(value).toLocaleLowerCase().includes(keyword)))
+      key !== 'key' && key !== 'connections' && String(value).toLocaleLowerCase().includes(keyword)))
 })
 const updatedAt = computed(() =>
   query.dataUpdatedAt.value ? new Date(query.dataUpdatedAt.value).toLocaleTimeString() : '尚未采集')
@@ -45,11 +46,11 @@ function toggleKey(key: string) {
   expandedKeys.value = expandedKeys.value.includes(key)
     ? expandedKeys.value.filter(item => item !== key) : [...expandedKeys.value, key]
 }
-function toggleRow(row: Record<string, string>, _column: unknown, event: MouseEvent) {
+function toggleRow(row: NetworkRow, _column: unknown, event: MouseEvent) {
   if (event.target instanceof Element && event.target.closest('.el-table__expand-icon')) return
   toggleKey(row.key)
 }
-function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<string, string>[]) {
+function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
   expandedKeys.value = expandedRows.map(item => item.key)
 }
 </script>
@@ -89,6 +90,9 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
           <el-table-column label="节点" min-width="155">
             <template #default="{ row }">
               <div class="node-name">{{ row.hostname }}</div>
+              <div v-if="row.flags.length" class="node-flags">
+                <el-tag v-for="flag in row.flags" :key="flag" size="small" type="info">{{ flag }}</el-tag>
+              </div>
               <div class="node-meta" :title="row.id">ID：{{ row.id }}</div>
             </template>
           </el-table-column>
@@ -108,22 +112,13 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
           </el-table-column>
           <el-table-column prop="protocol" label="连接协议" min-width="110" />
           <el-table-column prop="latency" label="路径延迟" min-width="105" />
+          <el-table-column prop="loss" label="连接丢包率" min-width="110" />
+          <el-table-column prop="natType" label="UDP NAT 类型" min-width="140" show-overflow-tooltip />
           <el-table-column prop="subnets" label="代理网段" min-width="165" show-overflow-tooltip />
           <el-table-column prop="version" label="版本" min-width="130" show-overflow-tooltip />
           <el-table-column type="expand" width="42">
             <template #default="{ row }">
-              <dl class="node-detail">
-                <div><dt>节点 ID</dt><dd>{{ row.id }}</dd></div>
-                <div><dt>实例 ID</dt><dd>{{ row.instanceID }}</dd></div>
-                <div><dt>连接报告</dt><dd>{{ row.connection }}</dd></div>
-                <div><dt>下一跳节点</dt><dd>{{ row.nextHop }}</dd></div>
-                <div><dt>路由开销</dt><dd>{{ row.cost }}</dd></div>
-                <div><dt>直连延迟</dt><dd>{{ row.directLatency }}</dd></div>
-                <div><dt>累计接收</dt><dd>{{ row.rx }}</dd></div>
-                <div><dt>累计发送</dt><dd>{{ row.tx }}</dd></div>
-                <div v-if="row.kind === '入口实例'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
-                <div v-if="row.kind === '入口实例'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
-              </dl>
+              <NetworkNodeDetails :row="row" />
             </template>
           </el-table-column>
         </el-table>
@@ -139,23 +134,16 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
               <el-tag size="small" :type="row.kind === '入口实例' ? 'success' : 'info'">{{ row.kind }}</el-tag>
             </div>
             <div class="node-meta" :title="row.instanceID">{{ row.instance }} · {{ row.id }}</div>
+            <div v-if="row.flags.length" class="node-flags">
+              <el-tag v-for="flag in row.flags" :key="flag" size="small" type="info">{{ flag }}</el-tag>
+            </div>
             <div class="network-node-ip">{{ row.cidr }}</div>
             <div class="network-node-details">
               <span>{{ row.routeLabel }}</span><span>{{ row.protocol }}</span><span>{{ row.latency }}</span>
             </div>
             <div class="node-meta">代理网段：{{ row.subnets }} · 版本：{{ row.version }}</div>
-            <dl v-if="expandedKeys.includes(row.key)" class="node-detail node-detail-mobile">
-              <div><dt>节点 ID</dt><dd>{{ row.id }}</dd></div>
-              <div><dt>实例 ID</dt><dd>{{ row.instanceID }}</dd></div>
-              <div><dt>连接报告</dt><dd>{{ row.connection }}</dd></div>
-              <div><dt>下一跳节点</dt><dd>{{ row.nextHop }}</dd></div>
-              <div><dt>路由开销</dt><dd>{{ row.cost }}</dd></div>
-              <div><dt>直连延迟</dt><dd>{{ row.directLatency }}</dd></div>
-              <div><dt>累计接收</dt><dd>{{ row.rx }}</dd></div>
-              <div><dt>累计发送</dt><dd>{{ row.tx }}</dd></div>
-              <div v-if="row.kind === '入口实例'"><dt>公网地址</dt><dd>{{ row.publicIP }}</dd></div>
-              <div v-if="row.kind === '入口实例'"><dt>监听地址</dt><dd>{{ row.listeners }}</dd></div>
-            </dl>
+            <div class="node-meta">UDP NAT：{{ row.natType }} · 连接丢包率：{{ row.loss }}</div>
+            <NetworkNodeDetails v-if="expandedKeys.includes(row.key)" :row="row" />
           </article>
         </div>
       <p class="network-note">
@@ -175,16 +163,16 @@ function syncExpandedRows(_row: Record<string, string>, expandedRows: Record<str
 .network-summary { display: flex; justify-content: space-between; gap: 12px; margin: 12px 0; color: #8bacca; font-size: 12px; }
 .node-name { font-weight: 650; }
 .node-meta { margin-top: 5px; color: #8bacca; font-size: 12px; overflow-wrap: anywhere; }
+.node-flags { display: flex; gap: 5px; flex-wrap: wrap; margin-top: 5px; }
+.network-desktop-table { container-type: inline-size; }
+:deep(.el-table__expanded-cell) { padding: 0; }
+/* 列表可横向滚动，展开详情始终适配可见宽度。 */
+:deep(.el-table__expanded-cell .node-details) { width: 100cqw; box-sizing: border-box; position: sticky; left: 0; }
 :deep(.network-desktop-table .el-table__row) { cursor: pointer; }
 :deep(.network-desktop-table .el-table__row:hover > td) { background: var(--el-fill-color-light); }
 .route-cell { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .network-node-card { cursor: pointer; }
 .network-node-card:focus-visible { outline: 2px solid var(--el-color-primary); outline-offset: 2px; }
-.node-detail-mobile { margin-top: 14px; padding: 14px 0 0; border-top: 1px solid #28435c; }
-.node-detail { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 10px 20px; margin: 0; padding: 10px 22px; }
-.node-detail div { min-width: 0; }
-.node-detail dt { color: #8bacca; font-size: 12px; }
-.node-detail dd { margin: 4px 0 0; overflow-wrap: anywhere; }
 .network-mobile-list, .network-mobile-empty { display: none; }
 @media (max-width: 760px) {
   .network-pane { margin: 12px; padding: 14px; }

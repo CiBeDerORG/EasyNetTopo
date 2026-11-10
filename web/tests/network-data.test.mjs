@@ -122,3 +122,80 @@ test('空路由只显示本机；空多实例无节点；不受支持的结构�
   assert.throws(() => mergedNetworkRows([{ route: {} }]), /多实例/)
   assert.throws(() => networkRows({ unknown: true }, 'route'), /peer_routes/)
 })
+
+test('默认连接决定丢包率，逐条展示 IPv4/IPv6 连接并保留路径延迟口径', () => {
+  const firstID = '00000001-0000-0002-0000-000300000004'
+  const defaultID = '12345678-9abc-def0-1234-56789abcdef0'
+  const rows = mergedNetworkRows({
+    node_info: { ...yun.node_info, stun_info: { udp_nat_type: 'OpenInternet' } },
+    peer_routes: [{ route: {
+      hostname: '服务器', peer_id: 2, cost: 2, path_latency: 50,
+      stun_info: { udp_nat_type: 'FullCone' },
+      feature_flag: { is_public_server: true, avoid_relay_data: true }
+    }, peer: {
+      default_conn_id: { part1: 0x12345678, part2: 0x9abcdef0, part3: 0x12345678, part4: 0x9abcdef0 },
+      conns: [
+        { conn_id: firstID, loss_rate: 0.01,
+          tunnel: { tunnel_type: 'udp', remote_addr: { url: 'udp://192.0.2.1:11010' } },
+          stats: { latency_us: 1000, rx_bytes: 100, tx_bytes: 200 } },
+        { conn_id: defaultID, loss_rate: 0.125,
+          tunnel: { tunnel_type: 'udp', local_addr: { url: 'udp://[2001:db8::1]:11010' },
+            remote_addr: { url: 'udp://[2001:db8::2]:11010' } },
+          stats: { latency_us: 2500, rx_bytes: '300', tx_bytes: '400' } },
+        { is_closed: true, loss_rate: 1, stats: { rx_bytes: 9999 }, tunnel: { tunnel_type: 'tcp' } }
+      ]
+    } }]
+  })
+  assert.equal(rows[0].natType, '开放互联网')
+  assert.equal(rows[0].loss, '—')
+  const row = rows[1]
+  assert.equal(row.natType, '全锥形')
+  assert.deepEqual(row.flags, ['公共服务器', '避免数据中继'])
+  assert.equal(row.loss, '12.5%')
+  assert.equal(row.protocol, 'udp、udp6')
+  assert.equal(row.latency, '50.00 ms')
+  assert.equal(row.directLatency, '1.00 ms')
+  assert.equal(row.rx, '400 B')
+  assert.equal(row.tx, '600 B')
+  assert.equal(row.connections.length, 2)
+  assert.equal(row.connections[0].isDefault, false)
+  assert.deepEqual(row.connections[1], {
+    id: defaultID, protocol: 'udp6', localAddress: 'udp://[2001:db8::1]:11010',
+    remoteAddress: 'udp://[2001:db8::2]:11010', latency: '2.50 ms', loss: '12.5%',
+    rx: '300 B', tx: '400 B', isDefault: true
+  })
+})
+
+test('NAT 兼容枚举名称和数值，缺失信息与未知类型分开显示', () => {
+  for (const [stun, expected] of [
+    [undefined, '—'], [{}, '未知'], [{ udp_nat_type: 6 }, '对称型'],
+    [{ udp_nat_type: '6' }, '对称型'], [{ udp_nat_type: 'Symmetric' }, '对称型'],
+    [{ udp_nat_type: 'NewType' }, '未知']
+  ]) {
+    const row = mergedNetworkRows({ node_info: { ...yun.node_info, stun_info: stun }, peer_routes: [] })[0]
+    assert.equal(row.natType, expected)
+  }
+})
+
+test('默认连接缺失或关闭时回退，零丢包率按 Protobuf 默认值显示，无连接不伪造统计', () => {
+  const create = peer => mergedNetworkRows({ node_info: yun.node_info,
+    peer_routes: [{ route: { peer_id: 2, cost: 2 }, peer }] })[1]
+  assert.equal(create({}).loss, '—')
+  assert.deepEqual(create({}).connections, [])
+  assert.equal(create({ conns: [{ conn_id: 'a' }] }).loss, '0%')
+  assert.equal(create({ default_conn_id: 'closed', conns: [
+    { conn_id: 'closed', is_closed: true, loss_rate: 0.8 }, { conn_id: 'a', loss_rate: 0.04 }
+  ] }).loss, '4%')
+  assert.equal(create({ default_conn_id: 'missing', conns: [{ loss_rate: 0.02 }] }).loss, '2%')
+  assert.equal(create({ default_conn_id: 'B', conns: [
+    { conn_id: 'a', loss_rate: 0.9 }, { conn_id: 'b', loss_rate: 0 }
+  ] }).loss, '0%')
+  for (const loss of [-1, 2, 'bad', NaN]) {
+    assert.equal(create({ conns: [{ loss_rate: loss }] }).loss, '—')
+  }
+  const row = create({ conns: [{ tunnel: { tunnel_type: 'tcp', remote_addr: { url: 'not-a-url' } } }] })
+  assert.equal(row.protocol, 'tcp')
+  assert.equal(row.connections[0].latency, '—')
+  assert.equal(row.connections[0].rx, '—')
+  assert.deepEqual(row.flags, [])
+})

@@ -1,5 +1,17 @@
 type RecordValue = Record<string, unknown>
 type NetworkInstance = { id: string; name: string; result: RecordValue }
+export type ConnectionRow = {
+  id: string; protocol: string; localAddress: string; remoteAddress: string
+  latency: string; loss: string; rx: string; tx: string; isDefault: boolean
+}
+export type NetworkRow = {
+  key: string; kind: string; instance: string; instanceID: string; id: string
+  hostname: string; ip: string; cidr: string; subnets: string; version: string
+  nextHop: string; cost: string; routeLabel: string; connection: string
+  protocol: string; latency: string; directLatency: string; rx: string; tx: string
+  publicIP: string; listeners: string; natType: string; loss: string
+  flags: string[]; connections: ConnectionRow[]
+}
 
 export function record(value: unknown): RecordValue {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as RecordValue : {}
@@ -52,8 +64,67 @@ function subnets(value: unknown): string {
 function connections(value: unknown): RecordValue[] {
   return list(record(value).conns).map(record).filter(conn => conn.is_closed !== true)
 }
+function numeric(value: unknown): number | null {
+  if (typeof value !== 'number' && (typeof value !== 'string' || !value.trim())) return null
+  const number = Number(value)
+  return Number.isFinite(number) ? number : null
+}
+function natType(value: unknown): string {
+  if (!value || typeof value !== 'object') return '—'
+  const names = ['Unknown', 'OpenInternet', 'NoPAT', 'FullCone', 'Restricted', 'PortRestricted',
+    'Symmetric', 'SymUdpFirewall', 'SymmetricEasyInc', 'SymmetricEasyDec']
+  const labels = ['未知', '开放互联网', '无端口转换', '全锥形', '受限锥形', '端口受限锥形',
+    '对称型', '对称 UDP 防火墙', '对称型递增', '对称型递减']
+  // Protobuf JSON 可使用枚举名称或数值；省略枚举字段代表 Unknown。
+  const raw = record(value).udp_nat_type ?? 0
+  const index = numeric(raw) ?? names.indexOf(String(raw))
+  return labels[index] ?? '未知'
+}
+function nodeFlags(value: unknown): string[] {
+  const flags = record(value)
+  return [flags.is_public_server === true ? '公共服务器' : '',
+    flags.avoid_relay_data === true ? '避免数据中继' : ''].filter(Boolean)
+}
+function defaultConnectionId(value: unknown): string | null {
+  if (typeof value === 'string') return value.toLowerCase()
+  const uuid = record(value)
+  const parts = ['part1', 'part2', 'part3', 'part4'].map(key => numeric(uuid[key] ?? 0))
+  if (parts.some(part => part == null || !Number.isInteger(part) || part < 0 || part > 0xffffffff)
+    || parts.every(part => part === 0)) return null
+  const hex = parts.map(part => part!.toString(16).padStart(8, '0')).join('')
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+}
+function protocol(conn: RecordValue): string {
+  const tunnel = record(conn.tunnel)
+  const type = display(tunnel.tunnel_type)
+  if (type === '—') return type
+  const isIPv6 = [tunnel.local_addr, tunnel.remote_addr].some(address => {
+    try { return new URL(String(record(address).url)).hostname.startsWith('[') }
+    catch { return false }
+  })
+  return isIPv6 && !type.endsWith('6') ? type + '6' : type
+}
+function lossRate(conn: RecordValue): string {
+  // 已上报连接的 Protobuf JSON 会省略零丢包率；没有连接时由调用方显示缺失。
+  const loss = numeric(conn.loss_rate ?? 0)
+  return loss == null || loss < 0 || loss > 1 ? '—' : `${Number((loss * 100).toFixed(1))}%`
+}
+function connectionRows(peer: RecordValue, items: RecordValue[]): ConnectionRow[] {
+  const defaultId = defaultConnectionId(peer.default_conn_id)
+  return items.map(conn => {
+    const latency = numeric(record(conn.stats).latency_us)
+    return {
+      id: display(conn.conn_id), protocol: protocol(conn),
+      localAddress: display(record(record(conn.tunnel).local_addr).url),
+      remoteAddress: display(record(record(conn.tunnel).remote_addr).url),
+      latency: latency == null || latency < 0 ? '—' : (latency / 1000).toFixed(2) + ' ms',
+      loss: lossRate(conn), rx: totalBytes([conn], 'rx_bytes'), tx: totalBytes([conn], 'tx_bytes'),
+      isDefault: defaultId != null && String(conn.conn_id).toLowerCase() === defaultId
+    }
+  })
+}
 function protocols(items: RecordValue[]): string {
-  return [...new Set(items.map(item => display(record(item.tunnel).tunnel_type))
+  return [...new Set(items.map(protocol)
     .filter(item => item !== '—'))].join('、') || '—'
 }
 function durationMs(items: RecordValue[]): number | null {
@@ -69,17 +140,18 @@ function pathLatency(route: RecordValue, items: RecordValue[]): string {
   return ms == null ? '—' : ms.toFixed(2) + ' ms'
 }
 function totalBytes(items: RecordValue[], field: 'rx_bytes' | 'tx_bytes'): string {
-  const values = items.map(conn => record(conn.stats)[field])
+  const values = items.map(conn => numeric(record(conn.stats)[field]))
     .filter((value): value is number => typeof value === 'number' && Number.isFinite(value) && value >= 0)
   return values.length ? values.reduce((sum, value) => sum + value, 0).toLocaleString() + ' B' : '—'
 }
-function routeRows(instance: NetworkInstance): Record<string, string>[] {
+function routeRows(instance: NetworkInstance): NetworkRow[] {
   if (!Array.isArray(instance.result.peer_routes)) {
     throw new Error('EasyTier route 返回结构无效：缺少 peer_routes 数组')
   }
   return instance.result.peer_routes.map(value => {
     const pair = record(value), route = record(pair.route), peer = record(pair.peer)
     const items = connections(peer)
+    const details = connectionRows(peer, items)
     const id = display(route.peer_id ?? peer.peer_id)
     const hostname = display(route.hostname)
     const cost = display(route.cost)
@@ -88,6 +160,7 @@ function routeRows(instance: NetworkInstance): Record<string, string>[] {
       : costValue != null && costValue > 1 ? '中继 · 开销 ' + cost
       : '路由可见'
     return {
+      key: '', kind: '网络路由',
       instance: instance.name,
       instanceID: instance.id,
       id,
@@ -104,14 +177,21 @@ function routeRows(instance: NetworkInstance): Record<string, string>[] {
       latency: pathLatency(route, items),
       directLatency: durationMs(items) == null ? '—' : durationMs(items)!.toFixed(2) + ' ms',
       rx: totalBytes(items, 'rx_bytes'),
-      tx: totalBytes(items, 'tx_bytes')
+      tx: totalBytes(items, 'tx_bytes'),
+      publicIP: '—', listeners: '—',
+      natType: natType(route.stun_info), flags: nodeFlags(route.feature_flag),
+      loss: (details.find(conn => conn.isDefault) ?? details[0])?.loss ?? '—',
+      connections: details
     }
   })
 }
-function localRow(instance: NetworkInstance): Record<string, string> {
+function localRow(instance: NetworkInstance): NetworkRow {
   const node = record(instance.result.node_info || instance.result)
   if (!Object.keys(node).length) throw new Error('EasyTier route 返回结构无效：缺少 node_info')
   return {
+    key: '', kind: '入口实例', routeLabel: '本机实例', connection: '本机',
+    protocol: '—', latency: '—', directLatency: '—', nextHop: '—', cost: '—', rx: '—', tx: '—',
+    loss: '—', connections: [], natType: natType(node.stun_info), flags: nodeFlags(node.feature_flag),
     instance: instance.name,
     instanceID: instance.id,
     id: display(node.peer_id),
@@ -126,15 +206,15 @@ function localRow(instance: NetworkInstance): Record<string, string> {
 }
 
 // 保留原有 node / route 查询的独立列表，供迁移前后核对。
-export function networkRows(value: unknown, capability: string): Record<string, string>[] {
+export function networkRows(value: unknown, capability: string): NetworkRow[] {
   return instances(value).flatMap(instance =>
     capability === 'node' ? [localRow(instance)] : routeRows(instance))
 }
 
 // 新列表完全基于一次 CLI route -v -o json 的结果，避免 peer -v 的数组格式歧义。
 // 一个实例的一条路由对应一条记录；本机与路由表重复时优先保留本机行。
-export function mergedNetworkRows(routeValue: unknown): Record<string, string>[] {
-  const rows: Record<string, string>[] = []
+export function mergedNetworkRows(routeValue: unknown): NetworkRow[] {
+  const rows: NetworkRow[] = []
   for (const instance of instances(routeValue)) {
     if (!instance.result.node_info || !Array.isArray(instance.result.peer_routes)) {
       throw new Error('EasyTier route 返回结构无效：需要 node_info 和 peer_routes')
@@ -142,16 +222,6 @@ export function mergedNetworkRows(routeValue: unknown): Record<string, string>[]
     const local = localRow(instance)
     const instanceKey = instance.id !== '—' ? instance.id : instance.name
     local.key = 'local:' + instanceKey + ':' + local.id
-    local.kind = '入口实例'
-    local.routeLabel = '本机实例'
-    local.connection = '本机'
-    local.protocol = '—'
-    local.latency = '—'
-    local.directLatency = '—'
-    local.nextHop = '—'
-    local.cost = '—'
-    local.rx = '—'
-    local.tx = '—'
     rows.push(local)
 
     const seen = new Set<string>()
@@ -162,9 +232,6 @@ export function mergedNetworkRows(routeValue: unknown): Record<string, string>[]
       if (seen.has(identity)) continue
       seen.add(identity)
       route.key = 'route:' + instanceKey + ':' + identity
-      route.kind = '网络路由'
-      route.publicIP = '—'
-      route.listeners = '—'
       rows.push(route)
     }
   }
