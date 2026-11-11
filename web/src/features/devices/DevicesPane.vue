@@ -8,6 +8,7 @@ import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey } from '../network-nodes/identity'
+import { suggestedDirectGatewayIP } from './gateway-ip'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
 import {
   createDevice, deleteDevice, getDevices, getNodeDevices, getGatewayGroups,
@@ -250,6 +251,21 @@ const savingDevice = ref(false)
 const editingDeviceId = ref('')
 const deviceDraft = ref<DeviceInput>(emptyDevice())
 const isOpenWrtDraft = computed(() => deviceDraft.value.semantic_kinds.includes('openwrt'))
+// 设备编辑期间若代理网段尚未加载，可在节点数据返回后补填一次；用户手动输入会取消待补填状态。
+const gatewayIPAutofillPending = ref(false)
+function fillGatewayIPIfNeeded() {
+  if (!gatewayIPAutofillPending.value || !deviceDialogOpen.value || !editingDeviceId.value) return
+  const suggested = suggestedDirectGatewayIP(deviceDraft.value, nodeOptions.value)
+  if (!suggested) return
+  deviceDraft.value.ip_address = suggested
+  gatewayIPAutofillPending.value = false
+}
+watch(
+  [() => deviceDraft.value.is_gateway, () => deviceDraft.value.gateway_group_id,
+    () => deviceDraft.value.network_key, () => deviceDraft.value.peer_id, nodeOptions],
+  fillGatewayIPIfNeeded
+)
+watch(deviceDialogOpen, open => { if (!open) gatewayIPAutofillPending.value = false })
 function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
@@ -284,6 +300,7 @@ const deviceDraftNodeKey = computed({
   }
 })
 function openCreateDevice(gatewayDevice: Device) {
+  gatewayIPAutofillPending.value = false
   if (!gatewayDevice.owned_gateway_group_id) {
     ElMessage.warning('该设备尚未配置网关层级')
     return
@@ -298,6 +315,7 @@ function openCreateDevice(gatewayDevice: Device) {
   deviceDialogOpen.value = true
 }
 function openEditDevice(device: Device) {
+  gatewayIPAutofillPending.value = !device.ip_address?.trim()
   editingDeviceId.value = device.id
   deviceDraft.value = {
     name: device.name, group_id: '', gateway_group_id: device.gateway_group_id || '',
@@ -308,6 +326,7 @@ function openEditDevice(device: Device) {
     network_key: device.network_key || '', peer_id: device.peer_id || ''
   }
   deviceDialogOpen.value = true
+  fillGatewayIPIfNeeded()
 }
 async function saveDeviceRecord() {
   if (savingDevice.value) return
@@ -714,7 +733,11 @@ watch(
             <el-input v-model="deviceDraft.model" maxlength="120" placeholder="例如：XDR6088" />
           </el-form-item>
           <el-form-item label="设备管理 IP" :required="isOpenWrtDraft">
-            <el-input v-model="deviceDraft.ip_address" placeholder="例如：192.168.1.1" />
+            <el-input v-model="deviceDraft.ip_address" placeholder="例如：192.168.1.1"
+              @input="gatewayIPAutofillPending = false" />
+            <div v-if="editingDeviceId && deviceDraft.is_gateway && !deviceDraft.gateway_group_id" class="field-hint">
+              直属网关设备的管理 IP 为空时，将从所属网络节点代理网段自动建议首个可用 IP；不覆盖已有值，可手动修改。
+            </div>
           </el-form-item>
           <el-form-item label="MAC 地址">
             <el-input v-model="deviceDraft.mac_address" placeholder="例如：AA:BB:CC:DD:EE:FF" />
