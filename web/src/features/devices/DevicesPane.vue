@@ -271,7 +271,7 @@ async function saveOpenWrtSettings() {
     await saveDeviceOpenWrtConfig(target.id, { ...openWrtForm.value, username: openWrtForm.value.username.trim() })
     await queryClient.invalidateQueries({ queryKey: ['devices'] })
     openWrtDialogOpen.value = false
-    ElMessage.success('该设备的 OpenWrt 发现服务配置已保存')
+    ElMessage.success('该设备的 OpenWrt RPCD 配置已保存')
   } catch (error) { ElMessage.error(formatApiError(error)) }
   finally { openWrtSaving.value = false }
 }
@@ -284,7 +284,7 @@ async function removeOpenWrtSettings() {
     await clearDeviceOpenWrtConfig(target.id)
     await queryClient.invalidateQueries({ queryKey: ['devices'] })
     openWrtDialogOpen.value = false
-    ElMessage.success('OpenWrt 服务配置已清除')
+    ElMessage.success('OpenWrt RPCD 配置已清除')
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
@@ -374,7 +374,7 @@ async function refreshAll() {
               </div>
               <div class="device-actions">
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
-                <el-button v-if="device.is_openwrt" text circle aria-label="OpenWrt 服务设置" title="OpenWrt 服务设置"
+                <el-button v-if="device.is_openwrt" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
               </div>
             </div>
@@ -386,7 +386,7 @@ async function refreshAll() {
             <p v-if="device.note" class="device-note">{{ device.note }}</p>
             <div v-if="device.is_openwrt" class="openwrt-status">
               <el-icon><Connection /></el-icon>
-              <span>{{ device.openwrt_configured ? 'RPCD 发现服务已配置' : 'OpenWrt 发现服务尚未配置' }}</span>
+              <span>{{ device.openwrt_configured ? 'RPCD 账号已配置' : 'RPCD 账号尚未配置' }}</span>
               <span v-if="device.openwrt_configured" class="openwrt-endpoint">
                 {{ device.openwrt_https ? 'HTTPS' : 'HTTP' }} · {{ device.openwrt_rpcd_port || 80 }}
               </span>
@@ -466,7 +466,7 @@ async function refreshAll() {
       </template>
     </el-dialog>
 
-    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt 发现服务设置" width="min(520px, 92vw)" destroy-on-close>
+    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
       <template v-if="openWrtTarget">
         <el-alert type="info" :closable="false" show-icon
           title="此配置属于设备「{{ openWrtTarget.name }}」，不会挂在分组上。RPCD 密钥在服务端加密保存，不会回传。" />
