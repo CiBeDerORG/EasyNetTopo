@@ -8,12 +8,13 @@ export function useHostStoreData(
   selectedHostId: ComputedRef<string>,
   authenticated: ComputedRef<boolean>,
   shouldPoll: ComputedRef<boolean>,
-  agentRestarting: ComputedRef<boolean>
+  agentRestarting: ComputedRef<boolean>,
+  storePage: ComputedRef<boolean>
 ) {
   const tasksQuery = useQuery({
     queryKey: ['execution-tasks'],
     queryFn: getExecutionTasks,
-    enabled: authenticated,
+    enabled: computed(() => authenticated.value && storePage.value),
     retry: 0,
     refetchInterval: 2500
   })
@@ -21,10 +22,10 @@ export function useHostStoreData(
     queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000
   })
   const sourcesQuery = useQuery({
-    queryKey: ['catalog-sources'], queryFn: getSources, enabled: authenticated, staleTime: 15_000
+    queryKey: ['catalog-sources'], queryFn: getSources, enabled: computed(() => authenticated.value && storePage.value), staleTime: 15_000
   })
   const appsQuery = useQuery({
-    queryKey: ['catalog-apps'], queryFn: getApps, enabled: authenticated, staleTime: 15_000
+    queryKey: ['catalog-apps'], queryFn: getApps, enabled: computed(() => authenticated.value && storePage.value), staleTime: 15_000
   })
 
   const tasks = computed(() => tasksQuery.data.value || [])
@@ -39,7 +40,7 @@ export function useHostStoreData(
   const snapshotQuery = useQuery({
     queryKey: computed(() => ['host-snapshot', selectedHostId.value]),
     queryFn: () => getHostSnapshot(selectedHostId.value),
-    enabled: computed(() => authenticated.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
+    enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
     retry: 0,
     staleTime: 10_000,
     refetchInterval: computed(() => agentRestarting.value || tasks.value.some(task =>
@@ -50,7 +51,7 @@ export function useHostStoreData(
   const statusQuery = useQuery({
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),
     queryFn: () => getAppStatuses(selectedHostId.value, catalogApps.value),
-    enabled: computed(() => authenticated.value && !!selectedHostId.value &&
+    enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value &&
       !!selectedHost.value?.agent_id && appsQuery.isSuccess.value),
     retry: 0,
     refetchInterval: query => shouldPoll.value ||
@@ -61,7 +62,7 @@ export function useHostStoreData(
     queryFn: () => getDockerInventory(selectedHostId.value),
     // 应用卡片也需要使用同一份 Docker 快照展示宿主机映射端口，
     // 不再等到用户打开资源抽屉时才读取。
-    enabled: computed(() => authenticated.value && !!selectedHost.value?.agent_id),
+    enabled: computed(() => authenticated.value && storePage.value && !!selectedHost.value?.agent_id),
     retry: 0,
     staleTime: 10_000
   })

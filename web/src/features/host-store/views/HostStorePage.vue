@@ -52,6 +52,7 @@ import type {
 const route = useRoute()
 const isNetworkPage = computed(() => route.path === '/network-nodes')
 const isDevicesPage = computed(() => route.path === '/devices')
+const isStorePage = computed(() => !isNetworkPage.value && !isDevicesPage.value)
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
 const authQuery = useQuery({
@@ -109,7 +110,7 @@ const agentMaintenanceForHost = computed(() => {
 })
 const agentUpdateBusy = ref(false)
 let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
-const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating)
+const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating, isStorePage)
 
 const hosts = data.hosts
 const executionTasks = data.tasks

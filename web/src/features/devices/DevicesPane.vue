@@ -410,7 +410,8 @@ async function refreshAll() {
             </el-select>
           </el-form-item>
           <el-form-item label="设备类型" required>
-            <el-select v-model="deviceDraft.device_type" class="full">
+            <el-select v-model="deviceDraft.device_type" class="full"
+              @change="deviceDraft.device_type !== 'router' && (deviceDraft.is_openwrt = false)">
               <el-option v-for="(label, value) in typeLabels" :key="value" :label="label" :value="value" />
             </el-select>
           </el-form-item>
