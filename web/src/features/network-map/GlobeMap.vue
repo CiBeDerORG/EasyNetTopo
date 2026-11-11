@@ -42,22 +42,37 @@ function linkColor(kind: MapLink['kind']): Cesium.Color {
   return Cesium.Color.fromCssColorString(
     activeTheme.value === 'dark' ? '#b1bfd0' : '#60768a')
 }
-function imageryProvider(key: Exclude<Basemap, 'auto'>): Cesium.ImageryProvider {
-  if (key === 'satellite') return new Cesium.UrlTemplateImageryProvider({
-    url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    credit: 'Tiles © Esri, Maxar, Earthstar Geographics',
-    maximumLevel: 19
+function imageryProviders(key: Exclude<Basemap, 'auto'>): Array<{ provider: Cesium.ImageryProvider; name: string }> {
+  const url = (template: string, credit: string) => ({
+    provider: new Cesium.UrlTemplateImageryProvider({
+      url: template,
+      credit,
+      maximumLevel: 19
+    }),
+    name: key
   })
-  if (key === 'dark') return new Cesium.UrlTemplateImageryProvider({
-    url: 'https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}.png',
-    credit: '© OpenStreetMap contributors · CARTO',
-    maximumLevel: 19
-  })
-  return new Cesium.UrlTemplateImageryProvider({
-    url: 'https://basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}.png',
-    credit: '© OpenStreetMap contributors · CARTO',
-    maximumLevel: 19
-  })
+  if (key === 'satellite') return [url(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+    'Powered by Esri · Source: Esri, Vantor, Earthstar Geographics, and the GIS User Community'
+  )]
+  if (key === 'dark') return [
+    url(
+      'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+      'Powered by Esri · Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community'
+    ),
+    {
+      provider: new Cesium.UrlTemplateImageryProvider({
+        url: 'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Reference/MapServer/tile/{z}/{y}/{x}',
+        credit: 'Powered by Esri · Esri, HERE, Garmin, © OpenStreetMap contributors, and the GIS user community',
+        maximumLevel: 19
+      }),
+      name: 'dark labels'
+    }
+  ]
+  return [url(
+    'https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}',
+    'Powered by Esri · Sources: Esri, DeLorme, HERE, USGS, Intermap, iPC, NRCAN, Esri Japan, METI, Esri China (Hong Kong), Esri (Thailand), MapmyIndia, and TomTom'
+  )]
 }
 function applySceneTheme() {
   if (!viewer || viewer.isDestroyed()) return
@@ -77,14 +92,17 @@ function setBaseLayer() {
   tileFailureCount = 0
   viewer.imageryLayers.removeAll(true)
   try {
-    const provider = imageryProvider(resolvedBasemap())
-    provider.errorEvent.addEventListener(() => {
-      tileFailureCount += 1
-      if (tileFailureCount >= 8) {
-        error.value = '地图瓦片加载异常，请检查网络或切换底图；节点及连接数据不会丢失。'
-      }
-    })
-    viewer.imageryLayers.addImageryProvider(provider)
+    const providers = imageryProviders(resolvedBasemap())
+    for (const item of providers) {
+      item.provider.errorEvent.addEventListener(() => {
+        tileFailureCount += 1
+        if (tileFailureCount >= 3) {
+          error.value = '地图底图加载失败（' + item.name +
+            '），请检查网络；节点及连接数据不会丢失。'
+        }
+      })
+      viewer.imageryLayers.addImageryProvider(item.provider)
+    }
     error.value = ''
     viewer.scene.requestRender()
   } catch {
