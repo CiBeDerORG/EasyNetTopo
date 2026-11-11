@@ -91,6 +91,10 @@ func run() error {
 	if err != nil {
 		return fmt.Errorf("初始化主机管理失败: %w", err)
 	}
+	deviceStore, err := storage.NewDeviceStore(context.Background(), db)
+	if err != nil {
+		return fmt.Errorf("初始化设备管理失败: %w", err)
+	}
 	taskStore, err := storage.NewTaskStore(context.Background(), db)
 	if err != nil {
 		return fmt.Errorf("初始化任务存储失败: %w", err)
@@ -106,7 +110,7 @@ func run() error {
 		stopTasks()
 		taskService.Wait()
 	}()
-	server := &http.Server{Addr: listen, Handler: httpapi.NewHandlerWithHosts(webDir, db, catalogService, hostService, taskService), ReadHeaderTimeout: 5 * time.Second}
+	server := &http.Server{Addr: listen, Handler: httpapi.NewHandlerWithDevices(webDir, db, catalogService, hostService, taskService, deviceStore), ReadHeaderTimeout: 5 * time.Second}
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGTERM, os.Interrupt)
 	defer stop()
 	go func() {

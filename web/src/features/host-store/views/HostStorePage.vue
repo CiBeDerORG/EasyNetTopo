@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
+import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -50,6 +51,8 @@ import type {
 
 const route = useRoute()
 const isNetworkPage = computed(() => route.path === '/network-nodes')
+const isDevicesPage = computed(() => route.path === '/devices')
+const isStorePage = computed(() => !isNetworkPage.value && !isDevicesPage.value)
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
 const authQuery = useQuery({
@@ -107,7 +110,7 @@ const agentMaintenanceForHost = computed(() => {
 })
 const agentUpdateBusy = ref(false)
 let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
-const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating)
+const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating, isStorePage)
 
 const hosts = data.hosts
 const executionTasks = data.tasks
@@ -766,8 +769,8 @@ async function logout() {
     <main class="workspace">
       <header class="topbar">
         <div>
-          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : '主机商店' }}</div>
-          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : '主机商店' }}</h1></div>
+          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : '主机商店' }}</div>
+          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : '主机商店' }}</h1></div>
         </div>
         <div class="topbar-actions">
           <el-select class="theme-switcher" aria-label="页面主题" :model-value="ui.themeMode"
@@ -786,6 +789,7 @@ async function logout() {
       </header>
 
       <NetworkNodesPane v-if="isNetworkPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
+      <DevicesPane v-else-if="isDevicesPage" :hosts="hosts" />
       <div v-else class="main-layout">
         <HostListPane
           :hosts="hosts"
