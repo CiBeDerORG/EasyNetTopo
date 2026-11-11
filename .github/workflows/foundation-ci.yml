@@ -33,6 +33,19 @@ jobs:
           go mod tidy
           git diff -- go.mod go.sum
           git diff --exit-code -- go.mod go.sum
+      - name: Format Go sources for migration review
+        run: |
+          gofmt -w internal/httpapi/device_routes.go internal/httpapi/device_routes_test.go internal/httpapi/server.go internal/storage/devices.go internal/storage/devices_test.go
+      - name: Upload formatted Go sources
+        uses: actions/upload-artifact@v4
+        with:
+          name: device-management-gofmt
+          path: |
+            internal/httpapi/device_routes.go
+            internal/httpapi/device_routes_test.go
+            internal/httpapi/server.go
+            internal/storage/devices.go
+            internal/storage/devices_test.go
       - name: Check gofmt
         run: |
           gofmt -l cmd internal | tee /tmp/unformatted-go-files
