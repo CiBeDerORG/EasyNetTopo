@@ -46,7 +46,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			http.Error(w, "请求必须是 JSON", http.StatusUnsupportedMediaType)
 			return false
 		}
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 16*1024))
+		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, 1024*1024))
 		decoder.DisallowUnknownFields()
 		if err := decoder.Decode(target); err != nil {
 			http.Error(w, "请求参数无效", http.StatusBadRequest)
@@ -64,7 +64,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		case errors.Is(err, storage.ErrDeviceNotFound), errors.Is(err, storage.ErrDeviceGroupNotFound):
 			reply(w, http.StatusNotFound, map[string]string{"code": "not_found", "message": "设备或分组不存在"})
 		case errors.Is(err, storage.ErrInvalidDevice):
-			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device", "message": "设备名称、类型、IP、MAC 或网络节点关联信息不合法"})
+			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device", "message": "设备名称、类型名称、语义标签、IP、MAC 或网络节点关联信息不合法"})
 		case errors.Is(err, storage.ErrDeviceGroupExists):
 			reply(w, http.StatusConflict, map[string]string{"code": "device_group_exists", "message": "同名设备分组已存在"})
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):
@@ -187,6 +187,24 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/devices/"), "/")
+		if len(parts) == 2 && parts[0] == "network-nodes" && parts[1] == "sync" {
+			switch r.Method {
+			case http.MethodGet:
+				enabled, err := devices.NetworkNodeSyncEnabled(r.Context())
+				if err != nil { mapError(w, err); return }
+				reply(w, http.StatusOK, map[string]bool{"enabled": enabled})
+			case http.MethodPost:
+				if !mutation(w, r) { return }
+				var req struct { Nodes []storage.NetworkNodeDeviceInput `json:"nodes"` }
+				if !decode(w, r, &req) { return }
+				result, err := devices.SyncNetworkNodeDevices(r.Context(), req.Nodes)
+				if err != nil { mapError(w, err); return }
+				reply(w, http.StatusOK, result)
+			default:
+				methodNotAllowed(w, "GET, POST")
+			}
+			return
+		}
 		if len(parts) == 1 && parts[0] != "" {
 			switch r.Method {
 			case http.MethodPatch:

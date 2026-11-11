@@ -6,7 +6,7 @@ export type DeviceGroup = {
   updated_at: string
 }
 
-export type DeviceType = 'router' | 'computer' | 'phone' | 'tablet' | 'tv' | 'nas' | 'other'
+export type DeviceType = string
 
 export type Device = {
   id: string
@@ -14,6 +14,9 @@ export type Device = {
   group_id?: string
   group_name?: string
   device_type: DeviceType
+  semantic_kinds: string[]
+  is_node_device: boolean
+  is_gateway: boolean
   manufacturer?: string
   model?: string
   ip_address?: string
@@ -34,6 +37,8 @@ export type DeviceInput = {
   name: string
   group_id: string
   device_type: DeviceType
+  semantic_kinds: string[]
+  is_gateway: boolean
   manufacturer: string
   model: string
   ip_address: string
@@ -43,6 +48,15 @@ export type DeviceInput = {
   network_key: string
   peer_id: string
 }
+
+export type NetworkNodeDeviceInput = {
+  name: string
+  network_key: string
+  peer_id: string
+}
+
+export type NetworkNodeSyncStatus = { enabled: boolean }
+export type NetworkNodeSyncResult = { created: number; existing: number; enabled: boolean }
 
 export type DeviceOpenWrtConfig = {
   device_id: string

@@ -6,6 +6,7 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net"
@@ -37,39 +38,56 @@ type DeviceGroup struct {
 }
 
 type Device struct {
-	ID                string `json:"id"`
-	Name              string `json:"name"`
-	GroupID           string `json:"group_id,omitempty"`
-	GroupName         string `json:"group_name,omitempty"`
-	DeviceType        string `json:"device_type"`
-	Manufacturer      string `json:"manufacturer,omitempty"`
-	Model             string `json:"model,omitempty"`
-	IPAddress         string `json:"ip_address,omitempty"`
-	MACAddress        string `json:"mac_address,omitempty"`
-	Note              string `json:"note,omitempty"`
-	IsOpenWrt         bool   `json:"is_openwrt"`
-	NetworkKey        string `json:"network_key,omitempty"`
-	PeerID            string `json:"peer_id,omitempty"`
-	OpenWrtConfigured bool   `json:"openwrt_configured"`
-	OpenWrtRPCDPort   int    `json:"openwrt_rpcd_port,omitempty"`
-	OpenWrtHTTPS      bool   `json:"openwrt_https,omitempty"`
-	OpenWrtUsername   string `json:"openwrt_username,omitempty"`
-	CreatedAt         string `json:"created_at"`
-	UpdatedAt         string `json:"updated_at"`
+	ID                string   `json:"id"`
+	Name              string   `json:"name"`
+	GroupID           string   `json:"group_id,omitempty"`
+	GroupName         string   `json:"group_name,omitempty"`
+	DeviceType        string   `json:"device_type"`
+	SemanticKinds     []string `json:"semantic_kinds"`
+	IsNodeDevice      bool     `json:"is_node_device"`
+	IsGateway         bool     `json:"is_gateway"`
+	Manufacturer      string   `json:"manufacturer,omitempty"`
+	Model             string   `json:"model,omitempty"`
+	IPAddress         string   `json:"ip_address,omitempty"`
+	MACAddress        string   `json:"mac_address,omitempty"`
+	Note              string   `json:"note,omitempty"`
+	IsOpenWrt         bool     `json:"is_openwrt"`
+	NetworkKey        string   `json:"network_key,omitempty"`
+	PeerID            string   `json:"peer_id,omitempty"`
+	OpenWrtConfigured bool     `json:"openwrt_configured"`
+	OpenWrtRPCDPort   int      `json:"openwrt_rpcd_port,omitempty"`
+	OpenWrtHTTPS      bool     `json:"openwrt_https,omitempty"`
+	OpenWrtUsername   string   `json:"openwrt_username,omitempty"`
+	CreatedAt         string   `json:"created_at"`
+	UpdatedAt         string   `json:"updated_at"`
 }
 
 type DeviceInput struct {
-	Name         string `json:"name"`
-	GroupID      string `json:"group_id"`
-	DeviceType   string `json:"device_type"`
-	Manufacturer string `json:"manufacturer"`
-	Model        string `json:"model"`
-	IPAddress    string `json:"ip_address"`
-	MACAddress   string `json:"mac_address"`
-	Note         string `json:"note"`
-	IsOpenWrt    bool   `json:"is_openwrt"`
-	NetworkKey   string `json:"network_key"`
-	PeerID       string `json:"peer_id"`
+	Name          string   `json:"name"`
+	GroupID       string   `json:"group_id"`
+	DeviceType    string   `json:"device_type"`
+	SemanticKinds []string `json:"semantic_kinds"`
+	IsGateway     bool     `json:"is_gateway"`
+	Manufacturer  string   `json:"manufacturer"`
+	Model         string   `json:"model"`
+	IPAddress     string   `json:"ip_address"`
+	MACAddress    string   `json:"mac_address"`
+	Note          string   `json:"note"`
+	IsOpenWrt     bool     `json:"is_openwrt"`
+	NetworkKey    string   `json:"network_key"`
+	PeerID        string   `json:"peer_id"`
+}
+
+type NetworkNodeDeviceInput struct {
+	Name       string `json:"name"`
+	NetworkKey string `json:"network_key"`
+	PeerID     string `json:"peer_id"`
+}
+
+type NetworkNodeSyncResult struct {
+	Created  int  `json:"created"`
+	Existing int  `json:"existing"`
+	Enabled  bool `json:"enabled"`
 }
 
 type DeviceOpenWrtConfig struct {
@@ -99,8 +117,10 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		)`,
 		`CREATE TABLE IF NOT EXISTS devices (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, group_id TEXT REFERENCES device_groups(id) ON DELETE SET NULL,
-			device_type TEXT NOT NULL DEFAULT 'other', manufacturer TEXT NOT NULL DEFAULT '',
-			model TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
+			device_type TEXT NOT NULL DEFAULT '通用设备', semantic_kinds TEXT NOT NULL DEFAULT '[]',
+			is_node_device INTEGER NOT NULL DEFAULT 0, is_gateway INTEGER NOT NULL DEFAULT 0,
+			manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+			ip_address TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
 			note TEXT NOT NULL DEFAULT '', is_openwrt INTEGER NOT NULL DEFAULT 0,
 			network_key TEXT NOT NULL DEFAULT '', peer_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -109,6 +129,10 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_network_node
 			ON devices(network_key,peer_id) WHERE network_key<>'' AND peer_id<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_group ON devices(group_id,name)`,
+		`CREATE TABLE IF NOT EXISTS network_node_sync_seen (
+			network_key TEXT NOT NULL, peer_id TEXT NOT NULL, first_seen_at TEXT NOT NULL,
+			PRIMARY KEY(network_key,peer_id)
+		)`,
 		`CREATE TABLE IF NOT EXISTS device_openwrt_configs (
 			device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
 			rpcd_port INTEGER NOT NULL DEFAULT 80, https INTEGER NOT NULL DEFAULT 0,
@@ -119,6 +143,26 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		if _, err := db.db.ExecContext(ctx, query); err != nil {
 			return nil, fmt.Errorf("初始化设备管理数据失败: %w", err)
 		}
+	}
+	for _, column := range []struct{ name, definition string }{
+		{"semantic_kinds", `semantic_kinds TEXT NOT NULL DEFAULT '[]'`},
+		{"is_node_device", "is_node_device INTEGER NOT NULL DEFAULT 0"},
+		{"is_gateway", "is_gateway INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureDeviceColumn(ctx, db, column.name, column.definition); err != nil {
+			return nil, fmt.Errorf("迁移设备字段 %s 失败: %w", column.name, err)
+		}
+	}
+	if _, err := db.db.ExecContext(ctx, `UPDATE devices SET semantic_kinds=CASE device_type
+		WHEN 'router' THEN '["router"]' WHEN 'computer' THEN '["computer"]'
+		WHEN 'phone' THEN '["phone"]' WHEN 'tablet' THEN '["tablet"]'
+		WHEN 'tv' THEN '["tv"]' WHEN 'nas' THEN '["nas"]'
+		WHEN 'other' THEN '["other"]' ELSE semantic_kinds END
+		WHERE semantic_kinds='[]'`); err != nil {
+		return nil, fmt.Errorf("迁移设备类型标签失败: %w", err)
+	}
+	if _, err := db.db.ExecContext(ctx, "UPDATE devices SET is_node_device=1 WHERE network_key<>'' AND peer_id<>''"); err != nil {
+		return nil, fmt.Errorf("迁移节点设备标识失败: %w", err)
 	}
 	keyPath := filepath.Join(db.DataDir(), ".device-openwrt-sealing-key")
 	if _, statErr := os.Lstat(keyPath); errors.Is(statErr, os.ErrNotExist) {
@@ -137,6 +181,27 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		return nil, err
 	}
 	return &DeviceStore{store: db, key: key}, nil
+}
+
+func ensureDeviceColumn(ctx context.Context, db *Store, name, definition string) error {
+	rows, err := db.db.QueryContext(ctx, "PRAGMA table_info(devices)")
+	if err != nil { return err }
+	found := false
+	for rows.Next() {
+		var cid, notnull, primary int
+		var columnName, columnType string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &columnName, &columnType, &notnull, &defaultValue, &primary); err != nil {
+			_ = rows.Close()
+			return err
+		}
+		if columnName == name { found = true }
+	}
+	if err := rows.Err(); err != nil { _ = rows.Close(); return err }
+	if err := rows.Close(); err != nil { return err }
+	if found { return nil }
+	_, err = db.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN "+definition)
+	return err
 }
 
 func loadDeviceSealingKey(dir string) ([]byte, error) {
@@ -229,17 +294,28 @@ func normalizeDevice(v *DeviceInput) error {
 	if v.Name == "" || len([]rune(v.Name)) > 100 || strings.ContainsAny(v.Name, "\r\n\x00") {
 		return ErrInvalidDevice
 	}
-	if v.DeviceType == "" {
-		v.DeviceType = "other"
-	}
-	switch v.DeviceType {
-	case "router", "computer", "phone", "tablet", "tv", "nas", "other":
-	default:
+	if v.DeviceType == "" { v.DeviceType = "通用设备" }
+	if len([]rune(v.DeviceType)) > 100 || strings.ContainsAny(v.DeviceType, "\r\n\x00") {
 		return ErrInvalidDevice
 	}
-	if v.IsOpenWrt && v.DeviceType != "router" {
-		return ErrInvalidDevice
+	allowedKinds := map[string]bool{
+		"router": true, "server": true, "openwrt": true, "phone": true, "computer": true,
+		"tablet": true, "tv": true, "nas": true, "linux": true, "android": true, "other": true,
 	}
+	legacyKinds := map[string]string{"router":"router","computer":"computer","phone":"phone","tablet":"tablet","tv":"tv","nas":"nas","other":"other"}
+	if kind := legacyKinds[v.DeviceType]; kind != "" { v.SemanticKinds = append(v.SemanticKinds, kind) }
+	if v.IsOpenWrt { v.SemanticKinds = append(v.SemanticKinds, "router", "openwrt") }
+	seenKinds := make(map[string]bool)
+	kinds := make([]string, 0, len(v.SemanticKinds))
+	for _, kind := range v.SemanticKinds {
+		kind = strings.TrimSpace(kind)
+		if kind == "" { continue }
+		if !allowedKinds[kind] || len(kind) > 32 { return ErrInvalidDevice }
+		if !seenKinds[kind] { seenKinds[kind] = true; kinds = append(kinds, kind) }
+	}
+	if len(kinds) > 16 { return ErrInvalidDevice }
+	v.SemanticKinds = kinds
+	if v.IsOpenWrt && !seenKinds["router"] { return ErrInvalidDevice }
 	for _, field := range []struct {
 		value string
 		limit int
@@ -360,17 +436,25 @@ func (s *DeviceStore) DeleteDeviceGroup(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),d.device_type,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
+const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
 	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at
 	FROM devices d LEFT JOIN device_groups g ON g.id=d.group_id LEFT JOIN device_openwrt_configs c ON c.device_id=d.id`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var v Device
 	var configured, https bool
-	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.DeviceType, &v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &v.IsOpenWrt, &v.NetworkKey, &v.PeerID, &configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt)
+	var semanticKinds string
+	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
+		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &v.IsOpenWrt, &v.NetworkKey, &v.PeerID,
+		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt)
+	if err != nil { return Device{}, err }
+	if err := json.Unmarshal([]byte(semanticKinds), &v.SemanticKinds); err != nil {
+		return Device{}, fmt.Errorf("设备语义标签数据损坏: %w", err)
+	}
+	if v.SemanticKinds == nil { v.SemanticKinds = []string{} }
 	v.OpenWrtConfigured = configured
 	v.OpenWrtHTTPS = https
-	return v, err
+	return v, nil
 }
 func (s *DeviceStore) ListDevices(ctx context.Context) ([]Device, error) {
 	rows, err := s.store.db.QueryContext(ctx, deviceSelect+" ORDER BY COALESCE(g.name,'') COLLATE NOCASE,d.name COLLATE NOCASE,d.id")
@@ -396,16 +480,16 @@ func (s *DeviceStore) Device(ctx context.Context, id string) (Device, error) {
 	return v, err
 }
 func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Device, error) {
-	if err := normalizeDevice(&input); err != nil {
-		return Device{}, err
-	}
+	if err := normalizeDevice(&input); err != nil { return Device{}, err }
 	id, err := uuid()
-	if err != nil {
-		return Device{}, err
-	}
+	if err != nil { return Device{}, err }
+	semanticKinds, err := json.Marshal(input.SemanticKinds)
+	if err != nil { return Device{}, err }
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.store.db.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,device_type,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), input.DeviceType, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, now)
+	_, err = s.store.db.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), input.DeviceType, string(semanticKinds),
+		input.NetworkKey != "" && input.PeerID != "", input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
+		input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, now)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
 			return Device{}, ErrDeviceGroupNotFound
@@ -418,17 +502,16 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	return s.Device(ctx, id)
 }
 func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceInput) (Device, error) {
-	if err := normalizeDevice(&input); err != nil {
-		return Device{}, err
-	}
+	if err := normalizeDevice(&input); err != nil { return Device{}, err }
+	semanticKinds, err := json.Marshal(input.SemanticKinds)
+	if err != nil { return Device{}, err }
 	tx, err := s.store.db.BeginTx(ctx, nil)
-	if err != nil {
-		return Device{}, err
-	}
+	if err != nil { return Device{}, err }
 	defer tx.Rollback()
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,device_type=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
-		input.Name, nullIfEmpty(input.GroupID), input.DeviceType, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, id)
+	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,device_type=?,semantic_kinds=?,is_node_device=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
+		input.Name, nullIfEmpty(input.GroupID), input.DeviceType, string(semanticKinds), input.NetworkKey != "" && input.PeerID != "", input.IsGateway,
+		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, id)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
 			return Device{}, ErrDeviceGroupNotFound
@@ -455,6 +538,49 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	}
 	return s.Device(ctx, id)
 }
+func (s *DeviceStore) NetworkNodeSyncEnabled(ctx context.Context) (bool, error) {
+	var value string
+	err := s.store.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='device_network_node_auto_sync'").Scan(&value)
+	if errors.Is(err, sql.ErrNoRows) { return false, nil }
+	return value == "1", err
+}
+
+// SyncNetworkNodeDevices 只补充从未同步过的新节点；离线节点及用户主动删除的节点设备均不会被删除或反复重建。
+func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []NetworkNodeDeviceInput) (NetworkNodeSyncResult, error) {
+	if len(nodes) == 0 || len(nodes) > 500 { return NetworkNodeSyncResult{}, ErrInvalidDevice }
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil { return NetworkNodeSyncResult{}, err }
+	defer tx.Rollback()
+	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES('device_network_node_auto_sync','1')
+		ON CONFLICT(key) DO UPDATE SET value='1'`); err != nil { return NetworkNodeSyncResult{}, err }
+	result := NetworkNodeSyncResult{Enabled: true}
+	now := time.Now().UTC().Format(time.RFC3339)
+	for _, node := range nodes {
+		input := DeviceInput{Name: node.Name, DeviceType: "通用设备", NetworkKey: node.NetworkKey, PeerID: node.PeerID}
+		if err := normalizeDevice(&input); err != nil { return NetworkNodeSyncResult{}, err }
+		var existingID string
+		err := tx.QueryRowContext(ctx, "SELECT id FROM devices WHERE network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID)
+		if err == nil {
+			if _, err = tx.ExecContext(ctx, "UPDATE devices SET is_node_device=1,updated_at=? WHERE id=?", now, existingID); err != nil { return NetworkNodeSyncResult{}, err }
+			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil { return NetworkNodeSyncResult{}, err }
+			result.Existing++
+			continue
+		}
+		if !errors.Is(err, sql.ErrNoRows) { return NetworkNodeSyncResult{}, err }
+		var seen int
+		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM network_node_sync_seen WHERE network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&seen); err != nil { return NetworkNodeSyncResult{}, err }
+		if seen > 0 { result.Existing++; continue }
+		id, err := uuid()
+		if err != nil { return NetworkNodeSyncResult{}, err }
+		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+			VALUES(?,?,NULL,'通用设备','[]',1,0,'','','','','',0,?,?,?,?)`, id, input.Name, input.NetworkKey, input.PeerID, now, now); err != nil { return NetworkNodeSyncResult{}, err }
+		if _, err = tx.ExecContext(ctx, "INSERT INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil { return NetworkNodeSyncResult{}, err }
+		result.Created++
+	}
+	if err = tx.Commit(); err != nil { return NetworkNodeSyncResult{}, err }
+	return result, nil
+}
+
 func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
 	result, err := s.store.db.ExecContext(ctx, "DELETE FROM devices WHERE id=?", id)
 	if err != nil {

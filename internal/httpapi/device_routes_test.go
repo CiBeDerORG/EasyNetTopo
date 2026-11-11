@@ -107,3 +107,41 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 		t.Fatalf("设备列表缺少关联数据: %d %s", list.Code, list.Body.String())
 	}
 }
+
+func TestNetworkNodeSyncAPI(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	deviceStore, err := storage.NewDeviceStore(ctx, db)
+	if err != nil { t.Fatal(err) }
+	handler := NewHandlerWithDevices(t.TempDir(), db, nil, nil, nil, deviceStore)
+	token, _, err := db.NewSession(ctx)
+	if err != nil { t.Fatal(err) }
+	request := func(method, path, body string, auth, csrf bool) *httptest.ResponseRecorder {
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" { req.Header.Set("Content-Type", "application/json") }
+		if auth { req.AddCookie(&http.Cookie{Name: authCookie, Value: token}) }
+		if csrf { req.Header.Set("X-ENT-Request", "1") }
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+	status := request("GET", "/api/v1/devices/network-nodes/sync", "", true, false)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"enabled":false`) {
+		t.Fatalf("读取自动补充状态失败: %d %s", status.Code, status.Body.String())
+	}
+	body := `{"nodes":[{"name":"入口节点","network_key":"network:home","peer_id":"peer-1"}]}`
+	synced := request("POST", "/api/v1/devices/network-nodes/sync", body, true, true)
+	if synced.Code != http.StatusOK || !strings.Contains(synced.Body.String(), `"created":1`) || !strings.Contains(synced.Body.String(), `"enabled":true`) {
+		t.Fatalf("同步网络节点失败: %d %s", synced.Code, synced.Body.String())
+	}
+	status = request("GET", "/api/v1/devices/network-nodes/sync", "", true, false)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"enabled":true`) {
+		t.Fatalf("自动补充状态未更新: %d %s", status.Code, status.Body.String())
+	}
+	list := request("GET", "/api/v1/devices", "", true, false)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"is_node_device":true`) {
+		t.Fatalf("节点设备标识未通过 API 返回: %d %s", list.Code, list.Body.String())
+	}
+}

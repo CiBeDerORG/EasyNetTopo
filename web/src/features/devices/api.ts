@@ -1,5 +1,8 @@
 import { apiRequest } from '../../lib/api-client'
-import type { Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig } from './types'
+import type {
+  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig,
+  NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus
+} from './types'
 
 export async function getDevices() {
   const result = await apiRequest<{ devices: Device[] }>('/api/v1/devices')
@@ -27,6 +30,13 @@ export function updateDeviceGroup(id: string, name: string) {
 }
 export function deleteDeviceGroup(id: string) {
   return apiRequest<void>('/api/v1/device-groups/' + encodeURIComponent(id), { method: 'DELETE' })
+}
+
+export function getNetworkNodeSyncStatus() {
+  return apiRequest<NetworkNodeSyncStatus>('/api/v1/devices/network-nodes/sync')
+}
+export function syncNetworkNodeDevices(nodes: NetworkNodeDeviceInput[]) {
+  return apiRequest<NetworkNodeSyncResult>('/api/v1/devices/network-nodes/sync', { method: 'POST', body: { nodes } })
 }
 
 export function getDeviceOpenWrtConfig(id: string) {

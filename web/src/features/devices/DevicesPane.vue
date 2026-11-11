@@ -10,14 +10,16 @@ import { networkNodeAttributeKey } from '../network-nodes/identity'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
 import {
   createDevice, createDeviceGroup, deleteDevice, deleteDeviceGroup, getDeviceGroups, getDevices,
-  getDeviceOpenWrtConfig, saveDeviceOpenWrtConfig, clearDeviceOpenWrtConfig, updateDevice, updateDeviceGroup
+  getDeviceOpenWrtConfig, getNetworkNodeSyncStatus, syncNetworkNodeDevices, saveDeviceOpenWrtConfig,
+  clearDeviceOpenWrtConfig, updateDevice, updateDeviceGroup
 } from './api'
-import type { Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, DeviceType } from './types'
+import type { Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, NetworkNodeDeviceInput } from './types'
 
 const props = defineProps<{ hosts: Host[] }>()
 const queryClient = useQueryClient()
 const devicesQuery = useQuery({ queryKey: ['devices'], queryFn: getDevices, retry: 0 })
 const groupsQuery = useQuery({ queryKey: ['device-groups'], queryFn: getDeviceGroups, retry: 0 })
+const networkNodeSyncQuery = useQuery({ queryKey: ['device-network-node-sync'], queryFn: getNetworkNodeSyncStatus, retry: 0 })
 const attributesQuery = useQuery({ queryKey: ['network-node-attributes'], queryFn: listNodeAttributes, retry: 0 })
 const networkEntries = computed(() => props.hosts.filter(host => host.network_entry))
 const nodesQuery = useQuery({
@@ -65,7 +67,8 @@ const filteredDevices = computed(() => {
   if (!keyword) return devices.value
   return devices.value.filter(device => [
     device.name, device.group_name, device.device_type, device.manufacturer, device.model,
-    device.ip_address, device.mac_address, device.note, device.peer_id, device.network_key
+    device.ip_address, device.mac_address, device.note, device.peer_id, device.network_key,
+    ...(device.semantic_kinds || [])
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const allFilteredSelected = computed(() => filteredDevices.value.length > 0 &&
@@ -82,27 +85,38 @@ function toggleSelectAll(checked: boolean) {
     : selectedDeviceIds.value.filter(id => !visible.includes(id))
 }
 const sections = computed(() => {
-  const result: Array<{ id: string; name: string; group: DeviceGroup | null; items: Device[] }> = groups.value.map(group => ({
-    id: group.id, name: group.name, group,
-    items: filteredDevices.value.filter(device => device.group_id === group.id)
-  }))
-  const ungrouped = filteredDevices.value.filter(device => !device.group_id)
-  if (ungrouped.length) {
-    result.push({ id: '__ungrouped__', name: '未分组', group: null, items: ungrouped })
-  }
-  return result
+  if (!devices.value.length) return []
+  const items = [
+    { id: 'gateway', name: '网关设备', items: filteredDevices.value.filter(device => device.is_gateway) },
+    { id: 'non-gateway', name: '非网关设备', items: filteredDevices.value.filter(device => !device.is_gateway) }
+  ]
+  return search.value.trim() ? items.filter(section => section.items.length > 0) : items
 })
 const collapsed = ref<string[]>([])
 function toggleGroup(id: string) {
   collapsed.value = collapsed.value.includes(id)
     ? collapsed.value.filter(value => value !== id) : [...collapsed.value, id]
 }
-const typeLabels: Record<DeviceType, string> = {
-  router: '路由器', computer: '电脑', phone: '手机', tablet: '平板', tv: '电视',
-  nas: 'NAS', other: '其他设备'
+const semanticKindLabels: Record<string, string> = {
+  router: '路由器', server: '服务器', openwrt: 'OpenWrt', phone: '手机', computer: '电脑',
+  tablet: '平板', tv: '电视', nas: 'NAS', linux: 'Linux', android: 'Android', other: '其他'
 }
-const typeIcons = { router: Connection, computer: Monitor, phone: Iphone, tablet: Iphone, tv: Monitor, nas: Box, other: Monitor }
-function typeLabel(type: DeviceType) { return typeLabels[type] || '其他设备' }
+const semanticKindOptions = Object.entries(semanticKindLabels).map(([value, label]) => ({ value, label }))
+const typeIcons: Record<string, typeof Connection> = {
+  router: Connection, server: Monitor, openwrt: Connection, phone: Iphone, computer: Monitor,
+  tablet: Iphone, tv: Monitor, nas: Box, linux: Monitor, android: Iphone, other: Monitor
+}
+const legacyDeviceTypeNames: Record<string, string> = {
+  router: '路由器', computer: '电脑', phone: '手机', tablet: '平板', tv: '电视', nas: 'NAS', other: '其他设备'
+}
+function deviceTypeName(type: string) { return legacyDeviceTypeNames[type] || type || '通用设备' }
+function deviceIcon(device: Device) {
+  const kind = (device.semantic_kinds || []).find(value => value in typeIcons)
+  return kind ? typeIcons[kind] : Monitor
+}
+const gatewayCount = computed(() => filteredDevices.value.filter(device => device.is_gateway).length)
+const nonGatewayCount = computed(() => filteredDevices.value.length - gatewayCount.value)
+const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
 function nodeValue(node: { networkKey: string; row: NetworkRow }) {
   return JSON.stringify([node.networkKey, node.row.id])
 }
@@ -123,8 +137,9 @@ const savingDevice = ref(false)
 const editingDeviceId = ref('')
 const deviceDraft = ref<DeviceInput>(emptyDevice())
 function emptyDevice(): DeviceInput {
-  return { name: '', group_id: '', device_type: 'other', manufacturer: '', model: '',
-    ip_address: '', mac_address: '', note: '', is_openwrt: false, network_key: '', peer_id: '' }
+  return { name: '', group_id: '', device_type: '通用设备', semantic_kinds: [], is_gateway: false,
+    manufacturer: '', model: '', ip_address: '', mac_address: '', note: '', is_openwrt: false,
+    network_key: '', peer_id: '' }
 }
 function openCreateDevice() {
   editingDeviceId.value = ''
@@ -134,7 +149,8 @@ function openCreateDevice() {
 function openEditDevice(device: Device) {
   editingDeviceId.value = device.id
   deviceDraft.value = {
-    name: device.name, group_id: device.group_id || '', device_type: device.device_type,
+    name: device.name, group_id: '', device_type: deviceTypeName(device.device_type),
+    semantic_kinds: [...(device.semantic_kinds || [])], is_gateway: device.is_gateway,
     manufacturer: device.manufacturer || '', model: device.model || '',
     ip_address: device.ip_address || '', mac_address: device.mac_address || '',
     note: device.note || '', is_openwrt: device.is_openwrt,
@@ -161,9 +177,12 @@ function selectNetworkNode(value: string) {
 }
 async function saveDeviceRecord() {
   if (savingDevice.value) return
-  const draft = { ...deviceDraft.value }
-  if (draft.is_openwrt && draft.device_type !== 'router') draft.device_type = 'router'
+  const draft = { ...deviceDraft.value, group_id: '', semantic_kinds: [...deviceDraft.value.semantic_kinds] }
+  if (draft.is_openwrt) {
+    draft.semantic_kinds = [...new Set([...draft.semantic_kinds, 'router', 'openwrt'])]
+  }
   if (!draft.name.trim()) { ElMessage.warning('请填写设备名称'); return }
+  if (!draft.device_type.trim()) { ElMessage.warning('请填写设备类型名称'); return }
   if (draft.is_openwrt && !draft.ip_address.trim()) { ElMessage.warning('OpenWrt 设备需要填写一个管理 IP'); return }
   const previous = devices.value.find(item => item.id === editingDeviceId.value)
   if (previous?.is_openwrt && previous.openwrt_configured && !draft.is_openwrt) {
@@ -292,9 +311,7 @@ async function removeOpenWrtSettings() {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
 }
-type FailedNodeInitialization = { input: DeviceInput; message: string }
 const initializingDevices = ref(false)
-const failedNodeInitializations = ref<FailedNodeInitialization[]>([])
 const canInitializeNetworkNodes = computed(() =>
   !initializingDevices.value && networkEntries.value.length > 0 &&
   nodesQuery.isSuccess.value && !nodesQuery.isError.value &&
@@ -321,95 +338,73 @@ function uniqueNodeDeviceName(node: (typeof nodeOptions.value)[number], used: Se
   used.add(name.toLocaleLowerCase())
   return name
 }
-function networkNodeDeviceInputs(): DeviceInput[] {
+function networkNodeDeviceInputs(): NetworkNodeDeviceInput[] {
   const used = new Set(devices.value.map(device => device.name.toLocaleLowerCase()))
   return nodeOptions.value
     .filter(node => node.row.id !== '—' && !!node.networkKey && !!node.row.id)
     .map(node => ({
       name: uniqueNodeDeviceName(node, used),
-      group_id: '',
-      device_type: 'other',
-      manufacturer: '',
-      model: '',
-      ip_address: '',
-      mac_address: '',
-      note: '',
-      is_openwrt: false,
       network_key: node.networkKey,
       peer_id: node.row.id
     }))
 }
-async function createNetworkNodeDevices(inputs: DeviceInput[]) {
-  let created = 0
-  const failed: FailedNodeInitialization[] = []
-  for (const input of inputs) {
-    try {
-      await createDevice(input)
-      created++
-    } catch (error) {
-      failed.push({ input, message: formatApiError(error) })
-    }
-  }
-  return { created, failed }
-}
-async function initializeNetworkNodes() {
-  if (!canInitializeNetworkNodes.value || devices.value.length > 0) return
+async function runNetworkNodeSync(showMessage: boolean) {
   const inputs = networkNodeDeviceInputs()
   if (!inputs.length) {
-    ElMessage.warning('没有可初始化的有效网络节点')
+    if (showMessage) ElMessage.warning('没有可同步的有效网络节点')
     return
   }
+  initializingDevices.value = true
+  try {
+    const result = await syncNetworkNodeDevices(inputs)
+    queryClient.setQueryData(['device-network-node-sync'], { enabled: result.enabled })
+    await Promise.all([
+      devicesQuery.refetch(),
+      queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] })
+    ])
+    if (showMessage) {
+      ElMessage.success('网络节点同步完成：新增 ' + result.created + ' 台，已存在 ' + result.existing + ' 台；新节点自动补充已开启')
+    }
+  } catch (error) {
+    if (showMessage) ElMessage.error(formatApiError(error))
+  } finally {
+    initializingDevices.value = false
+  }
+}
+async function initializeNetworkNodes() {
+  if (!canInitializeNetworkNodes.value) return
+  const inputs = networkNodeDeviceInputs()
+  if (!inputs.length) { ElMessage.warning('没有可初始化的有效网络节点'); return }
   try {
     await ElMessageBox.confirm(
-      '将为 ' + inputs.length + ' 个网络节点分别创建一条「其他设备」记录，并自动关联原节点。不会复制节点 IP、公网 IP 或位置，也不会修改网络节点。是否继续？',
-      '初始化设备列表', { type: 'info', confirmButtonText: '开始初始化', cancelButtonText: '取消' })
+      '将为当前 ' + inputs.length + ' 个网络节点创建基础设备记录，并标记为「节点设备」。后续发现的新节点会自动补充；不会覆盖已有设备资料，也不会删除离线节点或复制节点实时 IP、路由和位置。是否继续？',
+      '初始化网络节点', { type: 'info', confirmButtonText: '开始初始化', cancelButtonText: '取消' })
   } catch { return }
-  initializingDevices.value = true
-  try {
-    const result = await createNetworkNodeDevices(inputs)
-    failedNodeInitializations.value = result.failed
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
-    ])
-    if (result.failed.length) {
-      ElMessage.warning('已初始化 ' + result.created + ' 台，' + result.failed.length + ' 台失败；可在下方重试失败项')
-    } else {
-      ElMessage.success('已将 ' + result.created + ' 个网络节点初始化为基础设备')
-    }
-  } finally {
-    initializingDevices.value = false
-  }
+  await runNetworkNodeSync(true)
 }
-async function retryFailedNodeInitializations() {
-  if (initializingDevices.value || !failedNodeInitializations.value.length) return
-  initializingDevices.value = true
-  try {
-    const latest = await devicesQuery.refetch()
-    const linked = new Set((latest.data || [])
-      .filter(device => device.network_key && device.peer_id)
-      .map(device => device.network_key + '|' + device.peer_id))
-    const pending = failedNodeInitializations.value
-      .filter(item => !linked.has(item.input.network_key + '|' + item.input.peer_id))
-      .map(item => item.input)
-    const result = await createNetworkNodeDevices(pending)
-    failedNodeInitializations.value = result.failed
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
-    ])
-    if (result.failed.length) ElMessage.warning('重试完成，仍有 ' + result.failed.length + ' 台设备未能初始化')
-    else ElMessage.success('失败项已处理完成')
-  } finally {
-    initializingDevices.value = false
-  }
+function onOpenWrtChange(enabled: boolean | string | number) {
+  const kinds = deviceDraft.value.semantic_kinds || []
+  deviceDraft.value.semantic_kinds = enabled
+    ? [...new Set([...kinds, 'router', 'openwrt'])]
+    : kinds.filter(kind => kind !== 'openwrt')
 }
-const isRefreshing = computed(() => devicesQuery.isFetching.value || groupsQuery.isFetching.value)
+const isRefreshing = computed(() =>
+  devicesQuery.isFetching.value || groupsQuery.isFetching.value || nodesQuery.isFetching.value)
 async function refreshAll() {
   await Promise.all([
-    devicesQuery.refetch(), groupsQuery.refetch(), nodesQuery.refetch(), attributesQuery.refetch()
+    devicesQuery.refetch(), groupsQuery.refetch(), nodesQuery.refetch(), attributesQuery.refetch(),
+    networkNodeSyncQuery.refetch()
   ])
 }
+watch(
+  () => [networkNodeSyncEnabled.value, nodesQuery.dataUpdatedAt.value] as const,
+  async ([enabled]) => {
+    if (!enabled || initializingDevices.value || !nodesQuery.isSuccess.value || nodesQuery.isError.value) return
+    if (!nodeOptions.value.length) return
+    await runNetworkNodeSync(false)
+  },
+  { immediate: true }
+)
 </script>
 
 <template>
@@ -421,7 +416,11 @@ async function refreshAll() {
       </div>
       <div class="devices-actions">
         <el-button @click="refreshAll" :loading="isRefreshing"><el-icon><Refresh /></el-icon>刷新</el-button>
-        <el-button @click="openCreateGroup"><el-icon><Plus /></el-icon>新建分组</el-button>
+        <el-button v-if="devices.length && networkEntries.length && !networkNodeSyncEnabled"
+          :disabled="!canInitializeNetworkNodes" :loading="initializingDevices" @click="initializeNetworkNodes">
+          <el-icon><Connection /></el-icon>同步网络节点
+        </el-button>
+        <el-tag v-if="networkNodeSyncEnabled" type="success" effect="plain">新节点自动补充已开启</el-tag>
         <el-button type="primary" @click="openCreateDevice"><el-icon><Plus /></el-icon>添加设备</el-button>
       </div>
     </div>
@@ -432,7 +431,8 @@ async function refreshAll() {
       </el-input>
       <div class="devices-summary">
         <span>{{ filteredDevices.length }} 台设备</span>
-        <span>{{ groups.length }} 个分组</span>
+        <span>{{ gatewayCount }} 台网关</span>
+        <span>{{ nonGatewayCount }} 台非网关</span>
         <el-checkbox :model-value="allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
         <el-button v-if="selectedDeviceIds.length" type="danger" plain size="small" @click="deleteSelectedDevices">
           <el-icon><Delete /></el-icon>删除所选 {{ selectedDeviceIds.length }} 台
@@ -454,19 +454,7 @@ async function refreshAll() {
       <el-skeleton :rows="5" animated />
     </div>
     <template v-else>
-      <el-alert v-if="failedNodeInitializations.length" type="warning" :closable="false" show-icon
-        title="部分网络节点没有成功初始化">
-        <div class="initialization-failures">
-          <span v-for="item in failedNodeInitializations" :key="item.input.network_key + '|' + item.input.peer_id">
-            {{ item.input.name }}：{{ item.message }}
-          </span>
-          <el-button text type="warning" :loading="initializingDevices" @click="retryFailedNodeInitializations">
-            重试失败项（{{ failedNodeInitializations.length }}）
-          </el-button>
-        </div>
-      </el-alert>
-
-      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
+      remove failure list      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
         <div class="empty-initialize">
           <p v-if="!networkEntries.length">尚未设置组网入口，请先在主机列表中设置组网入口。</p>
           <p v-else-if="nodesQuery.isPending.value">正在读取现有网络节点…</p>
@@ -475,7 +463,7 @@ async function refreshAll() {
           <p v-else>当前没有可初始化的有效网络节点。</p>
           <el-button type="primary" :loading="initializingDevices" :disabled="!canInitializeNetworkNodes"
             @click="initializeNetworkNodes">
-            <el-icon><Connection /></el-icon>初始化网络节点
+            <el-icon><Connection /></el-icon>{{ networkNodeSyncEnabled ? '同步网络节点' : '初始化网络节点' }}
           </el-button>
         </div>
       </el-empty>
@@ -487,10 +475,7 @@ async function refreshAll() {
             <strong>{{ section.name }}</strong>
             <span class="group-count">{{ section.items.length }}</span>
           </button>
-          <div v-if="section.group" class="group-actions">
-            <el-button text size="small" @click="openEditGroup(section.group)"><el-icon><Edit /></el-icon>重命名</el-button>
-            <el-button text size="small" type="danger" @click="removeGroup(section.group)"><el-icon><Delete /></el-icon>删除分组</el-button>
-          </div>
+          
         </div>
         <div v-if="!collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
@@ -499,12 +484,14 @@ async function refreshAll() {
                 :aria-label="'选择设备 ' + device.name"
                 @update:model-value="toggleDeviceSelection(device.id, $event)" />
               <div class="device-avatar">
-                <el-icon><component :is="typeIcons[device.device_type]" /></el-icon>
+                <el-icon><component :is="deviceIcon(device)" /></el-icon>
               </div>
               <div class="device-main">
                 <div class="device-title">
                   <strong>{{ device.name }}</strong>
-                  <el-tag size="small" effect="plain">{{ typeLabel(device.device_type) }}</el-tag>
+                  <el-tag size="small" effect="plain">{{ deviceTypeName(device.device_type) }}</el-tag>
+                  <el-tag v-for="kind in device.semantic_kinds" :key="kind" size="small" effect="plain">{{ semanticKindLabels[kind] || kind }}</el-tag>
+                  <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <el-tag v-if="device.is_openwrt" size="small" type="success" effect="dark">OpenWrt</el-tag>
                 </div>
                 <div class="device-subtitle">
@@ -544,16 +531,21 @@ async function refreshAll() {
           <el-form-item label="设备名称" required>
             <el-input v-model="deviceDraft.name" maxlength="100" placeholder="例如：客厅路由器" />
           </el-form-item>
-          <el-form-item label="所属分组">
-            <el-select v-model="deviceDraft.group_id" clearable placeholder="未分组" class="full">
-              <el-option v-for="group in groups" :key="group.id" :label="group.name" :value="group.id" />
-            </el-select>
+          <el-form-item label="设备类型名称" required>
+            <el-input v-model="deviceDraft.device_type" maxlength="100" placeholder="例如：X86 软路由、群晖 NAS" />
           </el-form-item>
-          <el-form-item label="设备类型" required>
-            <el-select v-model="deviceDraft.device_type" class="full"
-              @change="deviceDraft.device_type !== 'router' && (deviceDraft.is_openwrt = false)">
-              <el-option v-for="(label, value) in typeLabels" :key="value" :label="label" :value="value" />
+          <el-form-item label="设备分类" required>
+            <el-radio-group v-model="deviceDraft.is_gateway">
+              <el-radio :value="true">网关设备</el-radio>
+              <el-radio :value="false">非网关设备</el-radio>
+            </el-radio-group>
+          </el-form-item>
+          <el-form-item label="设备语义标签（可多选）" class="span-two">
+            <el-select v-model="deviceDraft.semantic_kinds" multiple collapse-tags collapse-tags-tooltip
+              clearable filterable class="full" placeholder="选择设备具备的类型/能力">
+              <el-option v-for="item in semanticKindOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
+            <div class="field-hint">名称用于自定义类型；标签可多选，例如同时具备「服务器」和「路由器」属性。</div>
           </el-form-item>
           <el-form-item label="厂商">
             <el-input v-model="deviceDraft.manufacturer" maxlength="100" placeholder="例如：TP-Link" />
@@ -584,7 +576,7 @@ async function refreshAll() {
         </div>
         <el-divider />
         <el-form-item label="设备能力">
-          <el-checkbox v-model="deviceDraft.is_openwrt" @change="deviceDraft.is_openwrt && (deviceDraft.device_type = 'router')">
+          <el-checkbox v-model="deviceDraft.is_openwrt" @change="onOpenWrtChange">
             这是 OpenWrt 路由器
           </el-checkbox>
           <div class="field-hint">只有标记为 OpenWrt 的设备才会出现专属 RPCD 发现服务配置。</div>
