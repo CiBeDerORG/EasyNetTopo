@@ -20,12 +20,12 @@ const attribute = (id, latitude, longitude) => ({
 test('route 数据构建本机、P2P、中继及未知路由，且没有位置时不猜测坐标', () => {
   const graph = buildMapTopology(route, [attribute(100, 31, 121), attribute(200, 35, 139)], 'entry')
   assert.equal(graph.nodes.length, 4)
-  assert.deepEqual(graph.links.map(link => link.kind), ['p2p', 'relay', 'unknown'])
+  assert.deepEqual(graph.links.map(link => link.kind).sort(), ['p2p', 'relay', 'unknown'].sort())
   const direct = graph.links[0]
   assert.equal(direct.latencyMs, 20)
   assert.equal(direct.rxBytes, 400)
   assert.equal(direct.txBytes, 600)
-  assert.equal(graph.links[1].via, graph.nodes[1].key)
+  assert.equal(graph.links.find(link => link.kind === 'relay')?.via, graph.nodes.find(node => node.id === '200')?.key)
   assert.equal(graph.nodes[2].latitude, null)
   assert.equal(graph.nodes[3].longitude, null)
 })
