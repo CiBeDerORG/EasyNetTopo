@@ -255,6 +255,16 @@ function emptyDevice(): DeviceInput {
 }
 const editingDevice = computed(() => devices.value.find(item => item.id === editingDeviceId.value))
 const isNodeDeviceEditing = computed(() => editingDevice.value?.is_node_device === true)
+const deviceDialogGatewayGroupsQuery = useQuery({
+  queryKey: computed(() => ['device-dialog-gateway-groups', deviceDraft.value.network_key, deviceDraft.value.peer_id]),
+  queryFn: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
+    ? getGatewayGroups(deviceDraft.value.network_key, deviceDraft.value.peer_id)
+    : Promise.resolve([] as GatewayGroup[]),
+  enabled: computed(() => deviceDialogOpen.value && !!deviceDraft.value.network_key && !!deviceDraft.value.peer_id),
+  retry: 0
+})
+const deviceDialogGatewayGroupOptions = computed(() =>
+  (deviceDialogGatewayGroupsQuery.data.value || []).filter(group => group.gateway_device_id !== editingDeviceId.value))
 const deviceDraftNodeKey = computed({
   get: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
     ? JSON.stringify([deviceDraft.value.network_key, deviceDraft.value.peer_id]) : '',
@@ -678,6 +688,14 @@ watch(
               </el-option>
             </el-select>
             <div class="field-hint">普通设备可以在编辑时迁移到其他网络节点；节点基础设备固定归属于其自身节点。通过网关设备卡片新增的设备会自动归属该网关。</div>
+          </el-form-item>
+          <el-form-item label="所属上级网关" class="span-two">
+            <el-select v-model="deviceDraft.gateway_group_id" clearable filterable class="full"
+              :disabled="isNodeDeviceEditing" placeholder="直属于当前网络节点">
+              <el-option v-for="group in deviceDialogGatewayGroupOptions" :key="group.id"
+                :label="(group.gateway_device_name || group.name) + '（网关设备）'" :value="group.id" />
+            </el-select>
+            <div class="field-hint">不选择上级网关时，设备直接归属于网络节点；也可以将普通设备或另一台网关设备挂到现有网关下面。</div>
           </el-form-item>
           <el-form-item label="设备角色" class="span-two">
             <el-checkbox v-model="deviceDraft.is_gateway" :disabled="!deviceDraft.network_key || !deviceDraft.peer_id">
