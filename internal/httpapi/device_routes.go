@@ -62,7 +62,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 	mapError := func(w http.ResponseWriter, err error) {
 		switch {
 		case errors.Is(err, storage.ErrDeviceNotFound), errors.Is(err, storage.ErrDeviceGroupNotFound):
-			http.NotFound(w, nil)
+			reply(w, http.StatusNotFound, map[string]string{"code":"not_found","message":"设备或分组不存在"})
 		case errors.Is(err, storage.ErrInvalidDevice):
 			reply(w, http.StatusBadRequest, map[string]string{"code":"invalid_device","message":"设备名称、类型、IP、MAC 或网络节点关联信息不合法"})
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):

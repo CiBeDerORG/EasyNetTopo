@@ -19,6 +19,7 @@ import (
 var (
 	ErrDeviceNotFound = errors.New("设备不存在")
 	ErrDeviceGroupNotFound = errors.New("设备分组不存在")
+	ErrDeviceGroupExists = errors.New("设备分组名称已存在")
 	ErrDeviceNodeConflict = errors.New("该网络节点已关联其他设备")
 	ErrInvalidDevice = errors.New("设备信息不合法")
 	ErrInvalidDeviceGroup = errors.New("设备分组名称不合法")
@@ -93,7 +94,7 @@ type DeviceStore struct {
 func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	for _, query := range []string{
 		`CREATE TABLE IF NOT EXISTS device_groups (
-			id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE,
+			id TEXT PRIMARY KEY, name TEXT NOT NULL UNIQUE COLLATE NOCASE,
 			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
 		)`,
 		`CREATE TABLE IF NOT EXISTS devices (
@@ -249,7 +250,10 @@ func (s *DeviceStore) CreateDeviceGroup(ctx context.Context, name string) (Devic
 	id, err := uuid(); if err != nil { return DeviceGroup{}, err }
 	now := time.Now().UTC().Format(time.RFC3339)
 	_, err = s.store.db.ExecContext(ctx,"INSERT INTO device_groups(id,name,created_at,updated_at) VALUES(?,?,?,?)",id,name,now,now)
-	if err != nil { return DeviceGroup{}, err }
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: device_groups.name") { return DeviceGroup{}, ErrDeviceGroupExists }
+		return DeviceGroup{}, err
+	}
 	return DeviceGroup{ID:id,Name:name,CreatedAt:now,UpdatedAt:now},nil
 }
 func (s *DeviceStore) UpdateDeviceGroup(ctx context.Context,id,name string) (DeviceGroup,error) {
@@ -257,7 +261,10 @@ func (s *DeviceStore) UpdateDeviceGroup(ctx context.Context,id,name string) (Dev
 	if id == "" || name == "" || len([]rune(name)) > 64 || strings.ContainsAny(name,"\r\n\x00") { return DeviceGroup{}, ErrInvalidDeviceGroup }
 	now := time.Now().UTC().Format(time.RFC3339)
 	result,err:=s.store.db.ExecContext(ctx,"UPDATE device_groups SET name=?,updated_at=? WHERE id=?",name,now,id)
-	if err!=nil{return DeviceGroup{},err}
+	if err!=nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: device_groups.name") { return DeviceGroup{}, ErrDeviceGroupExists }
+		return DeviceGroup{},err
+	}
 	n,err:=result.RowsAffected();if err!=nil{return DeviceGroup{},err};if n==0{return DeviceGroup{},ErrDeviceGroupNotFound}
 	var v DeviceGroup
 	err=s.store.db.QueryRowContext(ctx,`SELECT g.id,g.name,COUNT(d.id),g.created_at,g.updated_at FROM device_groups g LEFT JOIN devices d ON d.group_id=g.id WHERE g.id=? GROUP BY g.id`,id).Scan(&v.ID,&v.Name,&v.DeviceCount,&v.CreatedAt,&v.UpdatedAt)
