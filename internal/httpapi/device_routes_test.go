@@ -61,7 +61,23 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","device_type":"router","ip_address":"192.168.1.1","is_openwrt":true,"network_key":"network:home","peer_id":"peer-openwrt"}`
+	nodeSync := request("POST", "/api/v1/devices/network-nodes/sync",
+		`{"nodes":[{"name":"入口节点","network_key":"network:home","peer_id":"peer-openwrt"}]}`, true, true)
+	if nodeSync.Code != http.StatusOK {
+		t.Fatalf("初始化网络节点失败: %d %s", nodeSync.Code, nodeSync.Body.String())
+	}
+	gatewayGroupResponse := request("POST", "/api/v1/gateway-groups",
+		`{"name":"家庭网络","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
+	if gatewayGroupResponse.Code != http.StatusCreated {
+		t.Fatalf("创建网关组失败: %d %s", gatewayGroupResponse.Code, gatewayGroupResponse.Body.String())
+	}
+	var gatewayGroup struct {
+		ID string `json:"id"`
+	}
+	if err := json.Unmarshal(gatewayGroupResponse.Body.Bytes(), &gatewayGroup); err != nil {
+		t.Fatal(err)
+	}
+	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","gateway_group_id":"` + gatewayGroup.ID + `","device_type":"router","ip_address":"192.168.1.1","is_openwrt":true,"is_gateway":true,"network_key":"network:home","peer_id":"peer-openwrt"}`
 	created := request("POST", "/api/v1/devices", deviceBody, true, true)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("创建设备失败: %d %s", created.Code, created.Body.String())
@@ -102,6 +118,25 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 		t.Fatalf("普通设备竟可配置 OpenWrt 服务: %d %s", rejected.Code, rejected.Body.String())
 	}
 
+	child := request("POST", "/api/v1/devices",
+		`{"name":"客厅电视","device_type":"电视","gateway_group_id":"`+gatewayGroup.ID+`","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
+	if child.Code != http.StatusCreated {
+		t.Fatalf("同一节点网关组下添加第二台设备失败: %d %s", child.Code, child.Body.String())
+	}
+	filtered := request("GET", "/api/v1/devices?network_key=network%3Ahome&peer_id=peer-openwrt", "", true, false)
+	if filtered.Code != http.StatusOK || !strings.Contains(filtered.Body.String(), "OpenWrt 路由器") ||
+		!strings.Contains(filtered.Body.String(), "客厅电视") || !strings.Contains(filtered.Body.String(), `"is_node_device":true`) {
+		t.Fatalf("按网络节点筛选设备失败: %d %s", filtered.Code, filtered.Body.String())
+	}
+	groups := request("GET", "/api/v1/gateway-groups?network_key=network%3Ahome&peer_id=peer-openwrt", "", true, false)
+	if groups.Code != http.StatusOK || !strings.Contains(groups.Body.String(), "家庭网络") ||
+		!strings.Contains(groups.Body.String(), "OpenWrt 路由器") {
+		t.Fatalf("读取节点网关组失败: %d %s", groups.Code, groups.Body.String())
+	}
+	nodeDevices := request("GET", "/api/v1/devices/network-nodes", "", true, false)
+	if nodeDevices.Code != http.StatusOK || !strings.Contains(nodeDevices.Body.String(), "peer-openwrt") {
+		t.Fatalf("读取网络节点基础设备失败: %d %s", nodeDevices.Code, nodeDevices.Body.String())
+	}
 	list := request("GET", "/api/v1/devices", "", true, false)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "peer-openwrt") {
 		t.Fatalf("设备列表缺少关联数据: %d %s", list.Code, list.Body.String())
@@ -156,5 +191,16 @@ func TestNetworkNodeSyncAPI(t *testing.T) {
 	list := request("GET", "/api/v1/devices", "", true, false)
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"is_node_device":true`) {
 		t.Fatalf("节点设备标识未通过 API 返回: %d %s", list.Code, list.Body.String())
+	}
+	nodeDevices := request("GET", "/api/v1/devices/network-nodes", "", true, false)
+	var nodeData struct {
+		NodeDevices []storage.Device `json:"node_devices"`
+	}
+	if nodeDevices.Code != http.StatusOK || json.Unmarshal(nodeDevices.Body.Bytes(), &nodeData) != nil || len(nodeData.NodeDevices) != 1 {
+		t.Fatalf("节点基础设备列表 API 错误: %d %s", nodeDevices.Code, nodeDevices.Body.String())
+	}
+	deleted := request("DELETE", "/api/v1/devices/"+nodeData.NodeDevices[0].ID, "", true, true)
+	if deleted.Code != http.StatusConflict || !strings.Contains(deleted.Body.String(), "node_device_protected") {
+		t.Fatalf("不应允许删除节点基础设备: %d %s", deleted.Code, deleted.Body.String())
 	}
 }

@@ -24,6 +24,9 @@ func TestDeviceGroupsAndDevicesPersistAndAssociateNetworkNode(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{{Name: "节点 1", NetworkKey: "network:home", PeerID: "peer-1"}}); err != nil {
+		t.Fatal(err)
+	}
 	device, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "客厅电视", GroupID: group.ID, DeviceType: "tv", Manufacturer: "小米", Model: "电视",
 		IPAddress: "192.168.1.20", MACAddress: "AA:BB:CC:DD:EE:FF", NetworkKey: "network:home", PeerID: "peer-1",
@@ -34,8 +37,13 @@ func TestDeviceGroupsAndDevicesPersistAndAssociateNetworkNode(t *testing.T) {
 	if device.GroupName != "家庭" || device.MACAddress != "aa:bb:cc:dd:ee:ff" || device.PeerID != "peer-1" {
 		t.Fatalf("设备字段错误: %+v", device)
 	}
-	if _, err := store.CreateDevice(ctx, DeviceInput{Name: "重复节点", DeviceType: "other", NetworkKey: "network:home", PeerID: "peer-1"}); !errors.Is(err, ErrDeviceNodeConflict) {
-		t.Fatalf("允许同一节点关联多个设备: %v", err)
+	second, err := store.CreateDevice(ctx, DeviceInput{Name: "客厅电视盒子", DeviceType: "tv", NetworkKey: "network:home", PeerID: "peer-1"})
+	if err != nil || second.IsNodeDevice {
+		t.Fatalf("同一节点下应允许创建普通设备: %+v %v", second, err)
+	}
+	nodeItems, err := store.ListDevicesForNode(ctx, "network:home", "peer-1")
+	if err != nil || len(nodeItems) != 3 {
+		t.Fatalf("节点范围筛选错误，应该包含 1 个节点设备和 2 个普通设备: %d %v", len(nodeItems), err)
 	}
 	groups, err := store.ListDeviceGroups(ctx)
 	if err != nil || len(groups) != 1 || groups[0].DeviceCount != 1 {
@@ -63,6 +71,56 @@ func TestDeviceGroupsAndDevicesPersistAndAssociateNetworkNode(t *testing.T) {
 	}
 	if _, err := store.Device(ctx, device.ID); !errors.Is(err, ErrDeviceNotFound) {
 		t.Fatalf("设备删除失败: %v", err)
+	}
+}
+
+func TestDeviceNodeScopeIndexMigrationAllowsMultipleAssetsPerNode(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE devices (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, group_id TEXT,
+			device_type TEXT NOT NULL DEFAULT '通用设备', semantic_kinds TEXT NOT NULL DEFAULT '[]',
+			is_node_device INTEGER NOT NULL DEFAULT 0, is_gateway INTEGER NOT NULL DEFAULT 0,
+			manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+			ip_address TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '', is_openwrt INTEGER NOT NULL DEFAULT 0,
+			network_key TEXT NOT NULL DEFAULT '', peer_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX idx_devices_network_node ON devices(network_key,peer_id)
+			WHERE network_key<>'' AND peer_id<>''`,
+		`INSERT INTO devices(id,name,device_type,is_node_device,network_key,peer_id,created_at,updated_at)
+			VALUES('legacy-node','旧版节点设备','通用设备',1,'network:legacy','peer-legacy','2026-01-01','2026-01-01')`,
+	} {
+		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "迁移后新增设备", DeviceType: "电脑", NetworkKey: "network:legacy", PeerID: "peer-legacy",
+	})
+	if err != nil {
+		t.Fatalf("旧版唯一索引迁移后，同一节点仍不能新增普通设备: %v", err)
+	}
+	if child.IsNodeDevice {
+		t.Fatal("普通设备不应被自动标记为节点设备")
+	}
+	items, err := store.ListDevicesForNode(ctx, "network:legacy", "peer-legacy")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("旧数据迁移后的节点范围查询错误: count=%d err=%v", len(items), err)
+	}
+	if _, err := db.db.ExecContext(ctx, `INSERT INTO devices(id,name,device_type,is_node_device,network_key,peer_id,created_at,updated_at)
+		VALUES('duplicate-node','重复节点设备','通用设备',1,'network:legacy','peer-legacy','2026-01-02','2026-01-02')`); err == nil {
+		t.Fatal("迁移后应只允许每个网络节点有一条节点基础设备记录")
 	}
 }
 
@@ -230,8 +288,8 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if deletedID == "" {
 		t.Fatal("未找到待删除节点设备")
 	}
-	if err := store.DeleteDevice(ctx, deletedID); err != nil {
-		t.Fatal(err)
+	if err := store.DeleteDevice(ctx, deletedID); !errors.Is(err, ErrNodeDeviceProtected) {
+		t.Fatalf("不允许删除网络节点基础设备: %v", err)
 	}
 	preDeleted, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "提前删除的节点", DeviceType: "通用设备", NetworkKey: "network:home", PeerID: "peer-predeleted",
@@ -251,27 +309,71 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Created != 1 || third.Existing != 1 || third.Skipped != 2 {
+	if third.Created != 2 || third.Existing != 2 || third.Skipped != 0 {
 		t.Fatalf("自动补充新节点结果错误: %+v", third)
 	}
 	items, err = store.ListDevices(ctx)
-	if err != nil || len(items) != 2 {
-		t.Fatalf("删除的节点被自动重建或新节点未创建: count=%d err=%v", len(items), err)
+	if err != nil || len(items) != 4 {
+		t.Fatalf("节点基础设备或新节点创建结果错误: count=%d err=%v", len(items), err)
 	}
+	foundEntry, foundPreviouslyDeletedAssetScope := false, false
 	for _, item := range items {
-		if item.PeerID == "peer-entry" {
-			t.Fatal("用户删除的节点设备被自动重建")
+		if item.PeerID == "peer-entry" && item.IsNodeDevice {
+			foundEntry = true
+		}
+		if item.PeerID == "peer-predeleted" && item.IsNodeDevice {
+			foundPreviouslyDeletedAssetScope = true
 		}
 	}
+	if !foundEntry {
+		t.Fatal("节点基础设备在同步后丢失")
+	}
+	if !foundPreviouslyDeletedAssetScope {
+		t.Fatal("删除普通设备不应阻止该节点基础设备后续自动补充")
+	}
 
+	gatewayGroup, err := store.CreateGatewayGroup(ctx, "家庭网络", "network:home", "peer-new")
+	if err != nil {
+		t.Fatal(err)
+	}
 	custom, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "X86 软路由", DeviceType: "X86 软路由", SemanticKinds: []string{"router", "server"}, IsGateway: true,
+		Name: "X86 软路由", DeviceType: "X86 软路由", SemanticKinds: []string{"router", "server"},
+		IsGateway: true, GatewayGroupID: gatewayGroup.ID, NetworkKey: "network:home", PeerID: "peer-new",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !custom.IsGateway || len(custom.SemanticKinds) != 2 || custom.SemanticKinds[0] != "router" || custom.SemanticKinds[1] != "server" {
-		t.Fatalf("自定义类型/多语义标签/网关分类保存错误: %+v", custom)
+	if !custom.IsGateway || custom.GatewayGroupID != gatewayGroup.ID || len(custom.SemanticKinds) != 2 ||
+		custom.SemanticKinds[0] != "router" || custom.SemanticKinds[1] != "server" {
+		t.Fatalf("自定义类型/多语义标签/网关自身设备保存错误: %+v", custom)
+	}
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "客厅电视", DeviceType: "电视", GatewayGroupID: gatewayGroup.ID,
+		NetworkKey: "network:home", PeerID: "peer-new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-new")
+	if err != nil || len(groups) != 1 || groups[0].DeviceCount != 2 || groups[0].GatewayDeviceID != custom.ID {
+		t.Fatalf("网关组设备统计错误: %+v %v", groups, err)
+	}
+	if _, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "第二台网关", DeviceType: "路由器", IsGateway: true, GatewayGroupID: gatewayGroup.ID,
+		NetworkKey: "network:home", PeerID: "peer-new",
+	}); !errors.Is(err, ErrGatewayDeviceConflict) {
+		t.Fatalf("同一网关组允许绑定多个网关自身设备: %v", err)
+	}
+	if err := store.DeleteGatewayGroup(ctx, gatewayGroup.ID); err != nil {
+		t.Fatal(err)
+	}
+	updatedGateway, err := store.Device(ctx, custom.ID)
+	if err != nil || updatedGateway.GatewayGroupID != "" || updatedGateway.IsGateway {
+		t.Fatalf("删除网关组后设备未安全转为直属设备: %+v %v", updatedGateway, err)
+	}
+	updatedChild, err := store.Device(ctx, child.ID)
+	if err != nil || updatedChild.GatewayGroupID != "" {
+		t.Fatalf("删除网关组后下挂设备未保留: %+v %v", updatedChild, err)
 	}
 	if _, err := store.CreateDevice(ctx, DeviceInput{Name: "非法标签", DeviceType: "测试", SemanticKinds: []string{"unknown-kind"}}); !errors.Is(err, ErrInvalidDevice) {
 		t.Fatalf("非法语义标签未被拒绝: %v", err)

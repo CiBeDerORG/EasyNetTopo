@@ -1,11 +1,23 @@
 import { apiRequest } from '../../lib/api-client'
 import type {
-  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig,
+  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, GatewayGroup,
   NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus
 } from './types'
 
-export async function getDevices() {
-  const result = await apiRequest<{ devices: Device[] }>('/api/v1/devices')
+export async function getNodeDevices() {
+  const result = await apiRequest<{ node_devices: Device[] }>('/api/v1/devices/network-nodes')
+  return result.node_devices || []
+}
+export async function getDevices(scope?: { networkKey: string; peerId: string } | { unassigned: true }) {
+  const params = new URLSearchParams()
+  if (scope && 'unassigned' in scope) params.set('unassigned', 'true')
+  else if (scope) {
+    params.set('network_key', scope.networkKey)
+    params.set('peer_id', scope.peerId)
+  }
+  const query = params.toString()
+  const suffix = query ? '?' + query : ''
+  const result = await apiRequest<{ devices: Device[] }>('/api/v1/devices' + suffix)
   return result.devices || []
 }
 export function createDevice(payload: DeviceInput) {
@@ -30,6 +42,25 @@ export function updateDeviceGroup(id: string, name: string) {
 }
 export function deleteDeviceGroup(id: string) {
   return apiRequest<void>('/api/v1/device-groups/' + encodeURIComponent(id), { method: 'DELETE' })
+}
+
+export async function getGatewayGroups(networkKey: string, peerId: string) {
+  const params = new URLSearchParams({ network_key: networkKey, peer_id: peerId })
+  const result = await apiRequest<{ groups: GatewayGroup[] }>('/api/v1/gateway-groups?' + params.toString())
+  return result.groups || []
+}
+export function createGatewayGroup(name: string, networkKey: string, peerId: string) {
+  return apiRequest<GatewayGroup>('/api/v1/gateway-groups', {
+    method: 'POST', body: { name, network_key: networkKey, peer_id: peerId }
+  })
+}
+export function updateGatewayGroup(id: string, name: string) {
+  return apiRequest<GatewayGroup>('/api/v1/gateway-groups/' + encodeURIComponent(id), {
+    method: 'PATCH', body: { name }
+  })
+}
+export function deleteGatewayGroup(id: string) {
+  return apiRequest<void>('/api/v1/gateway-groups/' + encodeURIComponent(id), { method: 'DELETE' })
 }
 
 export function getNetworkNodeSyncStatus() {

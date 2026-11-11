@@ -65,6 +65,14 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			reply(w, http.StatusNotFound, map[string]string{"code": "not_found", "message": "设备或分组不存在"})
 		case errors.Is(err, storage.ErrInvalidDevice):
 			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device", "message": "设备名称、类型名称、语义标签、IP、MAC 或网络节点关联信息不合法"})
+		case errors.Is(err, storage.ErrGatewayGroupNotFound):
+			reply(w, http.StatusNotFound, map[string]string{"code": "gateway_group_not_found", "message": "网关组不存在"})
+		case errors.Is(err, storage.ErrInvalidGatewayGroup):
+			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_gateway_group", "message": "网关组名称或所属节点不合法"})
+		case errors.Is(err, storage.ErrGatewayDeviceConflict):
+			reply(w, http.StatusConflict, map[string]string{"code": "gateway_device_conflict", "message": "该网关组已经绑定网关自身设备"})
+		case errors.Is(err, storage.ErrNodeDeviceProtected):
+			reply(w, http.StatusConflict, map[string]string{"code": "node_device_protected", "message": "网络节点基础设备不能删除"})
 		case errors.Is(err, storage.ErrDeviceGroupExists):
 			reply(w, http.StatusConflict, map[string]string{"code": "device_group_exists", "message": "同名设备分组已存在"})
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):
@@ -152,13 +160,102 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			methodNotAllowed(w, "PATCH, DELETE")
 		}
 	})
+	mux.HandleFunc("/api/v1/gateway-groups", func(w http.ResponseWriter, r *http.Request) {
+		if !authorize(w, r) {
+			return
+		}
+		switch r.Method {
+		case http.MethodGet:
+			networkKey, peerID := r.URL.Query().Get("network_key"), r.URL.Query().Get("peer_id")
+			items, err := devices.ListGatewayGroups(r.Context(), networkKey, peerID)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			reply(w, http.StatusOK, map[string]any{"groups": items})
+		case http.MethodPost:
+			if !mutation(w, r) {
+				return
+			}
+			var req struct {
+				Name       string `json:"name"`
+				NetworkKey string `json:"network_key"`
+				PeerID     string `json:"peer_id"`
+			}
+			if !decode(w, r, &req) {
+				return
+			}
+			item, err := devices.CreateGatewayGroup(r.Context(), req.Name, req.NetworkKey, req.PeerID)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			reply(w, http.StatusCreated, item)
+		default:
+			methodNotAllowed(w, "GET, POST")
+		}
+	})
+	mux.HandleFunc("/api/v1/gateway-groups/", func(w http.ResponseWriter, r *http.Request) {
+		if !authorize(w, r) {
+			return
+		}
+		id := strings.Trim(strings.TrimPrefix(r.URL.Path, "/api/v1/gateway-groups/"), "/")
+		if id == "" || strings.Contains(id, "/") {
+			http.NotFound(w, r)
+			return
+		}
+		switch r.Method {
+		case http.MethodPatch:
+			if !mutation(w, r) {
+				return
+			}
+			var req struct {
+				Name string `json:"name"`
+			}
+			if !decode(w, r, &req) {
+				return
+			}
+			item, err := devices.UpdateGatewayGroup(r.Context(), id, req.Name)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			reply(w, http.StatusOK, item)
+		case http.MethodDelete:
+			if !mutation(w, r) {
+				return
+			}
+			if err := devices.DeleteGatewayGroup(r.Context(), id); err != nil {
+				mapError(w, err)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNoContent)
+		default:
+			methodNotAllowed(w, "PATCH, DELETE")
+		}
+	})
 	mux.HandleFunc("/api/v1/devices", func(w http.ResponseWriter, r *http.Request) {
 		if !authorize(w, r) {
 			return
 		}
 		switch r.Method {
 		case http.MethodGet:
-			items, err := devices.ListDevices(r.Context())
+			var items []storage.Device
+			networkKey, peerID := r.URL.Query().Get("network_key"), r.URL.Query().Get("peer_id")
+			unassigned := r.URL.Query().Get("unassigned") == "true"
+			var err error
+			switch {
+			case unassigned && (networkKey != "" || peerID != ""):
+				http.Error(w, "unassigned 与节点筛选不能同时使用", http.StatusBadRequest)
+				return
+			case unassigned:
+				items, err = devices.ListUnassignedDevices(r.Context())
+			case networkKey != "" || peerID != "":
+				items, err = devices.ListDevicesForNode(r.Context(), networkKey, peerID)
+			default:
+				items, err = devices.ListDevices(r.Context())
+			}
 			if err != nil {
 				mapError(w, err)
 				return
@@ -187,6 +284,19 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/devices/"), "/")
+		if len(parts) == 1 && parts[0] == "network-nodes" {
+			if r.Method != http.MethodGet {
+				methodNotAllowed(w, "GET")
+				return
+			}
+			items, err := devices.ListNodeDevices(r.Context())
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			reply(w, http.StatusOK, map[string]any{"node_devices": items})
+			return
+		}
 		if len(parts) == 2 && parts[0] == "network-nodes" && parts[1] == "sync" {
 			switch r.Method {
 			case http.MethodGet:

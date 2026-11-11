@@ -22,6 +22,10 @@ var (
 	ErrDeviceGroupNotFound   = errors.New("设备分组不存在")
 	ErrDeviceGroupExists     = errors.New("设备分组名称已存在")
 	ErrDeviceNodeConflict    = errors.New("该网络节点已关联其他设备")
+	ErrGatewayGroupNotFound  = errors.New("网关组不存在")
+	ErrInvalidGatewayGroup   = errors.New("网关组名称或节点范围不合法")
+	ErrGatewayDeviceConflict = errors.New("该网关组已经绑定网关设备")
+	ErrNodeDeviceProtected   = errors.New("网络节点基础设备不能删除")
 	ErrInvalidDevice         = errors.New("设备信息不合法")
 	ErrInvalidDeviceGroup    = errors.New("设备分组名称不合法")
 	ErrDeviceNotOpenWrt      = errors.New("该设备未标记为 OpenWrt")
@@ -37,11 +41,25 @@ type DeviceGroup struct {
 	UpdatedAt   string `json:"updated_at"`
 }
 
+type GatewayGroup struct {
+	ID                string `json:"id"`
+	Name              string `json:"name"`
+	NetworkKey        string `json:"network_key"`
+	PeerID            string `json:"peer_id"`
+	DeviceCount       int    `json:"device_count"`
+	GatewayDeviceID   string `json:"gateway_device_id,omitempty"`
+	GatewayDeviceName string `json:"gateway_device_name,omitempty"`
+	CreatedAt         string `json:"created_at"`
+	UpdatedAt         string `json:"updated_at"`
+}
+
 type Device struct {
 	ID                string   `json:"id"`
 	Name              string   `json:"name"`
 	GroupID           string   `json:"group_id,omitempty"`
 	GroupName         string   `json:"group_name,omitempty"`
+	GatewayGroupID    string   `json:"gateway_group_id,omitempty"`
+	GatewayGroupName  string   `json:"gateway_group_name,omitempty"`
 	DeviceType        string   `json:"device_type"`
 	SemanticKinds     []string `json:"semantic_kinds"`
 	IsNodeDevice      bool     `json:"is_node_device"`
@@ -64,8 +82,9 @@ type Device struct {
 
 type DeviceInput struct {
 	Name          string   `json:"name"`
-	GroupID       string   `json:"group_id"`
-	DeviceType    string   `json:"device_type"`
+	GroupID        string   `json:"group_id"`
+	GatewayGroupID string   `json:"gateway_group_id"`
+	DeviceType     string   `json:"device_type"`
 	SemanticKinds []string `json:"semantic_kinds"`
 	IsGateway     bool     `json:"is_gateway"`
 	Manufacturer  string   `json:"manufacturer"`
@@ -130,6 +149,12 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_network_node
 			ON devices(network_key,peer_id) WHERE network_key<>'' AND peer_id<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_group ON devices(group_id,name)`,
+		`CREATE TABLE IF NOT EXISTS device_gateway_groups (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL,
+			network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			CHECK (network_key<>'' AND peer_id<>'')
+		)`,
 		`CREATE TABLE IF NOT EXISTS network_node_sync_seen (
 			network_key TEXT NOT NULL, peer_id TEXT NOT NULL, first_seen_at TEXT NOT NULL,
 			PRIMARY KEY(network_key,peer_id)
@@ -149,6 +174,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		{"semantic_kinds", `semantic_kinds TEXT NOT NULL DEFAULT '[]'`},
 		{"is_node_device", "is_node_device INTEGER NOT NULL DEFAULT 0"},
 		{"is_gateway", "is_gateway INTEGER NOT NULL DEFAULT 0"},
+		{"gateway_group_id", "gateway_group_id TEXT REFERENCES device_gateway_groups(id) ON DELETE SET NULL"},
 	} {
 		if err := ensureDeviceColumn(ctx, db, column.name, column.definition); err != nil {
 			return nil, fmt.Errorf("迁移设备字段 %s 失败: %w", column.name, err)
@@ -168,6 +194,23 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	}
 	if _, err := db.db.ExecContext(ctx, "UPDATE devices SET is_node_device=1 WHERE network_key<>'' AND peer_id<>''"); err != nil {
 		return nil, fmt.Errorf("迁移节点设备标识失败: %w", err)
+	}
+	if _, err := db.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_devices_network_node"); err != nil {
+		return nil, fmt.Errorf("迁移节点设备唯一索引失败: %w", err)
+	}
+	for _, stmt := range []string{
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_node_device_unique
+			ON devices(network_key,peer_id) WHERE is_node_device=1 AND network_key<>'' AND peer_id<>''`,
+		`CREATE INDEX IF NOT EXISTS idx_devices_node_scope
+			ON devices(network_key,peer_id,is_node_device,gateway_group_id)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_gateway_group_gateway
+			ON devices(gateway_group_id) WHERE gateway_group_id IS NOT NULL AND gateway_group_id<>'' AND is_gateway=1`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_gateway_groups_scope_name
+			ON device_gateway_groups(network_key,peer_id,name COLLATE NOCASE)`,
+	} {
+		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
+			return nil, fmt.Errorf("初始化节点设备层级索引失败: %w", err)
+		}
 	}
 	keyPath := filepath.Join(db.DataDir(), ".device-openwrt-sealing-key")
 	if _, statErr := os.Lstat(keyPath); errors.Is(statErr, os.ErrNotExist) {
@@ -299,6 +342,7 @@ func (s *DeviceStore) unseal(deviceID string, sealed []byte) (string, error) {
 func normalizeDevice(v *DeviceInput) error {
 	v.Name = strings.TrimSpace(v.Name)
 	v.GroupID = strings.TrimSpace(v.GroupID)
+	v.GatewayGroupID = strings.TrimSpace(v.GatewayGroupID)
 	v.DeviceType = strings.TrimSpace(v.DeviceType)
 	v.Manufacturer = strings.TrimSpace(v.Manufacturer)
 	v.Model = strings.TrimSpace(v.Model)
@@ -482,15 +526,15 @@ func (s *DeviceStore) DeleteDeviceGroup(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
+const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(gg.name,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
 	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at
-	FROM devices d LEFT JOIN device_groups g ON g.id=d.group_id LEFT JOIN device_openwrt_configs c ON c.device_id=d.id`
+	FROM devices d LEFT JOIN device_groups g ON g.id=d.group_id LEFT JOIN device_gateway_groups gg ON gg.id=d.gateway_group_id LEFT JOIN device_openwrt_configs c ON c.device_id=d.id`
 
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var v Device
 	var configured, https bool
 	var semanticKinds string
-	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
+	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.GatewayGroupID, &v.GatewayGroupName, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
 		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &v.IsOpenWrt, &v.NetworkKey, &v.PeerID,
 		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
@@ -507,8 +551,9 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	return v, nil
 }
 
-func (s *DeviceStore) ListDevices(ctx context.Context) ([]Device, error) {
-	rows, err := s.store.db.QueryContext(ctx, deviceSelect+" ORDER BY COALESCE(g.name,'') COLLATE NOCASE,d.name COLLATE NOCASE,d.id")
+func (s *DeviceStore) listDevices(ctx context.Context, where string, args ...any) ([]Device, error) {
+	query := deviceSelect + " " + where + " ORDER BY d.is_node_device DESC,COALESCE(gg.name,'') COLLATE NOCASE,d.name COLLATE NOCASE,d.id"
+	rows, err := s.store.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -523,6 +568,25 @@ func (s *DeviceStore) ListDevices(ctx context.Context) ([]Device, error) {
 	}
 	return result, rows.Err()
 }
+
+func (s *DeviceStore) ListDevices(ctx context.Context) ([]Device, error) {
+	return s.listDevices(ctx, "")
+}
+
+func (s *DeviceStore) ListDevicesForNode(ctx context.Context, networkKey, peerID string) ([]Device, error) {
+	if strings.TrimSpace(networkKey) == "" || strings.TrimSpace(peerID) == "" {
+		return nil, ErrInvalidDevice
+	}
+	return s.listDevices(ctx, "WHERE d.network_key=? AND d.peer_id=?", networkKey, peerID)
+}
+
+func (s *DeviceStore) ListNodeDevices(ctx context.Context) ([]Device, error) {
+	return s.listDevices(ctx, "WHERE d.is_node_device=1")
+}
+
+func (s *DeviceStore) ListUnassignedDevices(ctx context.Context) ([]Device, error) {
+	return s.listDevices(ctx, "WHERE d.network_key='' AND d.peer_id=''")
+}
 func (s *DeviceStore) Device(ctx context.Context, id string) (Device, error) {
 	v, err := scanDevice(s.store.db.QueryRowContext(ctx, deviceSelect+" WHERE d.id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
@@ -530,8 +594,32 @@ func (s *DeviceStore) Device(ctx context.Context, id string) (Device, error) {
 	}
 	return v, err
 }
+func (s *DeviceStore) validateGatewayGroupScope(ctx context.Context, groupID, networkKey, peerID string) error {
+	if groupID == "" {
+		return nil
+	}
+	var groupNetworkKey, groupPeerID string
+	err := s.store.db.QueryRowContext(ctx, "SELECT network_key,peer_id FROM device_gateway_groups WHERE id=?", groupID).Scan(&groupNetworkKey, &groupPeerID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrGatewayGroupNotFound
+	}
+	if err != nil {
+		return err
+	}
+	if networkKey == "" || peerID == "" || groupNetworkKey != networkKey || groupPeerID != peerID {
+		return ErrInvalidDevice
+	}
+	return nil
+}
+
 func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Device, error) {
 	if err := normalizeDevice(&input); err != nil {
+		return Device{}, err
+	}
+	if input.IsGateway && input.GatewayGroupID == "" {
+		return Device{}, ErrInvalidDevice
+	}
+	if err := s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
 		return Device{}, err
 	}
 	id, err := uuid()
@@ -543,16 +631,17 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 		return Device{}, err
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.store.db.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), input.DeviceType, string(semanticKinds),
-		input.NetworkKey != "" && input.PeerID != "", input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
+	_, err = s.store.db.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds),
+		0, input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
 		input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, now)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
 			return Device{}, ErrDeviceGroupNotFound
 		}
-		if strings.Contains(strings.ToLower(err.Error()), "idx_devices_network_node") || strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: devices.network_key") {
-			return Device{}, ErrDeviceNodeConflict
+		if strings.Contains(strings.ToLower(err.Error()), "idx_devices_gateway_group_gateway") ||
+			strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: devices.gateway_group_id") {
+			return Device{}, ErrGatewayDeviceConflict
 		}
 		return Device{}, err
 	}
@@ -563,25 +652,42 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	if err := normalizeDevice(&input); err != nil {
 		return Device{}, err
 	}
-	semanticKinds, err := json.Marshal(input.SemanticKinds)
-	if err != nil {
-		return Device{}, err
-	}
 	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return Device{}, err
 	}
 	defer tx.Rollback()
+	var isNodeDevice bool
+	var currentNetworkKey, currentPeerID string
+	if err = tx.QueryRowContext(ctx, "SELECT is_node_device,network_key,peer_id FROM devices WHERE id=?", id).Scan(&isNodeDevice, &currentNetworkKey, &currentPeerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return Device{}, ErrDeviceNotFound
+		}
+		return Device{}, err
+	}
+	if isNodeDevice {
+		input.NetworkKey, input.PeerID = currentNetworkKey, currentPeerID
+		input.GatewayGroupID = ""
+		input.IsGateway = false
+	}
+	if input.IsGateway && input.GatewayGroupID == "" {
+		return Device{}, ErrInvalidDevice
+	}
+	if err = s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
+		return Device{}, err
+	}
+	semanticKinds, err := json.Marshal(input.SemanticKinds)
+	if err != nil {
+		return Device{}, err
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,device_type=?,semantic_kinds=?,is_node_device=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
-		input.Name, nullIfEmpty(input.GroupID), input.DeviceType, string(semanticKinds), input.NetworkKey != "" && input.PeerID != "", input.IsGateway,
+	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
+		input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds), input.IsGateway,
 		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, id)
 	if err != nil {
-		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
-			return Device{}, ErrDeviceGroupNotFound
-		}
-		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: devices.network_key") {
-			return Device{}, ErrDeviceNodeConflict
+		if strings.Contains(strings.ToLower(err.Error()), "idx_devices_gateway_group_gateway") ||
+			strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: devices.gateway_group_id") {
+			return Device{}, ErrGatewayDeviceConflict
 		}
 		return Device{}, err
 	}
@@ -601,6 +707,127 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		return Device{}, err
 	}
 	return s.Device(ctx, id)
+}
+
+func (s *DeviceStore) ListGatewayGroups(ctx context.Context, networkKey, peerID string) ([]GatewayGroup, error) {
+	if strings.TrimSpace(networkKey) == "" || strings.TrimSpace(peerID) == "" {
+		return nil, ErrInvalidGatewayGroup
+	}
+	rows, err := s.store.db.QueryContext(ctx, `SELECT gg.id,gg.name,gg.network_key,gg.peer_id,COUNT(d.id),
+		COALESCE(MAX(CASE WHEN d.is_gateway=1 THEN d.id END),''),COALESCE(MAX(CASE WHEN d.is_gateway=1 THEN d.name END),''),
+		gg.created_at,gg.updated_at
+		FROM device_gateway_groups gg LEFT JOIN devices d ON d.gateway_group_id=gg.id
+		WHERE gg.network_key=? AND gg.peer_id=? GROUP BY gg.id ORDER BY gg.name COLLATE NOCASE,gg.id`, networkKey, peerID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	result := make([]GatewayGroup, 0)
+	for rows.Next() {
+		var group GatewayGroup
+		if err := rows.Scan(&group.ID, &group.Name, &group.NetworkKey, &group.PeerID, &group.DeviceCount,
+			&group.GatewayDeviceID, &group.GatewayDeviceName, &group.CreatedAt, &group.UpdatedAt); err != nil {
+			return nil, err
+		}
+		result = append(result, group)
+	}
+	return result, rows.Err()
+}
+
+func normalizeGatewayGroup(name, networkKey, peerID string) (string, error) {
+	name = strings.TrimSpace(name)
+	networkKey = strings.TrimSpace(networkKey)
+	peerID = strings.TrimSpace(peerID)
+	if name == "" || len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\x00") ||
+		networkKey == "" || peerID == "" || len(networkKey) > 256 || len(peerID) > 128 {
+		return "", ErrInvalidGatewayGroup
+	}
+	return name, nil
+}
+
+func (s *DeviceStore) CreateGatewayGroup(ctx context.Context, name, networkKey, peerID string) (GatewayGroup, error) {
+	name, err := normalizeGatewayGroup(name, networkKey, peerID)
+	if err != nil {
+		return GatewayGroup{}, err
+	}
+	id, err := uuid()
+	if err != nil {
+		return GatewayGroup{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = s.store.db.ExecContext(ctx, "INSERT INTO device_gateway_groups(id,name,network_key,peer_id,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+		id, name, strings.TrimSpace(networkKey), strings.TrimSpace(peerID), now, now)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+			return GatewayGroup{}, ErrInvalidGatewayGroup
+		}
+		return GatewayGroup{}, err
+	}
+	groups, err := s.ListGatewayGroups(ctx, networkKey, peerID)
+	if err != nil {
+		return GatewayGroup{}, err
+	}
+	for _, group := range groups {
+		if group.ID == id {
+			return group, nil
+		}
+	}
+	return GatewayGroup{}, ErrGatewayGroupNotFound
+}
+
+func (s *DeviceStore) UpdateGatewayGroup(ctx context.Context, id, name string) (GatewayGroup, error) {
+	name = strings.TrimSpace(name)
+	if id == "" || name == "" || len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\x00") {
+		return GatewayGroup{}, ErrInvalidGatewayGroup
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.store.db.ExecContext(ctx, "UPDATE device_gateway_groups SET name=?,updated_at=? WHERE id=?", name, now, id)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+			return GatewayGroup{}, ErrInvalidGatewayGroup
+		}
+		return GatewayGroup{}, err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return GatewayGroup{}, err
+	}
+	if n == 0 {
+		return GatewayGroup{}, ErrGatewayGroupNotFound
+	}
+	var group GatewayGroup
+	err = s.store.db.QueryRowContext(ctx, `SELECT gg.id,gg.name,gg.network_key,gg.peer_id,COUNT(d.id),
+		COALESCE(MAX(CASE WHEN d.is_gateway=1 THEN d.id END),''),COALESCE(MAX(CASE WHEN d.is_gateway=1 THEN d.name END),''),
+		gg.created_at,gg.updated_at FROM device_gateway_groups gg LEFT JOIN devices d ON d.gateway_group_id=gg.id
+		WHERE gg.id=? GROUP BY gg.id`, id).Scan(&group.ID, &group.Name, &group.NetworkKey, &group.PeerID, &group.DeviceCount,
+		&group.GatewayDeviceID, &group.GatewayDeviceName, &group.CreatedAt, &group.UpdatedAt)
+	if errors.Is(err, sql.ErrNoRows) {
+		return GatewayGroup{}, ErrGatewayGroupNotFound
+	}
+	return group, err
+}
+
+func (s *DeviceStore) DeleteGatewayGroup(ctx context.Context, id string) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var exists int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM device_gateway_groups WHERE id=?", id).Scan(&exists); err != nil {
+		return err
+	}
+	if exists == 0 {
+		return ErrGatewayGroupNotFound
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=NULL,is_gateway=0,updated_at=? WHERE gateway_group_id=?", now, id); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, "DELETE FROM device_gateway_groups WHERE id=?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *DeviceStore) NetworkNodeSyncEnabled(ctx context.Context) (bool, error) {
@@ -636,7 +863,7 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
 		var existingID string
-		err := tx.QueryRowContext(ctx, "SELECT id FROM devices WHERE network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID)
+		err := tx.QueryRowContext(ctx, "SELECT id FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID)
 		if err == nil {
 			if _, err = tx.ExecContext(ctx, "UPDATE devices SET is_node_device=1,updated_at=? WHERE id=?", now, existingID); err != nil {
 				return NetworkNodeSyncResult{}, err
@@ -662,8 +889,8 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		if err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-			VALUES(?,?,NULL,'通用设备','[]',1,0,'','','','','',0,?,?,?,?)`, id, input.Name, input.NetworkKey, input.PeerID, now, now); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+			VALUES(?,?,NULL,NULL,'通用设备','[]',1,0,'','','','','',0,?,?,?,?)`, id, input.Name, input.NetworkKey, input.PeerID, now, now); err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {
@@ -684,18 +911,15 @@ func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
 	}
 	defer tx.Rollback()
 
-	var networkKey, peerID string
-	if err := tx.QueryRowContext(ctx, "SELECT network_key,peer_id FROM devices WHERE id=?", id).Scan(&networkKey, &peerID); err != nil {
+	var isNodeDevice bool
+	if err := tx.QueryRowContext(ctx, "SELECT is_node_device FROM devices WHERE id=?", id).Scan(&isNodeDevice); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return ErrDeviceNotFound
 		}
 		return err
 	}
-	if networkKey != "" && peerID != "" {
-		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
-			networkKey, peerID, time.Now().UTC().Format(time.RFC3339)); err != nil {
-			return err
-		}
+	if isNodeDevice {
+		return ErrNodeDeviceProtected
 	}
 	if _, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", id); err != nil {
 		return err

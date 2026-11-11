@@ -6,6 +6,18 @@ export type DeviceGroup = {
   updated_at: string
 }
 
+export type GatewayGroup = {
+  id: string
+  name: string
+  network_key: string
+  peer_id: string
+  device_count: number
+  gateway_device_id?: string
+  gateway_device_name?: string
+  created_at: string
+  updated_at: string
+}
+
 export type DeviceType = string
 
 export type Device = {
@@ -13,6 +25,8 @@ export type Device = {
   name: string
   group_id?: string
   group_name?: string
+  gateway_group_id?: string
+  gateway_group_name?: string
   device_type: DeviceType
   semantic_kinds: string[]
   is_node_device: boolean
@@ -36,6 +50,7 @@ export type Device = {
 export type DeviceInput = {
   name: string
   group_id: string
+  gateway_group_id: string
   device_type: DeviceType
   semantic_kinds: string[]
   is_gateway: boolean
