@@ -65,6 +65,8 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			reply(w, http.StatusNotFound, map[string]string{"code":"not_found","message":"设备或分组不存在"})
 		case errors.Is(err, storage.ErrInvalidDevice):
 			reply(w, http.StatusBadRequest, map[string]string{"code":"invalid_device","message":"设备名称、类型、IP、MAC 或网络节点关联信息不合法"})
+		case errors.Is(err, storage.ErrDeviceGroupExists):
+			reply(w, http.StatusConflict, map[string]string{"code":"device_group_exists","message":"同名设备分组已存在"})
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):
 			reply(w, http.StatusBadRequest, map[string]string{"code":"invalid_device_group","message":"分组名称不能为空且不能超过 64 个字符"})
 		case errors.Is(err, storage.ErrDeviceNodeConflict):

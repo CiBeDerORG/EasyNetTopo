@@ -67,7 +67,7 @@ const filteredDevices = computed(() => {
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const sections = computed(() => {
-  const result = groups.value.map(group => ({
+  const result: Array<{ id: string; name: string; group: DeviceGroup | null; items: Device[] }> = groups.value.map(group => ({
     id: group.id, name: group.name, group,
     items: filteredDevices.value.filter(device => device.group_id === group.id)
   }))
