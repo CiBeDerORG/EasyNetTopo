@@ -15,7 +15,7 @@ func filterNetworkData(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, err
 	}
 	allowed := map[string]bool{}
-	for _, key := range []string{"agent_id", "adapter_type", "resource_id", "capability", "data", "instance_id", "instance_name", "result", "node_info", "peer_routes", "route", "peer", "peer_id", "ipv4_addr", "proxy_cidrs", "hostname", "stun_info", "inst_id", "listeners", "version", "public_ip", "udp_nat_type", "tcp_nat_type", "address", "addr", "network_length", "next_hop_peer_id", "cost", "path_latency", "conns", "stats", "rx_bytes", "tx_bytes", "latency_us", "loss_rate", "is_closed", "tunnel", "tunnel_type", "network_name"} {
+	for _, key := range []string{"agent_id", "adapter_type", "resource_id", "capability", "data", "instance_id", "instance_name", "result", "node_info", "peer_routes", "route", "peer", "peer_id", "ipv4_addr", "proxy_cidrs", "hostname", "stun_info", "inst_id", "listeners", "version", "public_ip", "udp_nat_type", "tcp_nat_type", "address", "addr", "network_length", "next_hop_peer_id", "cost", "path_latency", "conns", "stats", "rx_bytes", "tx_bytes", "latency_us", "loss_rate", "is_closed", "tunnel", "tunnel_type", "network_name", "node_id", "direct_peers", "latency_ms"} {
 		allowed[key] = true
 	}
 	for _, key := range []string{"feature_flag", "is_public_server", "avoid_relay_data", "default_conn_id", "conn_id", "part1", "part2", "part3", "part4"} {
