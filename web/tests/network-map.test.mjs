@@ -5,7 +5,7 @@ import { buildMapTopology, trafficRates } from '../src/features/network-map/topo
 const route = {
   node_info: { hostname: 'yun', peer_id: 100, inst_id: 'a', network_name: 'prod', ipv4_addr: '10.10.10.1' },
   peer_routes: [
-    { route: { peer_id: 200, hostname: 'FnOS', cost: 1, next_hop_peer_id: 200, path_latency: 20 },
+    { route: { peer_id: 200, hostname: 'FnOS', cost: 1, next_hop_peer_id: 999, path_latency: 20 },
       peer: { conns: [{ stats: { rx_bytes: 400, tx_bytes: 600, latency_us: 18000 }, tunnel: { tunnel_type: 'udp' } }] } },
     { route: { peer_id: 300, hostname: 'OWRT', cost: 3, next_hop_peer_id: 200, path_latency: 67 } },
     { route: { peer_id: 400, hostname: 'Mac', cost: 0, path_latency: 0 } }
@@ -21,7 +21,7 @@ test('route 数据构建本机、P2P、中继及未知路由，且没有位置�
   const graph = buildMapTopology(route, [attribute(100, 31, 121), attribute(200, 35, 139)], 'entry')
   assert.equal(graph.nodes.length, 4)
   assert.deepEqual(graph.links.map(link => link.kind).sort(), ['p2p', 'relay', 'unknown'].sort())
-  const direct = graph.links[0]
+  const direct = graph.links.find(link => link.kind === 'p2p')!
   assert.equal(direct.latencyMs, 20)
   assert.equal(direct.rxBytes, 400)
   assert.equal(direct.txBytes, 600)
@@ -30,18 +30,25 @@ test('route 数据构建本机、P2P、中继及未知路由，且没有位置�
   assert.equal(graph.nodes[3].longitude, null)
 })
 
-test('Peer Center 补充真正的远端直连边，不覆盖入口路由的转发关系', () => {
+test('Peer Center 的真实直连优先级高于同一节点对的入口路由推断', () => {
   const peerCenter = [
     { node_id: '200', direct_peers: [{ node_id: '300', latency_ms: 11 }] },
     { node_id: '300', direct_peers: [{ node_id: '200', latency_ms: 11 }, { node_id: '100', latency_ms: 6 }] }
   ]
   const graph = buildMapTopology(route, [], 'entry', peerCenter)
-  assert.equal(graph.links.length, 5)
-  assert.equal(graph.links.filter(link => link.kind === 'relay').length, 1)
+  assert.equal(graph.links.length, 4)
+  assert.equal(graph.links.filter(link => link.kind === 'relay').length, 0)
   const extra = graph.links.filter(link => link.source === 'peer-center')
   assert.equal(extra.length, 2)
   assert.ok(extra.every(link => link.kind === 'p2p'))
   assert.ok(extra.some(link => link.latencyMs === 11))
+  const local = graph.nodes.find(node => node.id === '100')!
+  const relayPeer = graph.nodes.find(node => node.id === '300')!
+  const overridden = graph.links.find(link =>
+    (link.from === local.key && link.to === relayPeer.key) ||
+    (link.from === relayPeer.key && link.to === local.key))
+  assert.equal(overridden?.kind, 'p2p')
+  assert.equal(overridden?.source, 'peer-center')
 })
 
 test('没有实例标识的全局拓扑不能跨两个网络实例乱连', () => {
