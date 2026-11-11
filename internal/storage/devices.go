@@ -82,22 +82,22 @@ type Device struct {
 }
 
 type DeviceInput struct {
-	Name           string   `json:"name"`
-	GroupID        string   `json:"group_id"`
-	GatewayGroupID string   `json:"gateway_group_id"`
-	DeviceType     string   `json:"device_type"`
-	SemanticKinds  []string `json:"semantic_kinds"`
-	IsGateway          bool   `json:"is_gateway"`
-	CreateGatewayGroup bool   `json:"create_gateway_group,omitempty"`
-	GatewayGroupName   string `json:"gateway_group_name,omitempty"`
-	Manufacturer       string `json:"manufacturer"`
-	Model          string   `json:"model"`
-	IPAddress      string   `json:"ip_address"`
-	MACAddress     string   `json:"mac_address"`
-	Note           string   `json:"note"`
-	IsOpenWrt      bool     `json:"is_openwrt"`
-	NetworkKey     string   `json:"network_key"`
-	PeerID         string   `json:"peer_id"`
+	Name               string   `json:"name"`
+	GroupID            string   `json:"group_id"`
+	GatewayGroupID     string   `json:"gateway_group_id"`
+	DeviceType         string   `json:"device_type"`
+	SemanticKinds      []string `json:"semantic_kinds"`
+	IsGateway          bool     `json:"is_gateway"`
+	CreateGatewayGroup bool     `json:"create_gateway_group,omitempty"`
+	GatewayGroupName   string   `json:"gateway_group_name,omitempty"`
+	Manufacturer       string   `json:"manufacturer"`
+	Model              string   `json:"model"`
+	IPAddress          string   `json:"ip_address"`
+	MACAddress         string   `json:"mac_address"`
+	Note               string   `json:"note"`
+	IsOpenWrt          bool     `json:"is_openwrt"`
+	NetworkKey         string   `json:"network_key"`
+	PeerID             string   `json:"peer_id"`
 }
 
 type NetworkNodeDeviceInput struct {
