@@ -327,7 +327,17 @@ func normalizeDevice(v *DeviceInput) error {
 		v.SemanticKinds = append(v.SemanticKinds, kind)
 	}
 	if v.IsOpenWrt {
-		v.SemanticKinds = append(v.SemanticKinds, "router", "openwrt")
+		hasRouterKind := false
+		for _, kind := range v.SemanticKinds {
+			if strings.TrimSpace(kind) == "router" {
+				hasRouterKind = true
+				break
+			}
+		}
+		if !hasRouterKind {
+			return ErrInvalidDevice
+		}
+		v.SemanticKinds = append(v.SemanticKinds, "openwrt")
 	}
 	seenKinds := make(map[string]bool)
 	kinds := make([]string, 0, len(v.SemanticKinds))
