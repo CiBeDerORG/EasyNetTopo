@@ -18,6 +18,7 @@ on:
       - .github/workflows/container-image.yml
   workflow_dispatch:
   # 2026-11-09: rebuild main and run the existing post-publish deploy Hook.
+  # 2026-11-11: build merged device-management main and run post-publish Hook.
 
 permissions:
   contents: read
