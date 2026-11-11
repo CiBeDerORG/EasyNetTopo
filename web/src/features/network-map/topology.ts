@@ -118,7 +118,6 @@ export function buildMapTopology(
   })
   const locals = new Map(rows.filter(row => row.kind === '入口实例').map(row => [row.instanceID, row]))
   const links: MapLink[] = []
-  const directPairs = new Set<string>()
   const pairKey = (a: string, b: string) => [a, b].sort().join('|')
   for (const row of rows) {
     if (row.kind === '入口实例') continue
@@ -135,7 +134,6 @@ export function buildMapTopology(
       rxBytes: metric(row.rx), txBytes: metric(row.tx), rxBps: null, txBps: null
     }
     links.push(link)
-    if (kind === 'p2p') directPairs.add(pairKey(local.key, row.key))
   }
 
   const instanceIDs = [...new Set(rows.map(row => row.instanceID))]
