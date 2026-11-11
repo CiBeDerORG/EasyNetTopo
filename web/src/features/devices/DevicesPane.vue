@@ -87,7 +87,7 @@ const sections = computed(() => {
     items: filteredDevices.value.filter(device => device.group_id === group.id)
   }))
   const ungrouped = filteredDevices.value.filter(device => !device.group_id)
-  if (ungrouped.length || !result.length) {
+  if (ungrouped.length) {
     result.push({ id: '__ungrouped__', name: '未分组', group: null, items: ungrouped })
   }
   return result
@@ -292,6 +292,118 @@ async function removeOpenWrtSettings() {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
 }
+type FailedNodeInitialization = { input: DeviceInput; message: string }
+const initializingDevices = ref(false)
+const failedNodeInitializations = ref<FailedNodeInitialization[]>([])
+const canInitializeNetworkNodes = computed(() =>
+  !initializingDevices.value && networkEntries.value.length > 0 &&
+  nodesQuery.isSuccess.value && !nodesQuery.isError.value &&
+  !attributesQuery.isPending.value && nodeOptions.value.length > 0
+)
+function truncateDeviceName(value: string, length: number): string {
+  return Array.from(value).slice(0, length).join('')
+}
+function uniqueNodeDeviceName(node: (typeof nodeOptions.value)[number], used: Set<string>): string {
+  const raw = node.label && node.label.trim() && node.label !== '—' ? node.label.trim()
+    : node.row.hostname && node.row.hostname !== '—' ? node.row.hostname
+      : 'EasyTier 节点 ' + node.row.id.slice(0, 8)
+  let name = truncateDeviceName(raw, 100)
+  if (used.has(name.toLocaleLowerCase())) {
+    const suffix = ' · ' + truncateDeviceName(node.row.instance || '网络节点', 24)
+    name = truncateDeviceName(raw, 100 - Array.from(suffix).length) + suffix
+  }
+  let sequence = 2
+  while (used.has(name.toLocaleLowerCase())) {
+    const suffix = ' (' + sequence + ')'
+    name = truncateDeviceName(raw, 100 - Array.from(suffix).length) + suffix
+    sequence++
+  }
+  used.add(name.toLocaleLowerCase())
+  return name
+}
+function networkNodeDeviceInputs(): DeviceInput[] {
+  const used = new Set(devices.value.map(device => device.name.toLocaleLowerCase()))
+  return nodeOptions.value
+    .filter(node => node.row.id !== '—' && !!node.networkKey && !!node.row.id)
+    .map(node => ({
+      name: uniqueNodeDeviceName(node, used),
+      group_id: '',
+      device_type: 'other',
+      manufacturer: '',
+      model: '',
+      ip_address: '',
+      mac_address: '',
+      note: '',
+      is_openwrt: false,
+      network_key: node.networkKey,
+      peer_id: node.row.id
+    }))
+}
+async function createNetworkNodeDevices(inputs: DeviceInput[]) {
+  let created = 0
+  const failed: FailedNodeInitialization[] = []
+  for (const input of inputs) {
+    try {
+      await createDevice(input)
+      created++
+    } catch (error) {
+      failed.push({ input, message: formatApiError(error) })
+    }
+  }
+  return { created, failed }
+}
+async function initializeNetworkNodes() {
+  if (!canInitializeNetworkNodes.value || devices.value.length > 0) return
+  const inputs = networkNodeDeviceInputs()
+  if (!inputs.length) {
+    ElMessage.warning('没有可初始化的有效网络节点')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      '将为 ' + inputs.length + ' 个网络节点分别创建一条「其他设备」记录，并自动关联原节点。不会复制节点 IP、公网 IP 或位置，也不会修改网络节点。是否继续？',
+      '初始化设备列表', { type: 'info', confirmButtonText: '开始初始化', cancelButtonText: '取消' })
+  } catch { return }
+  initializingDevices.value = true
+  try {
+    const result = await createNetworkNodeDevices(inputs)
+    failedNodeInitializations.value = result.failed
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
+    ])
+    if (result.failed.length) {
+      ElMessage.warning('已初始化 ' + result.created + ' 台，' + result.failed.length + ' 台失败；可在下方重试失败项')
+    } else {
+      ElMessage.success('已将 ' + result.created + ' 个网络节点初始化为基础设备')
+    }
+  } finally {
+    initializingDevices.value = false
+  }
+}
+async function retryFailedNodeInitializations() {
+  if (initializingDevices.value || !failedNodeInitializations.value.length) return
+  initializingDevices.value = true
+  try {
+    const latest = await devicesQuery.refetch()
+    const linked = new Set((latest.data || [])
+      .filter(device => device.network_key && device.peer_id)
+      .map(device => device.network_key + '|' + device.peer_id))
+    const pending = failedNodeInitializations.value
+      .filter(item => !linked.has(item.input.network_key + '|' + item.input.peer_id))
+      .map(item => item.input)
+    const result = await createNetworkNodeDevices(pending)
+    failedNodeInitializations.value = result.failed
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
+    ])
+    if (result.failed.length) ElMessage.warning('重试完成，仍有 ' + result.failed.length + ' 台设备未能初始化')
+    else ElMessage.success('失败项已处理完成')
+  } finally {
+    initializingDevices.value = false
+  }
+}
 const isRefreshing = computed(() => devicesQuery.isFetching.value || groupsQuery.isFetching.value)
 async function refreshAll() {
   await Promise.all([
@@ -342,6 +454,31 @@ async function refreshAll() {
       <el-skeleton :rows="5" animated />
     </div>
     <template v-else>
+      <el-alert v-if="failedNodeInitializations.length" type="warning" :closable="false" show-icon
+        title="部分网络节点没有成功初始化">
+        <div class="initialization-failures">
+          <span v-for="item in failedNodeInitializations" :key="item.input.network_key + '|' + item.input.peer_id">
+            {{ item.input.name }}：{{ item.message }}
+          </span>
+          <el-button text type="warning" :loading="initializingDevices" @click="retryFailedNodeInitializations">
+            重试失败项（{{ failedNodeInitializations.length }}）
+          </el-button>
+        </div>
+      </el-alert>
+
+      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
+        <div class="empty-initialize">
+          <p v-if="!networkEntries.length">尚未设置组网入口，请先在主机列表中设置组网入口。</p>
+          <p v-else-if="nodesQuery.isPending.value">正在读取现有网络节点…</p>
+          <p v-else-if="nodesQuery.isError.value">网络节点读取失败，请先刷新后重试。</p>
+          <p v-else-if="nodeOptions.length">发现 {{ nodeOptions.length }} 个网络节点，可一键初始化为基础设备。</p>
+          <p v-else>当前没有可初始化的有效网络节点。</p>
+          <el-button type="primary" :loading="initializingDevices" :disabled="!canInitializeNetworkNodes"
+            @click="initializeNetworkNodes">
+            <el-icon><Connection /></el-icon>初始化网络节点
+          </el-button>
+        </div>
+      </el-empty>
       <div v-for="section in sections" :key="section.id" class="device-group">
         <div class="group-heading">
           <button class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
@@ -398,7 +535,7 @@ async function refreshAll() {
           <el-empty v-if="!section.items.length" description="该分组还没有设备" :image-size="54" />
         </div>
       </div>
-      <el-empty v-if="!sections.some(section => section.items.length) && search" description="没有匹配的设备" />
+      <el-empty v-if="devices.length && !sections.some(section => section.items.length) && search" description="没有匹配的设备" />
     </template>
 
     <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '添加设备'" width="min(620px, 94vw)" destroy-on-close>
@@ -544,6 +681,10 @@ async function refreshAll() {
 .openwrt-status { display:flex; align-items:center; gap:7px; margin-top:12px; padding:8px 10px; border:1px solid var(--ent-detail-line); border-radius:8px; background:var(--ent-detail-bg); color:var(--ent-detail-accent); font-size:11px; }
 .openwrt-endpoint { margin-left:auto; color:var(--ent-muted); }
 .devices-loading { padding:18px; }
+.empty-initialize { display:flex; align-items:center; flex-direction:column; gap:10px; }
+.empty-initialize p { margin:0; color:var(--ent-muted); font-size:12px; text-align:center; }
+.initialization-failures { display:flex; flex-direction:column; align-items:flex-start; gap:6px; }
+.initialization-failures span { overflow-wrap:anywhere; }
 .form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:0 14px; }
 .full { width:100%; }
 .span-two { grid-column:1 / -1; }
