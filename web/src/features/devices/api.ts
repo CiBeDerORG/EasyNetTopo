@@ -1,7 +1,8 @@
 import { apiRequest } from '../../lib/api-client'
 import type {
   Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, GatewayGroup,
-  NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus
+  NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus,
+  OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot
 } from './types'
 
 export async function getNodeDevices() {
@@ -90,4 +91,16 @@ export function saveDeviceOpenWrtConfig(id: string, payload: {
 }
 export function clearDeviceOpenWrtConfig(id: string) {
   return apiRequest<void>('/api/v1/devices/' + encodeURIComponent(id) + '/openwrt', { method: 'DELETE' })
+}
+
+function discoveryPath(id: string, kind: OpenWrtDiscoveryKind) {
+  return '/api/v1/devices/' + encodeURIComponent(id) + '/openwrt/discovery/' + kind
+}
+
+export function getOpenWrtDiscoverySnapshot(id: string, kind: OpenWrtDiscoveryKind) {
+  return apiRequest<OpenWrtDiscoverySnapshot>(discoveryPath(id, kind), { timeoutMs: 40_000 })
+}
+
+export function scanOpenWrtDiscovery(id: string, kind: OpenWrtDiscoveryKind) {
+  return apiRequest<OpenWrtDiscoverySnapshot>(discoveryPath(id, kind), { method: 'POST', timeoutMs: 40_000 })
 }

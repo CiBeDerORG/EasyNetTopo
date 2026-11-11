@@ -377,6 +377,59 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			}
 			return
 		}
+		if len(parts) == 4 && parts[0] != "" && parts[1] == "openwrt" && parts[2] == "discovery" {
+			kind := parts[3]
+			if kind != "devices" && kind != "adb" {
+				http.NotFound(w, r)
+				return
+			}
+			action := ""
+			switch r.Method {
+			case http.MethodGet:
+				action = "list"
+			case http.MethodPost:
+				if !mutation(w, r) {
+					return
+				}
+				action = "scan"
+			default:
+				methodNotAllowed(w, "GET, POST")
+				return
+			}
+			device, err := devices.Device(r.Context(), parts[0])
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			if !hasOpenWrtSemantic(device.SemanticKinds) {
+				reply(w, http.StatusConflict, map[string]string{"code": "device_not_openwrt", "message": "只有标记 OpenWrt 的设备才能使用发现接口"})
+				return
+			}
+			if !device.IsGateway {
+				reply(w, http.StatusConflict, map[string]string{"code": "openwrt_gateway_required", "message": "仅 OpenWrt 网关设备支持发起发现"})
+				return
+			}
+			if !device.OpenWrtConfigured {
+				reply(w, http.StatusConflict, map[string]string{"code": "openwrt_discovery_not_configured", "message": "请先为该网关设备配置 RPCD 专用账号"})
+				return
+			}
+			secret, err := devices.DeviceOpenWrtSecret(r.Context(), parts[0])
+			if err != nil {
+				if errors.Is(err, storage.ErrOpenWrtConfigNotFound) {
+					reply(w, http.StatusConflict, map[string]string{"code": "openwrt_discovery_not_configured", "message": "请先为该网关设备配置 RPCD 专用账号"})
+					return
+				}
+				mapError(w, err)
+				return
+			}
+			result, callErr := runOpenWrtDiscovery(r.Context(), device, secret, kind, action)
+			if callErr != nil {
+				reply(w, callErr.status, map[string]string{"code": callErr.code, "message": callErr.message})
+				return
+			}
+			reply(w, http.StatusOK, result)
+			return
+		}
 		if len(parts) == 2 && parts[0] != "" && parts[1] == "openwrt" {
 			switch r.Method {
 			case http.MethodGet:

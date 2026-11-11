@@ -64,10 +64,10 @@ function decodeErrorBody(raw: string, status: number): ApiError {
   return new ApiError(raw.trim(), status)
 }
 
-type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown }
+type RequestOptions = Omit<RequestInit, 'body'> & { body?: unknown; timeoutMs?: number }
 
 export async function apiRequest<T>(url: string, options: RequestOptions = {}): Promise<T> {
-  const { body, ...requestOptions } = options
+  const { body, timeoutMs = 20_000, ...requestOptions } = options
   const method = (requestOptions.method || (body === undefined ? 'GET' : 'POST')).toUpperCase()
   const headers = new Headers(requestOptions.headers)
 
@@ -75,7 +75,7 @@ export async function apiRequest<T>(url: string, options: RequestOptions = {}): 
   if (body !== undefined) headers.set('Content-Type', 'application/json')
 
   const controller = new AbortController()
-  const timeout = setTimeout(() => controller.abort(), 20_000)
+  const timeout = setTimeout(() => controller.abort(), timeoutMs)
 
   try {
     const response = await fetch(url, {

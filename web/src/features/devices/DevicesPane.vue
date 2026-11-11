@@ -8,6 +8,7 @@ import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey } from '../network-nodes/identity'
+import OpenWrtDiscoveryDialog from './OpenWrtDiscoveryDialog.vue'
 import { suggestedDirectGatewayIP } from './gateway-ip'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
 import {
@@ -16,7 +17,7 @@ import {
   syncNetworkNodeDevices, saveDeviceOpenWrtConfig, clearDeviceOpenWrtConfig, updateDevice
 } from './api'
 import type {
-  Device, DeviceInput, DeviceOpenWrtConfig, GatewayGroup, NetworkNodeDeviceInput
+  Device, DeviceInput, DeviceOpenWrtConfig, GatewayGroup, NetworkNodeDeviceInput, OpenWrtDiscoveryKind
 } from './types'
 
 const props = defineProps<{ hosts: Host[] }>()
@@ -399,6 +400,16 @@ async function deleteSelectedDevices() {
 
 
 
+const discoveryDialogOpen = ref(false)
+const discoveryTarget = ref<Device | null>(null)
+const discoveryKind = ref<OpenWrtDiscoveryKind>('devices')
+function openDiscovery(device: Device, kind: OpenWrtDiscoveryKind) {
+  if (!isOpenWrtDevice(device) || !device.is_gateway || !device.openwrt_configured) return
+  discoveryTarget.value = device
+  discoveryKind.value = kind
+  discoveryDialogOpen.value = true
+}
+
 const openWrtDialogOpen = ref(false)
 const openWrtTarget = ref<Device | null>(null)
 const openWrtSaving = ref(false)
@@ -678,6 +689,11 @@ watch(
                 {{ device.openwrt_https ? 'HTTPS' : 'HTTP' }} · {{ device.openwrt_rpcd_port || 80 }}
               </span>
             </div>
+            <div v-if="device.is_gateway && isOpenWrtDevice(device) && device.openwrt_configured"
+              class="discovery-actions">
+              <el-button size="small" plain @click="openDiscovery(device, 'devices')">服务发现</el-button>
+              <el-button size="small" plain @click="openDiscovery(device, 'adb')">ADB 发现</el-button>
+            </div>
           </article>
           <el-empty v-if="!section.items.length" :description="section.kind === 'gateway' ? '该网关设备还没有下挂设备' : '暂无设备'" :image-size="54" />
         </div>
@@ -753,6 +769,10 @@ watch(
       </template>
     </el-dialog>
 
+    <OpenWrtDiscoveryDialog v-if="discoveryTarget"
+      :key="discoveryTarget.id + ':' + discoveryKind"
+      v-model="discoveryDialogOpen" :device="discoveryTarget" :kind="discoveryKind" />
+
     <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
       <template v-if="openWrtTarget">
         <el-alert type="info" :closable="false" show-icon
@@ -825,6 +845,8 @@ watch(
 .device-note { margin:10px 0 0; color:var(--ent-muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .openwrt-status { display:flex; align-items:center; gap:7px; margin-top:12px; padding:8px 10px; border:1px solid var(--ent-detail-line); border-radius:8px; background:var(--ent-detail-bg); color:var(--ent-detail-accent); font-size:11px; }
 .openwrt-endpoint { margin-left:auto; color:var(--ent-muted); }
+.discovery-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
+.discovery-actions :deep(.el-button + .el-button) { margin-left:0; }
 .devices-loading { padding:18px; }
 .empty-initialize { display:flex; align-items:center; flex-direction:column; gap:10px; }
 .empty-initialize p { margin:0; color:var(--ent-muted); font-size:12px; text-align:center; }

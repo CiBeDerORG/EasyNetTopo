@@ -75,3 +75,39 @@ export type DeviceOpenWrtConfig = {
   https: boolean
   username: string
 }
+
+export type OpenWrtDiscoveryKind = 'devices' | 'adb'
+
+export type OpenWrtDiscoveryDevice = {
+  id?: string
+  name?: string
+  hostname?: string | null
+  mac?: string | null
+  ipv4?: string[]
+  ipv6?: string[]
+  iface?: string
+  network?: string
+  vendor?: string | null
+  model?: string | null
+  observation?: 'recent' | 'lease' | 'cached'
+  last_seen?: number | null
+  instance?: string
+  protocol?: string
+  service?: string
+  host?: string
+  address?: string
+  port?: number
+}
+
+export type OpenWrtDiscoverySnapshot = {
+  status: 'ok' | 'partial' | 'error'
+  has_snapshot?: boolean
+  scanned_at?: number | null
+  last_attempt_at?: number | null
+  source?: string
+  count?: number
+  truncated?: boolean
+  message?: string
+  errors?: Array<{ source?: string; code?: string; message?: string }>
+  devices?: OpenWrtDiscoveryDevice[]
+}

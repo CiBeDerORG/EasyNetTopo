@@ -80,6 +80,8 @@
 - GET/POST `/api/v1/gateway-groups?network_key=...&peer_id=...`
 - PATCH/DELETE `/api/v1/gateway-groups/{id}`
 - GET/PUT/DELETE `/api/v1/devices/{id}/openwrt`
+- GET `/api/v1/devices/{id}/openwrt/discovery/{devices|adb}`：使用保存的 RPCD 凭据登录并调用 Easy Discovery 的 `list`，只读取路由器已有快照
+- POST `/api/v1/devices/{id}/openwrt/discovery/{devices|adb}`：调用 `scan` 主动发现并返回本次结果，要求管理员会话和同源请求标记；不得由 GET 隐式触发
 
 所有接口要求管理员会话；写接口要求同源请求标记。OpenWrt 密钥只在服务端解封供后续 RPCD 客户端使用。
 
@@ -91,6 +93,9 @@
 - 每个网关组展示网关自身设备和下挂设备数量，可重命名或删除。
 - 节点设备、普通设备、网关自身设备使用不同标识。
 - 未关联节点的旧设备保留在独立筛选项，可迁入选定网络节点。
+- 已保存 RPCD 账号且标记 OpenWrt 的网关设备卡片显示「服务发现」和「ADB 发现」按钮；弹窗按需读取快照，显式点击才会扫描。结果包含状态、时间、数量、来源错误及条目预览，本期不导入设备库。
+- 对接 `luci-app-easy-discovery` 中的 `easy-discovery.devices`、`easy-discovery.adb` 两个固定 RPCD 对象的 `list/scan`，不开放自由调用对象或 shell 命令。RPCD 凭据只在后端解封；后端固定访问设备 RFC1918 IPv4 管理 IP 的 `/ubus`，禁止代理重定向和系统 HTTP 代理；HTTPS 严格验证证书，不关闭校验；扫描超时及响应体有上限。
+- OpenWrt 的接口授权须为专用账号授予相应设备或 ADB 的 `list`/`scan` 权限。ADB 只提供无线连接端点发现，不执行配对、连接或远程指令。
 - 页面复用全局认证、主题和工作台外壳，不加载主机商店的应用目录、Docker 清单和执行任务轮询。
 
 ## 分期边界
@@ -99,7 +104,7 @@
 
 后续阶段再实现：
 - 网关组绑定 EasyTier 网络实例、配置快照、子网代理/网段映射规则与地址推导。
-- 仅从网关组中已配置且标记 OpenWrt 的网关自身设备发起普通设备发现；采用扫描快照、差异预览、逐项选择和确认应用。
+- 发现结果与设备管理数据做差异预览、逐项选择及确认导入；当前已实现显式扫描和只读快照预览，不自动修改设备库。
 - 设备服务的增删改查与网关服务展示。
 
 明确不纳入：
