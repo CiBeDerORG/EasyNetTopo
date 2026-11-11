@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting } from '@element-plus/icons-vue'
@@ -58,6 +58,21 @@ const nodeOptions = computed(() => (nodesQuery.data.value?.nodes || []).map(node
 })))
 const nodeErrors = computed(() => nodesQuery.data.value?.errors || 0)
 const search = ref('')
+const selectedDeviceIds = ref<string[]>([])
+watch(search, () => { selectedDeviceIds.value = [] })
+const allFilteredSelected = computed(() => filteredDevices.value.length > 0 &&
+  filteredDevices.value.every(device => selectedDeviceIds.value.includes(device.id)))
+function toggleDeviceSelection(id: string, checked: boolean) {
+  selectedDeviceIds.value = checked
+    ? [...new Set([...selectedDeviceIds.value, id])]
+    : selectedDeviceIds.value.filter(value => value !== id)
+}
+function toggleSelectAll(checked: boolean) {
+  const visible = filteredDevices.value.map(device => device.id)
+  selectedDeviceIds.value = checked
+    ? [...new Set([...selectedDeviceIds.value, ...visible])]
+    : selectedDeviceIds.value.filter(id => !visible.includes(id))
+}
 const filteredDevices = computed(() => {
   const keyword = search.value.trim().toLocaleLowerCase()
   if (!keyword) return devices.value
@@ -167,16 +182,23 @@ async function saveDeviceRecord() {
   } catch (error) { ElMessage.error(formatApiError(error)) }
   finally { savingDevice.value = false }
 }
-async function removeDevice(device: Device) {
+async function deleteSelectedDevices() {
+  const ids = [...selectedDeviceIds.value]
+  if (!ids.length) return
   try {
-    await ElMessageBox.confirm('删除设备「' + device.name + '」？此操作只删除设备登记和它自己的 OpenWrt 配置，不会删除关联的网络节点。',
-      '确认删除设备', { type: 'warning', confirmButtonText: '删除设备', cancelButtonText: '取消' })
-    await deleteDevice(device.id)
+    await ElMessageBox.confirm(
+      '确定删除选中的 ' + ids.length + ' 台设备？只删除设备登记和各自的 OpenWrt 配置，不会删除关联的网络节点。',
+      '批量删除设备', { type: 'warning', confirmButtonText: '删除所选设备', cancelButtonText: '取消' })
+    const results = await Promise.allSettled(ids.map(id => deleteDevice(id)))
+    const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled')
+    const failed = ids.filter((_, index) => results[index].status === 'rejected')
+    selectedDeviceIds.value = failed
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['devices'] }),
       queryClient.invalidateQueries({ queryKey: ['device-groups'] })
     ])
-    ElMessage.success('设备已删除')
+    if (failed.length) ElMessage.warning('已删除 ' + succeeded.length + ' 台，失败 ' + failed.length + ' 台；失败项仍保留在选择中')
+    else ElMessage.success('已删除 ' + succeeded.length + ' 台设备')
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
@@ -296,6 +318,10 @@ async function refreshAll() {
       <div class="devices-summary">
         <span>{{ filteredDevices.length }} 台设备</span>
         <span>{{ groups.length }} 个分组</span>
+        <el-checkbox :model-value="allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
+        <el-button v-if="selectedDeviceIds.length" type="danger" plain size="small" @click="deleteSelectedDevices">
+          <el-icon><Delete /></el-icon>删除所选 {{ selectedDeviceIds.length }} 台
+        </el-button>
       </div>
     </div>
 
@@ -329,6 +355,9 @@ async function refreshAll() {
         <div v-if="!collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
             <div class="device-card-head">
+              <el-checkbox class="device-select" :model-value="selectedDeviceIds.includes(device.id)"
+                :aria-label="'选择设备 ' + device.name"
+                @update:model-value="toggleDeviceSelection(device.id, $event)" />
               <div class="device-avatar">
                 <el-icon><component :is="typeIcons[device.device_type]" /></el-icon>
               </div>
@@ -347,7 +376,6 @@ async function refreshAll() {
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
                 <el-button v-if="device.is_openwrt" text circle aria-label="OpenWrt 服务设置" title="OpenWrt 服务设置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
-                <el-button text circle type="danger" aria-label="删除设备" title="删除设备" @click="removeDevice(device)"><el-icon><Delete /></el-icon></el-button>
               </div>
             </div>
             <div class="device-meta">
@@ -494,7 +522,8 @@ async function refreshAll() {
 .group-actions { display:flex; gap:4px; }
 .device-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr)); gap:12px; padding:14px; }
 .device-card { min-width:0; padding:15px; border:1px solid var(--ent-line); border-radius:12px; background:var(--ent-node-row); }
-.device-card-head { display:flex; align-items:flex-start; gap:12px; }
+.device-card-head { display:flex; align-items:flex-start; gap:10px; }
+.device-select { flex:none; margin-top:10px; }
 .device-avatar { display:grid; width:40px; height:40px; flex:none; place-items:center; border:1px solid var(--ent-line); border-radius:12px; background:var(--ent-elev); color:var(--ent-cyan); font-size:19px; }
 .device-main { min-width:0; flex:1; }
 .device-title { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
