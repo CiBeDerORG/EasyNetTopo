@@ -75,7 +75,7 @@ const topology = computed(() => ({
     ...link, ...currentRates.value[link.key]
   }))
 }))
-const basemap = ref<'standard' | 'satellite' | 'dark'>('standard')
+const basemap = ref<'auto' | 'standard' | 'satellite' | 'dark'>('auto')
 const filter = ref<'all' | 'p2p' | 'relay' | 'unknown'>('all')
 const showTraffic = ref(true)
 const visibleLinks = computed(() =>
@@ -126,6 +126,7 @@ function formatMs(value: number | null) {
           <el-option v-for="host in entries" :key="host.id" :label="host.name" :value="host.id" />
         </el-select>
         <el-select v-model="basemap" class="basemap-select" aria-label="地图底图">
+          <el-option value="auto" label="跟随页面主题" />
           <el-option value="standard" label="标准地图" />
           <el-option value="satellite" label="卫星影像" />
           <el-option value="dark" label="深色地图" />
@@ -259,19 +260,29 @@ function formatMs(value: number | null) {
 .map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 286px; min-height: 0; flex: 1; gap: 12px; }
 .globe-area { position: relative; min-height: 0; overflow: hidden; border: 1px solid var(--ent-line);
   border-radius: 14px; background: #061323; }
-.map-legend { position: absolute; left: 16px; bottom: 16px; background: #0b1f32de; color: #dbeaf8;
-  border: 1px solid #28465b; padding: 10px 12px; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; }
+:global(:root[data-theme='light']) .globe-area { background: #dceaf4; }
+.map-legend { position: absolute; left: 16px; bottom: 16px; background: #0b1f32e8; color: #dbeaf8;
+  border: 1px solid #28465b; padding: 10px 12px; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; box-shadow: 0 6px 20px #0003; backdrop-filter: blur(10px); }
+:global(:root[data-theme='light']) .map-legend { background: #ffffffed; color: #29445d; border-color: #bfd0df; box-shadow: 0 5px 18px #365b7620; }
 .map-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .line { display: inline-block; width: 24px; border-top: 2px solid; }
-.line.p2p { border-color: #3ae6ff; box-shadow: 0 0 8px #3ae6ff; }
-.line.relay { border-color: #ffae55; border-top-style: dashed; }
-.line.unknown { border-color: #b1bfd0; border-top-style: dashed; }
+.line.p2p { border-color: #38d8ff; border-top-style: solid; border-top-width: 3px; box-shadow: 0 0 8px #3ae6ff; }
+.line.relay { border-color: #ffae55; border-top-style: dashed; border-top-width: 3px; }
+.line.unknown { border-color: #b1bfd0; border-top-style: dotted; border-top-width: 2px; }
+:global(:root[data-theme='light']) .line.p2p { border-color: #087f9a; box-shadow: 0 0 6px #087f9a55; }
+:global(:root[data-theme='light']) .line.relay { border-color: #a85b0a; }
+:global(:root[data-theme='light']) .line.unknown { border-color: #74899a; }
 .point { width: 9px; height: 9px; border: 1px solid white; border-radius: 50%; background: #36dcec; }
 .map-controls { position: absolute; top: 15px; right: 16px; display: flex; gap: 12px; align-items: center;
-  padding: 7px 9px; border-radius: 10px; background: #0c2138e9; color: #eafaff; }
+  padding: 7px 9px; border-radius: 10px; background: #0c2138e9; color: #eafaff; border: 1px solid #31516a; box-shadow: 0 5px 18px #0002; backdrop-filter: blur(10px); }
+:global(:root[data-theme='light']) .map-controls { background: #ffffffed; color: #29445d; border-color: #bfd0df; box-shadow: 0 5px 18px #365b7620; }
+:global(:root[data-theme='light']) .map-controls .el-switch { --el-switch-on-color: #087f9a; }
+:global(:root[data-theme='light']) .map-controls .el-select__wrapper { background: #f6fafd; box-shadow: 0 0 0 1px #c2d3e1 inset; }
+:global(:root[data-theme='light']) .map-controls .el-select__selected-item { color: #29445d; }
 .link-filter { width: 116px; }
 .map-source-info { position: absolute; bottom: 62px; left: 16px; color: #b7d8ec;
-  padding: 5px 8px; border-radius: 5px; background: #081b2bcc; font-size: 10px; }
+  padding: 5px 8px; border-radius: 5px; background: #081b2be8; border: 1px solid #29485f; font-size: 10px; backdrop-filter: blur(8px); }
+:global(:root[data-theme='light']) .map-source-info { color: #4c657b; background: #ffffffed; border-color: #c2d3e1; }
 .map-side { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 11px; }
 .side-section { padding: 15px; border: 1px solid var(--ent-line); border-radius: 13px; background: var(--ent-panel); }
 .side-section h3 { margin: 0 0 11px; font-size: 13px; }
