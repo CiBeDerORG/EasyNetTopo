@@ -141,8 +141,8 @@ func TestDeviceValidationAndOpenWrtCredentialSealing(t *testing.T) {
 		{Name: "bad ip", DeviceType: "other", IPAddress: "not-an-ip"},
 		{Name: "bad mac", DeviceType: "other", MACAddress: "invalid"},
 		{Name: "invalid node link", DeviceType: "other", NetworkKey: "network:home"},
-		{Name: "bad OpenWrt", DeviceType: "other", IsOpenWrt: true, IPAddress: "192.168.1.1"},
-		{Name: "public OpenWrt", DeviceType: "router", IsOpenWrt: true, IPAddress: "8.8.8.8"},
+		{Name: "bad OpenWrt", DeviceType: "other", SemanticKinds: []string{"openwrt"}},
+		{Name: "public OpenWrt", SemanticKinds: []string{"openwrt"}, IPAddress: "8.8.8.8"},
 	} {
 		if _, err := store.CreateDevice(ctx, input); !errors.Is(err, ErrInvalidDevice) {
 			t.Fatalf("非法设备通过校验: %+v err=%v", input, err)
@@ -155,7 +155,7 @@ func TestDeviceValidationAndOpenWrtCredentialSealing(t *testing.T) {
 	if _, err := store.DeviceOpenWrtConfig(ctx, normal.ID); !errors.Is(err, ErrDeviceNotOpenWrt) {
 		t.Fatalf("普通设备可读取 OpenWrt 配置: %v", err)
 	}
-	router, err := store.CreateDevice(ctx, DeviceInput{Name: "OpenWrt", DeviceType: "router", IPAddress: "192.168.1.2", IsOpenWrt: true})
+	router, err := store.CreateDevice(ctx, DeviceInput{Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IPAddress: "192.168.1.2"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -213,7 +213,7 @@ func TestDeviceStoreDoesNotRegenerateMissingKeyWithSavedCredentials(t *testing.T
 		t.Fatal(err)
 	}
 	router, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "OpenWrt", DeviceType: "router", IPAddress: "192.168.1.1", IsOpenWrt: true,
+		Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IPAddress: "192.168.1.1",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -440,8 +440,7 @@ func TestClearDeviceDataIsScopedAndDisablesAutomaticNodeSync(t *testing.T) {
 	}
 	router, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "OpenWrt", GroupID: group.ID, IsGateway: true,
-		DeviceType: "router", SemanticKinds: []string{"router", "openwrt"},
-		IsOpenWrt: true, IPAddress: "192.168.1.1",
+		SemanticKinds: []string{"openwrt"}, IPAddress: "192.168.1.1",
 		NetworkKey: "network:home", PeerID: "peer-1",
 	})
 	if err != nil {
@@ -533,8 +532,15 @@ func TestNewDeviceStoreDoesNotRewriteHistoricalDeviceRows(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if legacy.IsNodeDevice || len(legacy.SemanticKinds) != 0 {
-		t.Fatalf("启动时不应自动改写历史设备标识或类型标签: %+v", legacy)
+	if legacy.IsNodeDevice || !hasSemanticKind(legacy.SemanticKinds, "openwrt") {
+		t.Fatalf("历史 OpenWrt 标记应只在读取结果中兼容为语义标签: %+v", legacy)
+	}
+	var storedSemanticKinds string
+	if err := db.db.QueryRowContext(ctx, "SELECT semantic_kinds FROM devices WHERE id='legacy'").Scan(&storedSemanticKinds); err != nil {
+		t.Fatal(err)
+	}
+	if storedSemanticKinds != "[]" {
+		t.Fatalf("启动时不应改写历史语义数据，实际值：%s", storedSemanticKinds)
 	}
 }
 

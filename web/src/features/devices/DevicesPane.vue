@@ -238,6 +238,9 @@ function deviceIcon(device: Device) {
   const kind = (device.semantic_kinds || []).find(value => value in typeIcons)
   return kind ? typeIcons[kind] : Monitor
 }
+function isOpenWrtDevice(device: Pick<Device, 'semantic_kinds'>) {
+  return (device.semantic_kinds || []).includes('openwrt')
+}
 const gatewayCount = computed(() => gatewayGroups.value.filter(group => !!group.gateway_device_id).length)
 const deviceAssetCount = computed(() => filteredDevices.value.filter(device => !device.is_node_device).length)
 const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
@@ -246,11 +249,12 @@ const deviceDialogOpen = ref(false)
 const savingDevice = ref(false)
 const editingDeviceId = ref('')
 const deviceDraft = ref<DeviceInput>(emptyDevice())
+const isOpenWrtDraft = computed(() => deviceDraft.value.semantic_kinds.includes("openwrt"))
 function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
     is_gateway: false, manufacturer: '', model: '', ip_address: '', mac_address: '',
-    note: '', is_openwrt: false, network_key: '', peer_id: ''
+    note: '', network_key: '', peer_id: ''
   }
 }
 const editingDevice = computed(() => devices.value.find(item => item.id === editingDeviceId.value))
@@ -300,7 +304,7 @@ function openEditDevice(device: Device) {
     semantic_kinds: [...(device.semantic_kinds || [])], is_gateway: device.is_gateway,
     manufacturer: device.manufacturer || '', model: device.model || '',
     ip_address: device.ip_address || '', mac_address: device.mac_address || '',
-    note: device.note || '', is_openwrt: device.is_openwrt,
+    note: device.note || '',
     network_key: device.network_key || '', peer_id: device.peer_id || ''
   }
   deviceDialogOpen.value = true
@@ -318,9 +322,9 @@ async function saveDeviceRecord() {
     ElMessage.warning('网关设备必须归属于一个网络节点')
     return
   }
-  if (draft.is_openwrt) draft.semantic_kinds = [...new Set([...draft.semantic_kinds, 'router', 'openwrt'])]
   if (!draft.name.trim()) { ElMessage.warning('请填写设备名称'); return }
-  if (draft.is_openwrt && !draft.ip_address.trim()) { ElMessage.warning('OpenWrt 设备需要填写一个管理 IP'); return }
+  const isOpenWrt = draft.semantic_kinds.includes('openwrt')
+  if (isOpenWrt && !draft.ip_address.trim()) { ElMessage.warning('OpenWrt 设备需要填写一个管理 IP'); return }
   if (previous?.is_gateway && !draft.is_gateway) {
     const ownedGroup = gatewayGroups.value.find(group => group.gateway_device_id === previous.id)
     if (ownedGroup?.device_count) {
@@ -331,7 +335,7 @@ async function saveDeviceRecord() {
       } catch { return }
     }
   }
-  if (previous?.is_openwrt && previous.openwrt_configured && !draft.is_openwrt) {
+  if (previous && isOpenWrtDevice(previous) && previous.openwrt_configured && !isOpenWrt) {
     try {
       await ElMessageBox.confirm('取消 OpenWrt 标识后，将同时清除该设备保存的 RPCD 发现服务配置。',
         '确认取消 OpenWrt 标识', { type: 'warning', confirmButtonText: '确认', cancelButtonText: '取消' })
@@ -499,12 +503,6 @@ async function initializeNetworkNodes() {
   } catch { return }
   await runNetworkNodeSync(true)
 }
-function onOpenWrtChange(enabled: boolean | string | number) {
-  const kinds = deviceDraft.value.semantic_kinds || []
-  deviceDraft.value.semantic_kinds = enabled
-    ? [...new Set([...kinds, 'router', 'openwrt'])]
-    : kinds.filter(kind => kind !== 'openwrt')
-}
 const isRefreshing = computed(() =>
   devicesQuery.isFetching.value || nodesQuery.isFetching.value || gatewayGroupsQuery.isFetching.value)
 async function refreshAll() {
@@ -634,8 +632,7 @@ watch(
                   <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <el-tag v-if="device.is_gateway" size="small" type="success" effect="dark">网关设备</el-tag>
                   <el-tag v-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
-                  <el-tag v-if="device.is_openwrt" size="small" type="success" effect="dark">OpenWrt</el-tag>
-                </div>
+                                  </div>
                 <div class="device-subtitle">
                   <span>{{ [device.manufacturer, device.model].filter(Boolean).join(' · ') || '未填写厂商与型号' }}</span>
                   <span v-if="device.ip_address">{{ device.ip_address }}</span>
@@ -645,7 +642,7 @@ watch(
                 <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
                   @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
-                <el-button v-if="device.is_openwrt" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
+                <el-button v-if="isOpenWrtDevice(device)" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
               </div>
             </div>
@@ -655,7 +652,7 @@ watch(
               <span v-if="device.is_node_device" class="node-association"><el-icon><Link /></el-icon>当前网络节点基础设备</span>
             </div>
             <p v-if="device.note" class="device-note">{{ device.note }}</p>
-            <div v-if="device.is_openwrt" class="openwrt-status">
+            <div v-if="isOpenWrtDevice(device)" class="openwrt-status">
               <el-icon><Connection /></el-icon>
               <span>{{ device.openwrt_configured ? 'RPCD 账号已配置' : 'RPCD 账号尚未配置' }}</span>
               <span v-if="device.openwrt_configured" class="openwrt-endpoint">
@@ -708,7 +705,7 @@ watch(
               clearable filterable class="full" placeholder="选择设备具备的类型/能力">
               <el-option v-for="item in semanticKindOptions" :key="item.value" :label="item.label" :value="item.value" />
             </el-select>
-            <div class="field-hint">语义标签直接描述设备类型与能力，可多选，例如同时具备「服务器」和「路由器」属性。</div>
+            <div class="field-hint">语义标签直接描述设备类型与能力，可多选；选择「OpenWrt」后启用该设备的 RPCD 配置入口，后续发现功能还要求该设备同时标记为网关设备。</div>
           </el-form-item>
           <el-form-item label="厂商">
             <el-input v-model="deviceDraft.manufacturer" maxlength="100" placeholder="例如：TP-Link" />
@@ -716,7 +713,7 @@ watch(
           <el-form-item label="型号">
             <el-input v-model="deviceDraft.model" maxlength="120" placeholder="例如：XDR6088" />
           </el-form-item>
-          <el-form-item label="设备管理 IP" :required="deviceDraft.is_openwrt">
+          <el-form-item label="设备管理 IP" :required="isOpenWrtDraft">
             <el-input v-model="deviceDraft.ip_address" placeholder="例如：192.168.1.1" />
           </el-form-item>
           <el-form-item label="MAC 地址">
@@ -726,13 +723,6 @@ watch(
             <el-input v-model="deviceDraft.note" type="textarea" :rows="2" maxlength="1000" show-word-limit />
           </el-form-item>
         </div>
-        <el-divider />
-        <el-form-item label="设备能力">
-          <el-checkbox v-model="deviceDraft.is_openwrt" @change="onOpenWrtChange">
-            这是 OpenWrt 路由器
-          </el-checkbox>
-          <div class="field-hint">只有标记为 OpenWrt 的设备才会出现专属 RPCD 配置；后续发现功能只会从同时标记为网关设备的 OpenWrt 设备发起。</div>
-        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="deviceDialogOpen = false">取消</el-button>

@@ -77,7 +77,7 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	if err := json.Unmarshal(gatewayGroupResponse.Body.Bytes(), &gatewayGroup); err != nil {
 		t.Fatal(err)
 	}
-	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","gateway_group_id":"` + gatewayGroup.ID + `","device_type":"router","ip_address":"192.168.1.1","is_openwrt":true,"is_gateway":true,"network_key":"network:home","peer_id":"peer-openwrt"}`
+	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","gateway_group_id":"` + gatewayGroup.ID + `","semantic_kinds":["openwrt"],"ip_address":"192.168.1.1","is_gateway":true,"network_key":"network:home","peer_id":"peer-openwrt"}`
 	created := request("POST", "/api/v1/devices", deviceBody, true, true)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("创建设备失败: %d %s", created.Code, created.Body.String())
@@ -87,6 +87,10 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &device); err != nil {
 		t.Fatal(err)
+	}
+	if strings.Contains(created.Body.String(), `"is_openwrt"`) ||
+		!strings.Contains(created.Body.String(), `"semantic_kinds":["openwrt"]`) {
+		t.Fatalf("设备 API 应只返回 OpenWrt 语义标签，不应暴露重复布尔标识: %s", created.Body.String())
 	}
 
 	config := request("PUT", "/api/v1/devices/"+device.ID+"/openwrt",
@@ -102,7 +106,7 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 		t.Fatalf("读取 OpenWrt 配置失败或泄漏密钥: %d %s", read.Code, read.Body.String())
 	}
 
-	normal := request("POST", "/api/v1/devices", `{"name":"普通路由器","device_type":"router","ip_address":"192.168.1.2"}`, true, true)
+	normal := request("POST", "/api/v1/devices", `{"name":"普通路由器","semantic_kinds":["router"],"ip_address":"192.168.1.2"}`, true, true)
 	if normal.Code != http.StatusCreated {
 		t.Fatalf("创建普通路由器失败: %d %s", normal.Code, normal.Body.String())
 	}
@@ -119,7 +123,7 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	}
 
 	child := request("POST", "/api/v1/devices",
-		`{"name":"客厅电视","device_type":"电视","gateway_group_id":"`+gatewayGroup.ID+`","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
+		`{"name":"客厅电视","semantic_kinds":["tv"],"gateway_group_id":"`+gatewayGroup.ID+`","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
 	if child.Code != http.StatusCreated {
 		t.Fatalf("同一节点网关组下添加第二台设备失败: %d %s", child.Code, child.Body.String())
 	}

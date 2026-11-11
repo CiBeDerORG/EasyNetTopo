@@ -34,7 +34,6 @@ export type Device = {
   ip_address?: string
   mac_address?: string
   note?: string
-  is_openwrt: boolean
   network_key?: string
   peer_id?: string
   openwrt_configured: boolean
@@ -56,7 +55,6 @@ export type DeviceInput = {
   ip_address: string
   mac_address: string
   note: string
-  is_openwrt: boolean
   network_key: string
   peer_id: string
 }

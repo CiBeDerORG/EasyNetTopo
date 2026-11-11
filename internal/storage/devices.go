@@ -71,7 +71,6 @@ type Device struct {
 	IPAddress           string   `json:"ip_address,omitempty"`
 	MACAddress          string   `json:"mac_address,omitempty"`
 	Note                string   `json:"note,omitempty"`
-	IsOpenWrt           bool     `json:"is_openwrt"`
 	NetworkKey          string   `json:"network_key,omitempty"`
 	PeerID              string   `json:"peer_id,omitempty"`
 	OpenWrtConfigured   bool     `json:"openwrt_configured"`
@@ -95,7 +94,6 @@ type DeviceInput struct {
 	IPAddress          string   `json:"ip_address"`
 	MACAddress         string   `json:"mac_address"`
 	Note               string   `json:"note"`
-	IsOpenWrt          bool     `json:"is_openwrt"`
 	NetworkKey         string   `json:"network_key"`
 	PeerID             string   `json:"peer_id"`
 }
@@ -378,6 +376,15 @@ func (s *DeviceStore) unseal(deviceID string, sealed []byte) (string, error) {
 	return string(plain), nil
 }
 
+func hasSemanticKind(kinds []string, target string) bool {
+	for _, kind := range kinds {
+		if kind == target {
+			return true
+		}
+	}
+	return false
+}
+
 func normalizeDevice(v *DeviceInput) error {
 	v.Name = strings.TrimSpace(v.Name)
 	v.GroupID = strings.TrimSpace(v.GroupID)
@@ -426,19 +433,6 @@ func normalizeDevice(v *DeviceInput) error {
 	if kind := legacyKinds[v.DeviceType]; kind != "" {
 		v.SemanticKinds = append(v.SemanticKinds, kind)
 	}
-	if v.IsOpenWrt {
-		hasRouterKind := false
-		for _, kind := range v.SemanticKinds {
-			if strings.TrimSpace(kind) == "router" {
-				hasRouterKind = true
-				break
-			}
-		}
-		if !hasRouterKind {
-			return ErrInvalidDevice
-		}
-		v.SemanticKinds = append(v.SemanticKinds, "openwrt")
-	}
 	seenKinds := make(map[string]bool)
 	kinds := make([]string, 0, len(v.SemanticKinds))
 	for _, kind := range v.SemanticKinds {
@@ -458,9 +452,6 @@ func normalizeDevice(v *DeviceInput) error {
 		return ErrInvalidDevice
 	}
 	v.SemanticKinds = kinds
-	if v.IsOpenWrt && !seenKinds["router"] {
-		return ErrInvalidDevice
-	}
 	for _, field := range []struct {
 		value string
 		limit int
@@ -488,7 +479,7 @@ func normalizeDevice(v *DeviceInput) error {
 		}
 		v.MACAddress = strings.ToLower(mac.String())
 	}
-	if v.IsOpenWrt {
+	if hasSemanticKind(v.SemanticKinds, "openwrt") {
 		ip, err := netip.ParseAddr(v.IPAddress)
 		if err != nil || !isPrivateIPv4(ip) {
 			return ErrInvalidDevice
@@ -593,9 +584,10 @@ const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name
 func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var v Device
 	var configured, https bool
+	var legacyIsOpenWrt bool
 	var semanticKinds string
 	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.GatewayGroupID, &v.GatewayGroupName, &v.OwnedGatewayGroupID, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
-		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &v.IsOpenWrt, &v.NetworkKey, &v.PeerID,
+		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID,
 		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt)
 	if err != nil {
 		return Device{}, err
@@ -605,6 +597,10 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	}
 	if v.SemanticKinds == nil {
 		v.SemanticKinds = []string{}
+	}
+	// 兼容历史记录：不改写数据库，只在读取结果中把旧标记映射为 OpenWrt 语义。
+	if legacyIsOpenWrt && !hasSemanticKind(v.SemanticKinds, "openwrt") {
+		v.SemanticKinds = append(v.SemanticKinds, "openwrt")
 	}
 	v.OpenWrtConfigured = configured
 	v.OpenWrtHTTPS = https
@@ -852,7 +848,7 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	_, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds),
 		0, input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
-		input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, now)
+		input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, now, now)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
 			return Device{}, ErrDeviceGroupNotFound
@@ -966,7 +962,7 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	}
 	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
 		input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds), input.IsGateway,
-		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, id)
+		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, now, id)
 	if err != nil {
 		return Device{}, err
 	}
@@ -977,7 +973,7 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	if n == 0 {
 		return Device{}, ErrDeviceNotFound
 	}
-	if !input.IsOpenWrt {
+	if !hasSemanticKind(input.SemanticKinds, "openwrt") {
 		if _, err = tx.ExecContext(ctx, "DELETE FROM device_openwrt_configs WHERE device_id=?", id); err != nil {
 			return Device{}, err
 		}
@@ -1303,7 +1299,7 @@ func (s *DeviceStore) DeviceOpenWrtConfig(ctx context.Context, id string) (Devic
 	if err != nil {
 		return DeviceOpenWrtConfig{}, err
 	}
-	if !device.IsOpenWrt {
+	if !hasSemanticKind(device.SemanticKinds, "openwrt") {
 		return DeviceOpenWrtConfig{}, ErrDeviceNotOpenWrt
 	}
 	var c DeviceOpenWrtConfig
@@ -1319,7 +1315,7 @@ func (s *DeviceStore) SaveDeviceOpenWrtConfig(ctx context.Context, id string, po
 	if err != nil {
 		return DeviceOpenWrtConfig{}, err
 	}
-	if !device.IsOpenWrt {
+	if !hasSemanticKind(device.SemanticKinds, "openwrt") {
 		return DeviceOpenWrtConfig{}, ErrDeviceNotOpenWrt
 	}
 	ip, parseErr := netip.ParseAddr(device.IPAddress)
@@ -1363,7 +1359,7 @@ func (s *DeviceStore) ClearDeviceOpenWrtConfig(ctx context.Context, id string) e
 	if err != nil {
 		return err
 	}
-	if !device.IsOpenWrt {
+	if !hasSemanticKind(device.SemanticKinds, "openwrt") {
 		return ErrDeviceNotOpenWrt
 	}
 	_, err = s.store.db.ExecContext(ctx, "DELETE FROM device_openwrt_configs WHERE device_id=?", id)
@@ -1374,7 +1370,7 @@ func (s *DeviceStore) DeviceOpenWrtSecret(ctx context.Context, id string) (Devic
 	if err != nil {
 		return DeviceOpenWrtSecret{}, err
 	}
-	if !device.IsOpenWrt {
+	if !hasSemanticKind(device.SemanticKinds, "openwrt") {
 		return DeviceOpenWrtSecret{}, ErrDeviceNotOpenWrt
 	}
 	var port int
