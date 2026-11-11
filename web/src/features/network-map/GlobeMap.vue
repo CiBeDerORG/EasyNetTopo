@@ -189,7 +189,7 @@ onMounted(() => {
     viewer.scene.globe.enableLighting = false
     viewer.scene.fog.enabled = false
     viewer.scene.backgroundColor = Cesium.Color.fromCssColorString('#061323')
-    viewer.scene.skyAtmosphere.show = true
+    if (viewer.scene.skyAtmosphere) viewer.scene.skyAtmosphere.show = true
     viewer.scene.screenSpaceCameraController.minimumZoomDistance = 350
     viewer.scene.screenSpaceCameraController.maximumZoomDistance = 45000000
     setBaseLayer()
