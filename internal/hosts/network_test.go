@@ -137,3 +137,19 @@ func TestNetworkDataUsesPairedAgentAndRejectsMismatch(t *testing.T) {
 		t.Fatal("未拒绝身份不匹配")
 	}
 }
+
+func TestNetworkPeerCenterKeepsOnlyDisplayTopology(t *testing.T) {
+	raw := []byte(`{"agent_id":"agent","data":[{"node_id":"100","hostname":"yun","ipv4":"10.10.10.1","direct_peers":[{"node_id":"200","hostname":"fnos","ipv4":"10.10.10.2","latency_ms":17,"network_secret":"leak"}],"credentials":"leak"}],"network_secret":"leak"}`)
+	filtered, err := filterNetworkData(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, want := range []string{"node_id", "direct_peers", "latency_ms", "17", "fnos"} {
+		if !strings.Contains(string(filtered), want) {
+			t.Fatalf("丢失 Peer Center 显示数据: %s", want)
+		}
+	}
+	if strings.Contains(string(filtered), "leak") || strings.Contains(string(filtered), "credentials") {
+		t.Fatal("全局拓扑查询泄露了非展示字段")
+	}
+}
