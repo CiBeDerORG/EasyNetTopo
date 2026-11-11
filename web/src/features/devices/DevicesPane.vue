@@ -65,7 +65,7 @@ const filteredDevices = computed(() => {
   if (!keyword) return devices.value
   return devices.value.filter(device => [
     device.name, device.group_name, device.device_type, device.manufacturer, device.model,
-    device.ip_address, device.mac_address, device.note, device.peer_id
+    device.ip_address, device.mac_address, device.note, device.peer_id, device.network_key
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const allFilteredSelected = computed(() => filteredDevices.value.length > 0 &&
@@ -109,6 +109,9 @@ function nodeValue(node: { networkKey: string; row: NetworkRow }) {
 function nodeForDevice(device: Device) {
   return nodeOptions.value.find(node => node.networkKey === device.network_key && node.row.id === device.peer_id)
 }
+const selectedNodeVisible = computed(() => !!deviceDraft.value.network_key && !!deviceDraft.value.peer_id &&
+  nodeOptions.value.some(node => node.networkKey === deviceDraft.value.network_key && node.row.id === deviceDraft.value.peer_id))
+const selectedNodeFallbackLabel = computed(() => '已关联节点当前不可见 · ' + deviceDraft.value.peer_id)
 function deviceNodeLabel(device: Device) {
   const node = nodeForDevice(device)
   if (node) return node.label + ' · ' + node.row.instance
@@ -430,6 +433,8 @@ async function refreshAll() {
           <el-form-item label="关联现有网络节点" class="span-two">
             <el-select :model-value="selectedNodeValue" clearable filterable class="full"
               placeholder="不关联网络节点" @update:model-value="selectNetworkNode">
+              <el-option v-if="selectedNodeValue && !selectedNodeVisible"
+                :label="selectedNodeFallbackLabel" :value="selectedNodeValue" />
               <el-option v-for="node in nodeOptions" :key="node.networkKey + '|' + node.row.id"
                 :label="node.label + ' · ' + node.row.ip + ' · ' + node.row.instance"
                 :value="nodeValue(node)" />
