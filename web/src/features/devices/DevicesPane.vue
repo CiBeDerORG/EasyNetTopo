@@ -325,7 +325,7 @@ async function runNetworkNodeSync(showMessage: boolean) {
       queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] })
     ])
     if (showMessage) {
-      ElMessage.success('网络节点同步完成：新增 ' + result.created + ' 台，已存在 ' + result.existing + ' 台；新节点自动补充已开启')
+      ElMessage.success('网络节点同步完成：新增 ' + result.created + ' 台，已存在 ' + result.existing + ' 台，跳过已删除 ' + result.skipped + ' 台；新节点自动补充已开启')
     }
   } catch (error) {
     if (showMessage) ElMessage.error(formatApiError(error))
@@ -549,7 +549,7 @@ watch(
       </template>
     </el-dialog>
 
-legacy group dialog    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
+    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
       <template v-if="openWrtTarget">
         <el-alert type="info" :closable="false" show-icon
           title="此配置属于设备「{{ openWrtTarget.name }}」，不会挂在分组上。RPCD 密钥在服务端加密保存，不会回传。" />

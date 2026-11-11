@@ -56,7 +56,7 @@ export type NetworkNodeDeviceInput = {
 }
 
 export type NetworkNodeSyncStatus = { enabled: boolean }
-export type NetworkNodeSyncResult = { created: number; existing: number; enabled: boolean }
+export type NetworkNodeSyncResult = { created: number; existing: number; skipped: number; enabled: boolean }
 
 export type DeviceOpenWrtConfig = {
   device_id: string

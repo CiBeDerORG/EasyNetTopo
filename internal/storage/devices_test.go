@@ -239,7 +239,7 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Created != 1 || third.Existing != 2 {
+	if third.Created != 1 || third.Existing != 1 || third.Skipped != 1 {
 		t.Fatalf("自动补充新节点结果错误: %+v", third)
 	}
 	items, err = store.ListDevices(ctx)

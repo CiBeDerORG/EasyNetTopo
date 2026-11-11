@@ -87,6 +87,7 @@ type NetworkNodeDeviceInput struct {
 type NetworkNodeSyncResult struct {
 	Created  int  `json:"created"`
 	Existing int  `json:"existing"`
+	Skipped  int  `json:"skipped"`
 	Enabled  bool `json:"enabled"`
 }
 
@@ -628,6 +629,9 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 	now := time.Now().UTC().Format(time.RFC3339)
 	for _, node := range nodes {
 		input := DeviceInput{Name: node.Name, DeviceType: "通用设备", NetworkKey: node.NetworkKey, PeerID: node.PeerID}
+		if input.NetworkKey == "" || input.PeerID == "" {
+			return NetworkNodeSyncResult{}, ErrInvalidDevice
+		}
 		if err := normalizeDevice(&input); err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
@@ -651,7 +655,7 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			return NetworkNodeSyncResult{}, err
 		}
 		if seen > 0 {
-			result.Existing++
+			result.Skipped++
 			continue
 		}
 		id, err := uuid()
