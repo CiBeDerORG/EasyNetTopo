@@ -8,6 +8,7 @@ import { mergedNetworkRows, type NetworkRow } from './data'
 import NetworkNodeDetails from './NetworkNodeDetails.vue'
 import NetworkNodeLocationPicker from './NetworkNodeLocationPicker.vue'
 import { listNodeAttributes, saveNodeAttributes, type NodeAttributes } from './attributes'
+import { networkNodeAttributeKey } from './identity'
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -38,11 +39,8 @@ const attributesQuery = useQuery({
 })
 const attributesByKey = computed(() => new Map<string, NodeAttributes>((attributesQuery.data.value?.attributes || [])
   .map(attr => [attr.network_key + '|' + attr.peer_id, attr] as const)))
-function networkScope(row: NetworkRow): string {
-  return row.networkKey.startsWith('instance:') ? 'entry:' + hostId.value + ':' + row.networkKey : row.networkKey
-}
 function getAttributes(row: NetworkRow): NodeAttributes | undefined {
-  return attributesByKey.value.get(networkScope(row) + '|' + row.id)
+  return attributesByKey.value.get(networkNodeAttributeKey(row, hostId.value) + '|' + row.id)
 }
 const editorOpen = ref(false)
 const editorSaving = ref(false)
