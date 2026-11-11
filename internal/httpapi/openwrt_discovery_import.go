@@ -37,9 +37,9 @@ func firstDiscoveryIP(candidates ...string) string {
 // 仅 POST scan 的有效新快照自动导入；GET list 和失败时留下的旧快照都不能写设备库。
 func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.DeviceStore, gatewayID, kind string, raw json.RawMessage) (json.RawMessage, *openWrtDiscoveryError) {
 	var snapshot struct {
-		Status      string                     `json:"status"`
-		HasSnapshot bool                       `json:"has_snapshot"`
-		Devices     []openWrtDiscoveryRecord   `json:"devices"`
+		Status      string                   `json:"status"`
+		HasSnapshot bool                     `json:"has_snapshot"`
+		Devices     []openWrtDiscoveryRecord `json:"devices"`
 	}
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return nil, discoveryError(http.StatusBadGateway, "openwrt_discovery_invalid_response", "发现返回的设备数据结构无效")
