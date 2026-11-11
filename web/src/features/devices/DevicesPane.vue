@@ -2,7 +2,7 @@
 import { computed, ref } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, Edit, Delete, Router, Monitor, Smartphone, Tablet, Tv, Server, Link, Setting } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
@@ -86,7 +86,7 @@ const typeLabels: Record<DeviceType, string> = {
   router: '路由器', computer: '电脑', phone: '手机', tablet: '平板', tv: '电视',
   nas: 'NAS', other: '其他设备'
 }
-const typeIcons = { router: Router, computer: Monitor, phone: Smartphone, tablet: Tablet, tv: Tv, nas: Server, other: Monitor }
+const typeIcons = { router: Connection, computer: Monitor, phone: Iphone, tablet: Iphone, tv: Monitor, nas: Box, other: Monitor }
 function typeLabel(type: DeviceType) { return typeLabels[type] || '其他设备' }
 function nodeValue(node: { networkKey: string; row: NetworkRow }) {
   return JSON.stringify([node.networkKey, node.row.id])
@@ -357,7 +357,7 @@ async function refreshAll() {
             </div>
             <p v-if="device.note" class="device-note">{{ device.note }}</p>
             <div v-if="device.is_openwrt" class="openwrt-status">
-              <el-icon><Router /></el-icon>
+              <el-icon><Connection /></el-icon>
               <span>{{ device.openwrt_configured ? 'RPCD 发现服务已配置' : 'OpenWrt 发现服务尚未配置' }}</span>
               <span v-if="device.openwrt_configured" class="openwrt-endpoint">
                 {{ device.openwrt_https ? 'HTTPS' : 'HTTP' }} · {{ device.openwrt_rpcd_port || 80 }}

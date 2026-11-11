@@ -55,7 +55,7 @@ function editAttributes(row: NetworkRow) {
   editingRow.value = row
   const saved = getAttributes(row)
   draft.value = saved ? { ...saved, location: { ...saved.location } } : {
-    network_key: networkScope(row), peer_id: row.id, alias: '',
+    network_key: networkNodeAttributeKey(row, hostId.value), peer_id: row.id, alias: '',
     has_public_ip: false, public_ip: '',
     location: { country: '', province: '', city: '', county: '', latitude: null, longitude: null }
   }
