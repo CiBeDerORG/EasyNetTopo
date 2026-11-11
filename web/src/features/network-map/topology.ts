@@ -51,11 +51,15 @@ function metric(value: string): number | null {
   return match ? numerical(match[1].replaceAll(',', '')) : null
 }
 function kindOf(row: NetworkRow): MapLinkKind {
-  const hop = row.nextHop
-  if (hop !== '—' && hop !== row.id) return 'relay'
+  // EasyTier route.cost 是路由类型的首要依据：
+  // 1 表示直连，>1 表示经过中继。next_hop_peer_id 仅在 cost 缺失时兜底，
+  // 不能先于 cost 判断，否则会把部分直连错误画成虚线。
   const cost = numerical(row.cost)
-  if (cost !== null && cost > 1) return 'relay'
   if (cost === 1) return 'p2p'
+  if (cost !== null && cost > 1) return 'relay'
+  if (cost === null && row.nextHop !== '—') {
+    return row.nextHop === row.id ? 'p2p' : 'relay'
+  }
   return 'unknown'
 }
 function isValidLocation(attr?: NodeAttributes): boolean {
@@ -135,6 +139,7 @@ export function buildMapTopology(
   }
 
   const instanceIDs = [...new Set(rows.map(row => row.instanceID))]
+  const seenPeerCenterPairs = new Set<string>()
   for (const group of peerCenterGroups(peerCenterData, instanceIDs)) {
     const byID = new Map(nodes.filter(node => node.instanceID === group.instanceID)
       .map(node => [node.id, node]))
@@ -146,8 +151,20 @@ export function buildMapTopology(
         const to = byID.get(String(data.node_id ?? ''))
         if (!to || to.key === from.key) continue
         const pair = pairKey(from.key, to.key)
-        if (directPairs.has(pair)) continue
-        directPairs.add(pair)
+        if (seenPeerCenterPairs.has(pair)) continue
+        seenPeerCenterPairs.add(pair)
+
+        // Peer Center 来自 EasyTier 全局 Peer Map，表示两个节点确实建立了直连。
+        // 如果入口 Route 对同一节点对推断出中继，真实直连关系优先，避免虚线覆盖实线。
+        const existing = links.find(link => pairKey(link.from, link.to) === pair)
+        if (existing) {
+          existing.kind = 'p2p'
+          existing.source = 'peer-center'
+          existing.via = null
+          existing.latencyMs = numerical(data.latency_ms) ?? existing.latencyMs
+          existing.cost = null
+          continue
+        }
         links.push({
           key: 'peer-center:' + pair, from: from.key, to: to.key,
           via: null, kind: 'p2p', source: 'peer-center',
