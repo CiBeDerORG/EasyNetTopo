@@ -139,7 +139,7 @@ func TestGatewayDiscoveryAutoImportRejectsWrongScopeAndMalformedRecords(t *testi
 		{Name: "非法 MAC", MACAddress: "not-a-mac"},
 		{Name: "只有名称"},
 		{Name: "无效 IP", IPAddress: "192.168.10.999"},
-		{Name: "无名但有 IP", IPAddress: "192.168.10.23"},
+		{IPAddress: "192.168.10.23"},
 		{Name: "电视\n盒子", IPAddress: "192.168.10.24"},
 	})
 	if err != nil || result.Created != 2 || result.Skipped != 3 {
