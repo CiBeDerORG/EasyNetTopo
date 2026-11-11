@@ -605,7 +605,7 @@ func TestDeviceGatewayOwnershipSupportsNestedGatewaysAndNodeDevices(t *testing.T
 	if err != nil || movedGrandchild.NetworkKey != "network:other" || movedGrandchild.PeerID != "peer-other" {
 		t.Fatalf("迁移网关时应递归迁移下挂设备: %+v %v", movedGrandchild, err)
 	}
-	groups, err = store.ListGatewayGroups(ctx, "network:other", "peer-other")
+	groups, err := store.ListGatewayGroups(ctx, "network:other", "peer-other")
 	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != childGateway.ID || groups[0].DeviceCount != 1 {
 		t.Fatalf("迁移后网关组范围和层级错误: %+v %v", groups, err)
 	}

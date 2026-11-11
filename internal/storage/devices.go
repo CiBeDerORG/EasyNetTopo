@@ -698,11 +698,14 @@ func validateGatewayGroupScopeTx(ctx context.Context, tx *sql.Tx, groupID, netwo
 		}
 		var ancestorID string
 		err = tx.QueryRowContext(ctx, "SELECT gateway_device_id FROM device_gateway_groups WHERE id=?", parentGroupID).Scan(&ancestorID)
-		if errors.Is(err, sql.ErrNoRows) || ancestorID == "" {
+		if errors.Is(err, sql.ErrNoRows) {
 			break
 		}
 		if err != nil {
 			return "", err
+		}
+		if ancestorID == "" {
+			break
 		}
 		current = ancestorID
 	}
