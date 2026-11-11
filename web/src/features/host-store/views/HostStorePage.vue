@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
+import NetworkMapPane from '../../network-map/NetworkMapPane.vue'
 import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
@@ -52,7 +53,8 @@ import type {
 const route = useRoute()
 const isNetworkPage = computed(() => route.path === '/network-nodes')
 const isDevicesPage = computed(() => route.path === '/devices')
-const isStorePage = computed(() => !isNetworkPage.value && !isDevicesPage.value)
+const isMapPage = computed(() => route.path === '/network-map')
+const isStorePage = computed(() => !isNetworkPage.value && !isDevicesPage.value && !isMapPage.value)
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
 const authQuery = useQuery({
@@ -769,8 +771,8 @@ async function logout() {
     <main class="workspace">
       <header class="topbar">
         <div>
-          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : '主机商店' }}</div>
-          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : '主机商店' }}</h1></div>
+          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : isMapPage ? '网络地图' : '主机商店' }}</div>
+          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : isMapPage ? '网络地图' : '主机商店' }}</h1></div>
         </div>
         <div class="topbar-actions">
           <el-select class="theme-switcher" aria-label="页面主题" :model-value="ui.themeMode"
@@ -790,6 +792,7 @@ async function logout() {
 
       <NetworkNodesPane v-if="isNetworkPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
       <DevicesPane v-else-if="isDevicesPage" :hosts="hosts" />
+      <NetworkMapPane v-else-if="isMapPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
       <div v-else class="main-layout">
         <HostListPane
           :hosts="hosts"
