@@ -87,8 +87,10 @@ type DeviceInput struct {
 	GatewayGroupID string   `json:"gateway_group_id"`
 	DeviceType     string   `json:"device_type"`
 	SemanticKinds  []string `json:"semantic_kinds"`
-	IsGateway      bool     `json:"is_gateway"`
-	Manufacturer   string   `json:"manufacturer"`
+	IsGateway          bool   `json:"is_gateway"`
+	CreateGatewayGroup bool   `json:"create_gateway_group,omitempty"`
+	GatewayGroupName   string `json:"gateway_group_name,omitempty"`
+	Manufacturer       string `json:"manufacturer"`
 	Model          string   `json:"model"`
 	IPAddress      string   `json:"ip_address"`
 	MACAddress     string   `json:"mac_address"`
@@ -330,6 +332,7 @@ func normalizeDevice(v *DeviceInput) error {
 	v.Name = strings.TrimSpace(v.Name)
 	v.GroupID = strings.TrimSpace(v.GroupID)
 	v.GatewayGroupID = strings.TrimSpace(v.GatewayGroupID)
+	v.GatewayGroupName = strings.TrimSpace(v.GatewayGroupName)
 	v.DeviceType = strings.TrimSpace(v.DeviceType)
 	v.Manufacturer = strings.TrimSpace(v.Manufacturer)
 	v.Model = strings.TrimSpace(v.Model)
@@ -346,6 +349,16 @@ func normalizeDevice(v *DeviceInput) error {
 	}
 	if len([]rune(v.DeviceType)) > 100 || strings.ContainsAny(v.DeviceType, "\r\n\x00") {
 		return ErrInvalidDevice
+	}
+	if v.CreateGatewayGroup {
+		if v.GatewayGroupID != "" || v.NetworkKey == "" || v.PeerID == "" {
+			return ErrInvalidDevice
+		}
+		if _, err := normalizeGatewayGroup(v.GatewayGroupName, v.NetworkKey, v.PeerID); err != nil {
+			return err
+		}
+	} else {
+		v.GatewayGroupName = ""
 	}
 	allowedKinds := map[string]bool{
 		"router": true, "server": true, "openwrt": true, "phone": true, "computer": true,
@@ -603,11 +616,15 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	if err := normalizeDevice(&input); err != nil {
 		return Device{}, err
 	}
-	if input.IsGateway && input.GatewayGroupID == "" {
-		return Device{}, ErrInvalidDevice
-	}
-	if err := s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
-		return Device{}, err
+	if input.CreateGatewayGroup {
+		input.IsGateway = true
+	} else {
+		if input.IsGateway && input.GatewayGroupID == "" {
+			return Device{}, ErrInvalidDevice
+		}
+		if err := s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
+			return Device{}, err
+		}
 	}
 	id, err := uuid()
 	if err != nil {
@@ -617,8 +634,19 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	if err != nil {
 		return Device{}, err
 	}
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return Device{}, err
+	}
+	defer tx.Rollback()
+	if input.CreateGatewayGroup {
+		input.GatewayGroupID, err = createGatewayGroupTx(ctx, tx, input.GatewayGroupName, input.NetworkKey, input.PeerID)
+		if err != nil {
+			return Device{}, err
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = s.store.db.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+	_, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
 		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds),
 		0, input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
 		input.Note, input.IsOpenWrt, input.NetworkKey, input.PeerID, now, now)
@@ -630,6 +658,9 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 			strings.Contains(strings.ToLower(err.Error()), "unique constraint failed: devices.gateway_group_id") {
 			return Device{}, ErrGatewayDeviceConflict
 		}
+		return Device{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Device{}, err
 	}
 	return s.Device(ctx, id)
@@ -656,12 +687,25 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		input.NetworkKey, input.PeerID = currentNetworkKey, currentPeerID
 		input.GatewayGroupID = ""
 		input.IsGateway = false
+		input.CreateGatewayGroup = false
+		input.GatewayGroupName = ""
 	}
-	if input.IsGateway && input.GatewayGroupID == "" {
-		return Device{}, ErrInvalidDevice
-	}
-	if err = s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
-		return Device{}, err
+	if input.CreateGatewayGroup {
+		if input.GatewayGroupID != "" {
+			return Device{}, ErrInvalidDevice
+		}
+		input.GatewayGroupID, err = createGatewayGroupTx(ctx, tx, input.GatewayGroupName, input.NetworkKey, input.PeerID)
+		if err != nil {
+			return Device{}, err
+		}
+		input.IsGateway = true
+	} else {
+		if input.IsGateway && input.GatewayGroupID == "" {
+			return Device{}, ErrInvalidDevice
+		}
+		if err = s.validateGatewayGroupScope(ctx, input.GatewayGroupID, input.NetworkKey, input.PeerID); err != nil {
+			return Device{}, err
+		}
 	}
 	semanticKinds, err := json.Marshal(input.SemanticKinds)
 	if err != nil {
@@ -730,6 +774,27 @@ func normalizeGatewayGroup(name, networkKey, peerID string) (string, error) {
 		return "", ErrInvalidGatewayGroup
 	}
 	return name, nil
+}
+
+func createGatewayGroupTx(ctx context.Context, tx *sql.Tx, name, networkKey, peerID string) (string, error) {
+	name, err := normalizeGatewayGroup(name, networkKey, peerID)
+	if err != nil {
+		return "", err
+	}
+	id, err := uuid()
+	if err != nil {
+		return "", err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	_, err = tx.ExecContext(ctx, "INSERT INTO device_gateway_groups(id,name,network_key,peer_id,created_at,updated_at) VALUES(?,?,?,?,?,?)",
+		id, name, strings.TrimSpace(networkKey), strings.TrimSpace(peerID), now, now)
+	if err != nil {
+		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+			return "", ErrInvalidGatewayGroup
+		}
+		return "", err
+	}
+	return id, nil
 }
 
 func (s *DeviceStore) CreateGatewayGroup(ctx context.Context, name, networkKey, peerID string) (GatewayGroup, error) {

@@ -512,3 +512,74 @@ func TestNewDeviceStoreDoesNotRewriteHistoricalDeviceRows(t *testing.T) {
 		t.Fatalf("启动时不应自动改写历史设备标识或类型标签: %+v", legacy)
 	}
 }
+
+func TestDeviceCanBeMovedAndPromotedToGatewayGroupAtomically(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	direct, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "上海-OWRT", NetworkKey: "network:old", PeerID: "peer-old",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updated, err := store.UpdateDevice(ctx, direct.ID, DeviceInput{
+		Name: "上海-OWRT", NetworkKey: "network:home", PeerID: "peer-home",
+		CreateGatewayGroup: true, GatewayGroupName: "上海-OWRT 网关组",
+		SemanticKinds: []string{"router", "openwrt"}, IsOpenWrt: false,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.NetworkKey != "network:home" || updated.PeerID != "peer-home" ||
+		!updated.IsGateway || updated.GatewayGroupID == "" {
+		t.Fatalf("编辑设备迁移节点并创建网关组失败: %+v", updated)
+	}
+	oldGroups, err := store.ListGatewayGroups(ctx, "network:old", "peer-old")
+	if err != nil || len(oldGroups) != 0 {
+		t.Fatalf("旧节点不应残留网关组: %+v %v", oldGroups, err)
+	}
+	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-home")
+	if err != nil || len(groups) != 1 || groups[0].ID != updated.GatewayGroupID ||
+		groups[0].GatewayDeviceID != updated.ID || groups[0].DeviceCount != 1 {
+		t.Fatalf("新网关组与网关设备关联错误: %+v %v", groups, err)
+	}
+
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "客厅电视", GatewayGroupID: updated.GatewayGroupID,
+		NetworkKey: "network:home", PeerID: "peer-home",
+	})
+	if err != nil || child.GatewayGroupID != updated.GatewayGroupID || child.IsGateway {
+		t.Fatalf("无法向自动创建的网关组添加下挂设备: %+v %v", child, err)
+	}
+	groups, err = store.ListGatewayGroups(ctx, "network:home", "peer-home")
+	if err != nil || len(groups) != 1 || groups[0].DeviceCount != 2 {
+		t.Fatalf("网关组设备计数错误: %+v %v", groups, err)
+	}
+
+	created, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "备用路由器", NetworkKey: "network:home", PeerID: "peer-home",
+		CreateGatewayGroup: true, GatewayGroupName: "备用网关组",
+	})
+	if err != nil || !created.IsGateway || created.GatewayGroupID == "" {
+		t.Fatalf("创建直属设备时自动创建网关组失败: %+v %v", created, err)
+	}
+	if _, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "重复网关", NetworkKey: "network:home", PeerID: "peer-home",
+		CreateGatewayGroup: true, GatewayGroupName: "上海-OWRT 网关组",
+	}); !errors.Is(err, ErrInvalidGatewayGroup) {
+		t.Fatalf("同一节点下不应允许重复网关组名称: %v", err)
+	}
+	groups, err = store.ListGatewayGroups(ctx, "network:home", "peer-home")
+	if err != nil || len(groups) != 2 {
+		t.Fatalf("重复创建失败后留下了多余网关组: %+v %v", groups, err)
+	}
+}

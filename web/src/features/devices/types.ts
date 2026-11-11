@@ -18,8 +18,6 @@ export type GatewayGroup = {
   updated_at: string
 }
 
-export type DeviceType = string
-
 export type Device = {
   id: string
   name: string
@@ -27,7 +25,6 @@ export type Device = {
   group_name?: string
   gateway_group_id?: string
   gateway_group_name?: string
-  device_type: DeviceType
   semantic_kinds: string[]
   is_node_device: boolean
   is_gateway: boolean
@@ -51,9 +48,10 @@ export type DeviceInput = {
   name: string
   group_id: string
   gateway_group_id: string
-  device_type: DeviceType
   semantic_kinds: string[]
   is_gateway: boolean
+  create_gateway_group: boolean
+  gateway_group_name: string
   manufacturer: string
   model: string
   ip_address: string
