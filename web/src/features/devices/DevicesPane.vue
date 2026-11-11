@@ -10,8 +10,8 @@ import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey } from '../network-nodes/identity'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
 import {
-  createDevice, deleteDevice, getDevices, getNodeDevices, getGatewayGroups, createGatewayGroup,
-  updateGatewayGroup, deleteGatewayGroup, getDeviceOpenWrtConfig, getNetworkNodeSyncStatus,
+  createDevice, deleteDevice, getDevices, getNodeDevices, getGatewayGroups,
+  getDeviceOpenWrtConfig, getNetworkNodeSyncStatus,
   syncNetworkNodeDevices, saveDeviceOpenWrtConfig, clearDeviceOpenWrtConfig, updateDevice
 } from './api'
 import type {
@@ -47,7 +47,7 @@ type NodeOption = {
 type DeviceSection = {
   id: string
   name: string
-  kind: 'node' | 'direct' | 'gateway'
+  kind: 'direct' | 'gateway'
   items: Device[]
   gatewayGroup?: GatewayGroup
   gatewayDevice?: Device
@@ -177,33 +177,34 @@ const filteredDevices = computed(() => {
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const nodeDevices = computed(() => filteredDevices.value.filter(device => device.is_node_device))
-const directDevices = computed(() => filteredDevices.value.filter(device =>
-  !device.is_node_device && !device.gateway_group_id))
-const gatewayGroupSections = computed(() => gatewayGroups.value.map(group => {
-  const items = filteredDevices.value.filter(device => device.gateway_group_id === group.id)
-  return {
-    ...group,
-    items,
-    gatewayDevice: items.find(device => device.is_gateway),
-    childDevices: items.filter(device => !device.is_gateway)
-  }
-}).filter(group => !search.value.trim() || group.items.length > 0))
+const directDevices = computed(() => filteredDevices.value.filter(device => !device.gateway_group_id))
+const gatewayGroupSections = computed(() => gatewayGroups.value
+  .filter(group => !!group.gateway_device_id)
+  .map(group => {
+    const items = filteredDevices.value.filter(device => device.gateway_group_id === group.id)
+    const gatewayDevice = devices.value.find(device => device.id === group.gateway_device_id)
+    return { ...group, items, gatewayDevice }
+  })
+  .filter(group => !!group.gatewayDevice && (!search.value.trim() || group.items.length > 0)))
 const deviceSections = computed<DeviceSection[]>(() => {
   const result: DeviceSection[] = []
-  if (nodeDevices.value.length) {
-    result.push({ id: 'node-devices', name: '网络节点设备', kind: 'node', items: nodeDevices.value })
-  }
-  if (directDevices.value.length || !search.value.trim()) {
+  if (directDevices.value.length) {
     result.push({ id: 'direct-devices', name: '直属设备', kind: 'direct', items: directDevices.value })
   }
   for (const group of gatewayGroupSections.value) {
     result.push({
-      id: group.id, name: group.name, kind: 'gateway', items: group.items,
-      gatewayGroup: group, gatewayDevice: group.gatewayDevice
+      id: group.id,
+      name: (group.gatewayDevice?.name || group.name) + ' 下挂设备',
+      kind: 'gateway',
+      items: group.items,
+      gatewayGroup: group,
+      gatewayDevice: group.gatewayDevice
     })
   }
   return result
 })
+
+
 const selectableDevices = computed(() => filteredDevices.value.filter(device => !device.is_node_device))
 const allFilteredSelected = computed(() => selectableDevices.value.length > 0 &&
   selectableDevices.value.every(device => selectedDeviceIds.value.includes(device.id)))
@@ -237,7 +238,7 @@ function deviceIcon(device: Device) {
   const kind = (device.semantic_kinds || []).find(value => value in typeIcons)
   return kind ? typeIcons[kind] : Monitor
 }
-const gatewayCount = computed(() => gatewayGroups.value.length)
+const gatewayCount = computed(() => gatewayGroups.value.filter(group => !!group.gateway_device_id).length)
 const deviceAssetCount = computed(() => filteredDevices.value.filter(device => !device.is_node_device).length)
 const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
 
@@ -248,22 +249,12 @@ const deviceDraft = ref<DeviceInput>(emptyDevice())
 function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
-    is_gateway: false, create_gateway_group: false, gateway_group_name: '',
-    manufacturer: '', model: '', ip_address: '', mac_address: '',
+    is_gateway: false, manufacturer: '', model: '', ip_address: '', mac_address: '',
     note: '', is_openwrt: false, network_key: '', peer_id: ''
   }
 }
 const editingDevice = computed(() => devices.value.find(item => item.id === editingDeviceId.value))
 const isNodeDeviceEditing = computed(() => editingDevice.value?.is_node_device === true)
-const deviceDialogGatewayGroupsQuery = useQuery({
-  queryKey: computed(() => ['device-dialog-gateway-groups', deviceDraft.value.network_key, deviceDraft.value.peer_id]),
-  queryFn: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
-    ? getGatewayGroups(deviceDraft.value.network_key, deviceDraft.value.peer_id)
-    : Promise.resolve([] as GatewayGroup[]),
-  enabled: computed(() => deviceDialogOpen.value && !!deviceDraft.value.network_key && !!deviceDraft.value.peer_id),
-  retry: 0
-})
-const deviceDialogGatewayGroups = computed(() => deviceDialogGatewayGroupsQuery.data.value || [])
 const deviceDraftNodeKey = computed({
   get: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
     ? JSON.stringify([deviceDraft.value.network_key, deviceDraft.value.peer_id]) : '',
@@ -273,26 +264,22 @@ const deviceDraftNodeKey = computed({
     const peerId = node?.peerId || ''
     if (networkKey !== deviceDraft.value.network_key || peerId !== deviceDraft.value.peer_id) {
       deviceDraft.value.gateway_group_id = ''
-      deviceDraft.value.is_gateway = false
-      deviceDraft.value.create_gateway_group = false
-      deviceDraft.value.gateway_group_name = ''
     }
     deviceDraft.value.network_key = networkKey
     deviceDraft.value.peer_id = peerId
   }
 })
-const selectedGatewayGroup = computed(() =>
-  deviceDialogGatewayGroups.value.find(group => group.id === deviceDraft.value.gateway_group_id))
-const gatewayGroupHasOtherGateway = computed(() =>
-  !!selectedGatewayGroup.value?.gateway_device_id && selectedGatewayGroup.value.gateway_device_id !== editingDeviceId.value)
-function openCreateDevice(gatewayGroupID = '') {
+function openCreateDevice(gatewayDevice: Device) {
+  if (!gatewayDevice.owned_gateway_group_id) {
+    ElMessage.warning('该设备尚未配置网关层级')
+    return
+  }
   editingDeviceId.value = ''
-  const node = selectedNode.value
   deviceDraft.value = {
     ...emptyDevice(),
-    gateway_group_id: gatewayGroupID,
-    network_key: node?.networkKey || '',
-    peer_id: node?.peerId || ''
+    gateway_group_id: gatewayDevice.owned_gateway_group_id,
+    network_key: gatewayDevice.network_key || '',
+    peer_id: gatewayDevice.peer_id || ''
   }
   deviceDialogOpen.value = true
 }
@@ -301,26 +288,12 @@ function openEditDevice(device: Device) {
   deviceDraft.value = {
     name: device.name, group_id: '', gateway_group_id: device.gateway_group_id || '',
     semantic_kinds: [...(device.semantic_kinds || [])], is_gateway: device.is_gateway,
-    create_gateway_group: false, gateway_group_name: '',
     manufacturer: device.manufacturer || '', model: device.model || '',
     ip_address: device.ip_address || '', mac_address: device.mac_address || '',
     note: device.note || '', is_openwrt: device.is_openwrt,
     network_key: device.network_key || '', peer_id: device.peer_id || ''
   }
   deviceDialogOpen.value = true
-}
-function onGatewayGroupChange(value: string) {
-  deviceDraft.value.create_gateway_group = false
-  deviceDraft.value.gateway_group_name = ''
-  if (!value) deviceDraft.value.is_gateway = false
-}
-function onCreateGatewayGroupChange(enabled: boolean | string | number) {
-  const checked = enabled === true || enabled === 1 || enabled === 'true'
-  deviceDraft.value.gateway_group_id = ''
-  deviceDraft.value.is_gateway = checked
-  if (checked && !deviceDraft.value.gateway_group_name.trim()) {
-    deviceDraft.value.gateway_group_name = (deviceDraft.value.name.trim() || '新建') + ' 网关组'
-  }
 }
 async function saveDeviceRecord() {
   if (savingDevice.value) return
@@ -330,28 +303,23 @@ async function saveDeviceRecord() {
     draft.network_key = previous.network_key || ''
     draft.peer_id = previous.peer_id || ''
     draft.gateway_group_id = ''
-    draft.is_gateway = false
-    draft.create_gateway_group = false
-    draft.gateway_group_name = ''
   }
-  if (draft.create_gateway_group) {
-    if (!draft.network_key || !draft.peer_id) { ElMessage.warning('请先选择所属网络节点'); return }
-    if (!draft.gateway_group_name.trim()) { ElMessage.warning('请填写新网关组名称'); return }
-    draft.gateway_group_id = ''
-    draft.is_gateway = true
-  } else if (!draft.gateway_group_id) {
-    draft.is_gateway = false
+  if (draft.is_gateway && (!draft.network_key || !draft.peer_id)) {
+    ElMessage.warning('网关设备必须归属于一个网络节点')
+    return
   }
   if (draft.is_openwrt) draft.semantic_kinds = [...new Set([...draft.semantic_kinds, 'router', 'openwrt'])]
   if (!draft.name.trim()) { ElMessage.warning('请填写设备名称'); return }
-  if (draft.is_gateway && !draft.gateway_group_id && !draft.create_gateway_group) {
-    ElMessage.warning('网关自身设备必须归属一个网关组')
-    return
-  }
   if (draft.is_openwrt && !draft.ip_address.trim()) { ElMessage.warning('OpenWrt 设备需要填写一个管理 IP'); return }
-  if (draft.is_gateway && gatewayGroupHasOtherGateway.value) {
-    ElMessage.warning('该网关组已经绑定网关自身设备')
-    return
+  if (previous?.is_gateway && !draft.is_gateway) {
+    const ownedGroup = gatewayGroups.value.find(group => group.gateway_device_id === previous.id)
+    if (ownedGroup?.device_count) {
+      try {
+        await ElMessageBox.confirm(
+          '取消网关属性后，该设备的下挂设备会提升为当前设备的同级设备；如果下挂设备本身也是网关，其下级关系会保留。是否继续？',
+          '确认取消网关属性', { type: 'warning', confirmButtonText: '确认取消', cancelButtonText: '保留网关属性' })
+      } catch { return }
+    }
   }
   if (previous?.is_openwrt && previous.openwrt_configured && !draft.is_openwrt) {
     try {
@@ -374,6 +342,7 @@ async function saveDeviceRecord() {
   } catch (error) { ElMessage.error(formatApiError(error)) }
   finally { savingDevice.value = false }
 }
+
 async function deleteSelectedDevices() {
   const ids = [...selectedDeviceIds.value]
   if (!ids.length) return
@@ -395,46 +364,7 @@ async function deleteSelectedDevices() {
   }
 }
 
-async function createGatewayGroupRecord() {
-  if (!selectedNode.value) { ElMessage.warning('请先选择一个网络节点'); return }
-  try {
-    const { value } = await ElMessageBox.prompt('为当前网络节点创建一个网关组。', '新建网关组', {
-      inputValue: '新网关组', inputPlaceholder: '例如：家庭网络', inputValidator: value => !!value.trim() || '请输入网关组名称',
-      confirmButtonText: '创建', cancelButtonText: '取消'
-    })
-    await createGatewayGroup(value, selectedNode.value.networkKey, selectedNode.value.peerId)
-    await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
-    ElMessage.success('网关组已创建')
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
-  }
-}
-async function renameGatewayGroupRecord(group: GatewayGroup) {
-  try {
-    const { value } = await ElMessageBox.prompt('修改网关组名称。', '重命名网关组', {
-      inputValue: group.name, inputValidator: value => !!value.trim() || '请输入网关组名称',
-      confirmButtonText: '保存', cancelButtonText: '取消'
-    })
-    await updateGatewayGroup(group.id, value)
-    await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
-    ElMessage.success('网关组名称已更新')
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
-  }
-}
-async function removeGatewayGroup(group: GatewayGroup) {
-  try {
-    await ElMessageBox.confirm(
-      '删除网关组后，组内网关自身设备和下挂设备都会保留，并转为当前节点的直属设备。不会删除任何设备记录。',
-      '删除网关组', { type: 'warning', confirmButtonText: '删除网关组', cancelButtonText: '取消' })
-    await deleteGatewayGroup(group.id)
-    await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
-    await queryClient.invalidateQueries({ queryKey: ['devices'] })
-    ElMessage.success('网关组已删除，设备已转为直属设备')
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
-  }
-}
+
 
 const openWrtDialogOpen = ref(false)
 const openWrtTarget = ref<Device | null>(null)
@@ -589,7 +519,7 @@ watch(
     <div class="devices-intro">
       <div>
         <h2>设备列表</h2>
-        <p>先选择 EasyTier 网络节点，再管理该节点的直属设备、网关组及网关下挂设备。</p>
+        <p>先选择 EasyTier 网络节点，再管理节点直属设备及各网关设备的下挂设备。</p>
       </div>
       <div class="devices-actions">
         <el-button @click="refreshAll" :loading="isRefreshing"><el-icon><Refresh /></el-icon>刷新</el-button>
@@ -598,8 +528,6 @@ watch(
           <el-icon><Connection /></el-icon>同步网络节点
         </el-button>
         <el-tag v-if="networkNodeSyncEnabled" type="success" effect="plain">新节点自动补充已开启</el-tag>
-        <el-button v-if="selectedNode" @click="createGatewayGroupRecord"><el-icon><Plus /></el-icon>新建网关组</el-button>
-        <el-button type="primary" @click="openCreateDevice()"><el-icon><Plus /></el-icon>添加直属设备</el-button>
       </div>
     </div>
 
@@ -641,7 +569,7 @@ watch(
       </el-input>
       <div class="devices-summary">
         <span>{{ deviceAssetCount }} 台设备</span>
-        <span>{{ gatewayCount }} 个网关组</span>
+        <span>{{ gatewayCount }} 个网关设备</span>
         <el-checkbox :model-value="allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
         <el-button v-if="selectedDeviceIds.length" type="danger" plain size="small" @click="deleteSelectedDevices">
           <el-icon><Delete /></el-icon>删除所选 {{ selectedDeviceIds.length }} 台
@@ -660,13 +588,11 @@ watch(
         <div class="empty-initialize">
           <p v-if="selectedNode && !nodeDevices.length">该节点尚未生成基础节点设备记录，可以同步网络节点后继续。</p>
           <p v-else-if="isUnassignedScope">这里保留尚未关联网络节点的旧设备记录。</p>
-          <p v-else>可以先添加直属设备，或者创建网关组，再向网关组添加下挂设备。</p>
+          <p v-else>先编辑当前节点的基础设备，将其设置为网关设备，再从该设备卡片新增下挂设备。</p>
           <el-button v-if="selectedNode && !nodeDevices.length && networkEntries.length"
             :loading="initializingDevices" :disabled="!canInitializeNetworkNodes" @click="initializeNetworkNodes">
             <el-icon><Connection /></el-icon>初始化 / 同步网络节点
           </el-button>
-          <el-button v-if="selectedNode" @click="createGatewayGroupRecord"><el-icon><Plus /></el-icon>新建网关组</el-button>
-          <el-button type="primary" @click="openCreateDevice()"><el-icon><Plus /></el-icon>添加直属设备</el-button>
         </div>
       </el-empty>
 
@@ -675,24 +601,9 @@ watch(
           <button class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
             @click="toggleGroup(section.id)">
             <span class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
-            <strong>{{ section.kind === 'gateway' ? '网关组：' : '' }}{{ section.name }}</strong>
+            <strong>{{ section.name }}</strong>
             <span class="group-count">{{ section.items.length }}</span>
           </button>
-          <div class="group-actions">
-            <template v-if="section.kind === 'direct'">
-              <el-button size="small" @click="openCreateDevice()">添加直属设备</el-button>
-            </template>
-            <template v-else-if="section.kind === 'gateway' && section.gatewayGroup">
-              <el-button size="small" @click="openCreateDevice(section.gatewayGroup.id)">添加下挂设备</el-button>
-              <el-button size="small" text @click="renameGatewayGroupRecord(section.gatewayGroup)">重命名</el-button>
-              <el-button size="small" text type="danger" @click="removeGatewayGroup(section.gatewayGroup)">删除网关组</el-button>
-            </template>
-          </div>
-        </div>
-        <div v-if="section.kind === 'gateway' && section.gatewayGroup" class="gateway-group-summary">
-          <span>网关自身设备：{{ section.gatewayDevice?.name || '尚未绑定' }}</span>
-          <span>下挂设备：{{ section.items.filter(device => !device.is_gateway).length }} 台</span>
-          <el-tag v-if="!section.gatewayDevice" type="warning" size="small">尚未配置网关自身设备</el-tag>
         </div>
         <div v-if="!collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
@@ -711,9 +622,8 @@ watch(
                     {{ semanticKindLabels[kind] || kind }}
                   </el-tag>
                   <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
-                  <el-tag v-if="device.is_gateway && !device.gateway_group_id" size="small" type="warning" effect="plain">旧版网关标记</el-tag>
-                  <el-tag v-else-if="device.is_gateway && device.gateway_group_id" size="small" type="success" effect="dark">网关自身</el-tag>
-                  <el-tag v-else-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
+                  <el-tag v-if="device.is_gateway" size="small" type="success" effect="dark">网关设备</el-tag>
+                  <el-tag v-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
                   <el-tag v-if="device.is_openwrt" size="small" type="success" effect="dark">OpenWrt</el-tag>
                 </div>
                 <div class="device-subtitle">
@@ -722,6 +632,8 @@ watch(
                 </div>
               </div>
               <div class="device-actions">
+                <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
+                  @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
                 <el-button v-if="device.is_openwrt" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
@@ -729,7 +641,7 @@ watch(
             </div>
             <div class="device-meta">
               <span v-if="device.mac_address">MAC：{{ device.mac_address }}</span>
-              <span v-if="device.gateway_group_name" class="node-association"><el-icon><Link /></el-icon>{{ device.gateway_group_name }}</span>
+              <span v-if="device.gateway_group_name" class="node-association"><el-icon><Link /></el-icon>上级网关：{{ device.gateway_group_name }}</span>
               <span v-if="device.is_node_device" class="node-association"><el-icon><Link /></el-icon>当前网络节点基础设备</span>
             </div>
             <p v-if="device.note" class="device-note">{{ device.note }}</p>
@@ -741,13 +653,13 @@ watch(
               </span>
             </div>
           </article>
-          <el-empty v-if="!section.items.length" :description="section.kind === 'gateway' ? '该网关组还没有设备' : '暂无设备'" :image-size="54" />
+          <el-empty v-if="!section.items.length" :description="section.kind === 'gateway' ? '该网关设备还没有下挂设备' : '暂无设备'" :image-size="54" />
         </div>
       </div>
       <el-empty v-if="devices.length && !deviceSections.some(section => section.items.length) && search" description="没有匹配的设备" />
     </template>
 
-    <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : (deviceDraft.gateway_group_id ? '添加网关下挂设备' : '添加直属设备')" width="min(620px, 94vw)" destroy-on-close>
+    <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '新增设备'" width="min(620px, 94vw)" destroy-on-close>
       <el-form label-position="top" @submit.prevent="saveDeviceRecord">
         <div class="form-grid">
           <el-form-item label="设备名称" required>
@@ -755,7 +667,7 @@ watch(
           </el-form-item>
           <el-form-item label="所属网络节点" class="span-two">
             <el-select v-model="deviceDraftNodeKey" clearable filterable class="full"
-              :disabled="isNodeDeviceEditing" placeholder="选择设备所属的网络节点">
+              :disabled="isNodeDeviceEditing || (!editingDeviceId && !!deviceDraft.gateway_group_id)" placeholder="选择设备所属的网络节点">
               <el-option v-for="node in nodeOptions" :key="node.networkKey + '|' + node.peerId"
                 :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
                 <div class="node-option">
@@ -765,33 +677,13 @@ watch(
                 </div>
               </el-option>
             </el-select>
-            <div class="field-hint">普通设备可以在编辑时迁移到其他网络节点；节点基础设备固定归属于其自身节点。</div>
+            <div class="field-hint">普通设备可以在编辑时迁移到其他网络节点；节点基础设备固定归属于其自身节点。通过网关设备卡片新增的设备会自动归属该网关。</div>
           </el-form-item>
-          <el-form-item label="所属网关组" class="span-two">
-            <el-select v-model="deviceDraft.gateway_group_id" clearable class="full" placeholder="不属于网关组（直属设备）"
-              :disabled="isNodeDeviceEditing || deviceDraft.create_gateway_group" @change="onGatewayGroupChange">
-              <el-option v-for="group in deviceDialogGatewayGroups" :key="group.id" :label="group.name" :value="group.id" />
-            </el-select>
-            <div class="field-hint">不选择网关组时，设备直接归属于所选网络节点。</div>
-          </el-form-item>
-          <el-form-item v-if="!isNodeDeviceEditing && deviceDraft.gateway_group_id" label="设备角色" class="span-two">
-            <el-checkbox v-model="deviceDraft.is_gateway" :disabled="gatewayGroupHasOtherGateway">
-              这是该网关组的网关自身设备
+          <el-form-item label="设备角色" class="span-two">
+            <el-checkbox v-model="deviceDraft.is_gateway" :disabled="!deviceDraft.network_key || !deviceDraft.peer_id">
+              这是网关设备
             </el-checkbox>
-            <div class="field-hint">
-              每个网关组最多绑定一台网关自身设备；其他设备均作为该网关组的下挂设备。
-              <span v-if="gatewayGroupHasOtherGateway">该网关组已经有网关自身设备。</span>
-            </div>
-          </el-form-item>
-          <el-form-item v-else-if="!isNodeDeviceEditing && !deviceDraft.gateway_group_id" label="设备角色" class="span-two">
-            <el-checkbox v-model="deviceDraft.create_gateway_group" :disabled="!deviceDraft.network_key || !deviceDraft.peer_id"
-              @change="onCreateGatewayGroupChange">
-              将此设备设为网关组的网关设备（自动创建网关组）
-            </el-checkbox>
-            <div v-if="deviceDraft.create_gateway_group" class="gateway-group-create-field" style="margin-top: 10px">
-              <el-input v-model="deviceDraft.gateway_group_name" maxlength="100" placeholder="输入新网关组名称" />
-            </div>
-            <div class="field-hint">勾选后会在所选网络节点下创建网关组，并将当前设备设为该组的网关自身设备。下挂设备之后可以加入该组。</div>
+            <div class="field-hint">任何已归属网络节点的设备都可以独立设置网关属性。网关设备卡片会提供「新增设备」入口；关闭网关属性后，其下挂设备会提升为同级设备。</div>
           </el-form-item>
           <el-form-item label="设备语义标签（可多选）" class="span-two">
             <el-select v-model="deviceDraft.semantic_kinds" multiple collapse-tags collapse-tags-tooltip
@@ -821,7 +713,7 @@ watch(
           <el-checkbox v-model="deviceDraft.is_openwrt" @change="onOpenWrtChange">
             这是 OpenWrt 路由器
           </el-checkbox>
-          <div class="field-hint">只有标记为 OpenWrt 的设备才会出现专属 RPCD 配置；后续发现功能只会从网关组的网关自身设备发起。</div>
+          <div class="field-hint">只有标记为 OpenWrt 的设备才会出现专属 RPCD 配置；后续发现功能只会从同时标记为网关设备的 OpenWrt 设备发起。</div>
         </el-form-item>
       </el-form>
       <template #footer>

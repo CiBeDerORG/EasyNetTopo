@@ -332,49 +332,79 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 		t.Fatal("删除普通设备不应阻止该节点基础设备后续自动补充")
 	}
 
-	gatewayGroup, err := store.CreateGatewayGroup(ctx, "家庭网络", "network:home", "peer-new")
-	if err != nil {
-		t.Fatal(err)
-	}
 	custom, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "X86 软路由", DeviceType: "X86 软路由", SemanticKinds: []string{"router", "server"},
-		IsGateway: true, GatewayGroupID: gatewayGroup.ID, NetworkKey: "network:home", PeerID: "peer-new",
+		IsGateway: true, NetworkKey: "network:home", PeerID: "peer-new",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !custom.IsGateway || custom.GatewayGroupID != gatewayGroup.ID || len(custom.SemanticKinds) != 2 ||
+	if !custom.IsGateway || custom.OwnedGatewayGroupID == "" || custom.GatewayGroupID != "" || len(custom.SemanticKinds) != 2 ||
 		custom.SemanticKinds[0] != "router" || custom.SemanticKinds[1] != "server" {
-		t.Fatalf("自定义类型/多语义标签/网关自身设备保存错误: %+v", custom)
+		t.Fatalf("自定义类型/多语义标签/网关设备保存错误: %+v", custom)
 	}
 	child, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "客厅电视", DeviceType: "电视", GatewayGroupID: gatewayGroup.ID,
+		Name: "客厅电视", DeviceType: "电视", GatewayGroupID: custom.OwnedGatewayGroupID,
+		NetworkKey: "network:home", PeerID: "peer-new",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	childGateway, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "二级路由器", DeviceType: "路由器", IsGateway: true, GatewayGroupID: custom.OwnedGatewayGroupID,
+		NetworkKey: "network:home", PeerID: "peer-new",
+	})
+	if err != nil || !childGateway.IsGateway || childGateway.OwnedGatewayGroupID == "" ||
+		childGateway.GatewayGroupID != custom.OwnedGatewayGroupID {
+		t.Fatalf("网关下挂设备也应能独立成为网关: %+v %v", childGateway, err)
+	}
+	grandchild, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "二级网关下的电视", GatewayGroupID: childGateway.OwnedGatewayGroupID,
 		NetworkKey: "network:home", PeerID: "peer-new",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-new")
-	if err != nil || len(groups) != 1 || groups[0].DeviceCount != 2 || groups[0].GatewayDeviceID != custom.ID {
-		t.Fatalf("网关组设备统计错误: %+v %v", groups, err)
+	if err != nil || len(groups) != 2 {
+		t.Fatalf("多层网关关系没有正确建立: %+v %v", groups, err)
 	}
-	if _, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "第二台网关", DeviceType: "路由器", IsGateway: true, GatewayGroupID: gatewayGroup.ID,
-		NetworkKey: "network:home", PeerID: "peer-new",
-	}); !errors.Is(err, ErrGatewayDeviceConflict) {
-		t.Fatalf("同一网关组允许绑定多个网关自身设备: %v", err)
+	for _, group := range groups {
+		switch group.GatewayDeviceID {
+		case custom.ID:
+			if group.DeviceCount != 2 {
+				t.Fatalf("一级网关下挂设备计数错误: %+v", group)
+			}
+		case childGateway.ID:
+			if group.DeviceCount != 1 {
+				t.Fatalf("二级网关下挂设备计数错误: %+v", group)
+			}
+		default:
+			t.Fatalf("网关组所有者错误: %+v", group)
+		}
 	}
-	if err := store.DeleteGatewayGroup(ctx, gatewayGroup.ID); err != nil {
+	if err := store.DeleteGatewayGroup(ctx, custom.OwnedGatewayGroupID); err != nil {
 		t.Fatal(err)
 	}
 	updatedGateway, err := store.Device(ctx, custom.ID)
-	if err != nil || updatedGateway.GatewayGroupID != "" || updatedGateway.IsGateway {
-		t.Fatalf("删除网关组后设备未安全转为直属设备: %+v %v", updatedGateway, err)
+	if err != nil || updatedGateway.OwnedGatewayGroupID != "" || updatedGateway.IsGateway {
+		t.Fatalf("关闭网关组后设备未安全转为普通设备: %+v %v", updatedGateway, err)
 	}
 	updatedChild, err := store.Device(ctx, child.ID)
 	if err != nil || updatedChild.GatewayGroupID != "" {
-		t.Fatalf("删除网关组后下挂设备未保留: %+v %v", updatedChild, err)
+		t.Fatalf("删除上级网关后普通下挂设备未提升为直属设备: %+v %v", updatedChild, err)
 	}
+	updatedChildGateway, err := store.Device(ctx, childGateway.ID)
+	if err != nil || updatedChildGateway.GatewayGroupID != "" || !updatedChildGateway.IsGateway ||
+		updatedChildGateway.OwnedGatewayGroupID == "" {
+		t.Fatalf("删除上级网关后下级网关应保留自身网关能力: %+v %v", updatedChildGateway, err)
+	}
+	updatedGrandchild, err := store.Device(ctx, grandchild.ID)
+	if err != nil || updatedGrandchild.GatewayGroupID != childGateway.OwnedGatewayGroupID {
+		t.Fatalf("二级网关下挂设备关系不应被破坏: %+v %v", updatedGrandchild, err)
+	}
+
+
 	if _, err := store.CreateDevice(ctx, DeviceInput{Name: "非法标签", DeviceType: "测试", SemanticKinds: []string{"unknown-kind"}}); !errors.Is(err, ErrInvalidDevice) {
 		t.Fatalf("非法语义标签未被拒绝: %v", err)
 	}
@@ -409,12 +439,8 @@ func TestClearDeviceDataIsScopedAndDisablesAutomaticNodeSync(t *testing.T) {
 	}); err != nil {
 		t.Fatal(err)
 	}
-	gatewayGroup, err := store.CreateGatewayGroup(ctx, "家庭网关", "network:home", "peer-1")
-	if err != nil {
-		t.Fatal(err)
-	}
 	router, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "OpenWrt", GroupID: group.ID, GatewayGroupID: gatewayGroup.ID,
+		Name: "OpenWrt", GroupID: group.ID, IsGateway: true,
 		DeviceType: "router", SemanticKinds: []string{"router", "openwrt"},
 		IsOpenWrt: true, IPAddress: "192.168.1.1",
 		NetworkKey: "network:home", PeerID: "peer-1",
@@ -513,7 +539,7 @@ func TestNewDeviceStoreDoesNotRewriteHistoricalDeviceRows(t *testing.T) {
 	}
 }
 
-func TestDeviceCanBeMovedAndPromotedToGatewayGroupAtomically(t *testing.T) {
+func TestDeviceGatewayOwnershipSupportsNestedGatewaysAndNodeDevices(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
 	if err != nil {
@@ -524,62 +550,127 @@ func TestDeviceCanBeMovedAndPromotedToGatewayGroupAtomically(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-
-	direct, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "上海-OWRT", NetworkKey: "network:old", PeerID: "peer-old",
-	})
-	if err != nil {
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "节点基础设备", NetworkKey: "network:home", PeerID: "peer-home"},
+	}); err != nil {
 		t.Fatal(err)
 	}
-	updated, err := store.UpdateDevice(ctx, direct.ID, DeviceInput{
-		Name: "上海-OWRT", NetworkKey: "network:home", PeerID: "peer-home",
-		CreateGatewayGroup: true, GatewayGroupName: "上海-OWRT 网关组",
-		SemanticKinds: []string{"router", "openwrt"}, IsOpenWrt: false,
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("节点基础设备初始化失败: %+v %v", nodes, err)
+	}
+	nodeGateway, err := store.UpdateDevice(ctx, nodes[0].ID, DeviceInput{
+		Name: "节点基础设备", IsGateway: true, NetworkKey: "network:home", PeerID: "peer-home",
 	})
-	if err != nil {
-		t.Fatal(err)
-	}
-	if updated.NetworkKey != "network:home" || updated.PeerID != "peer-home" ||
-		!updated.IsGateway || updated.GatewayGroupID == "" {
-		t.Fatalf("编辑设备迁移节点并创建网关组失败: %+v", updated)
-	}
-	oldGroups, err := store.ListGatewayGroups(ctx, "network:old", "peer-old")
-	if err != nil || len(oldGroups) != 0 {
-		t.Fatalf("旧节点不应残留网关组: %+v %v", oldGroups, err)
-	}
-	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-home")
-	if err != nil || len(groups) != 1 || groups[0].ID != updated.GatewayGroupID ||
-		groups[0].GatewayDeviceID != updated.ID || groups[0].DeviceCount != 1 {
-		t.Fatalf("新网关组与网关设备关联错误: %+v %v", groups, err)
+	if err != nil || !nodeGateway.IsNodeDevice || !nodeGateway.IsGateway || nodeGateway.OwnedGatewayGroupID == "" {
+		t.Fatalf("节点基础设备应能直接成为网关设备: %+v %v", nodeGateway, err)
 	}
 
-	child, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "客厅电视", GatewayGroupID: updated.GatewayGroupID,
+	childGateway, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "下挂路由器", IsGateway: true, GatewayGroupID: nodeGateway.OwnedGatewayGroupID,
 		NetworkKey: "network:home", PeerID: "peer-home",
 	})
-	if err != nil || child.GatewayGroupID != updated.GatewayGroupID || child.IsGateway {
-		t.Fatalf("无法向自动创建的网关组添加下挂设备: %+v %v", child, err)
+	if err != nil || childGateway.OwnedGatewayGroupID == "" || childGateway.GatewayGroupID != nodeGateway.OwnedGatewayGroupID {
+		t.Fatalf("下挂设备应能同时拥有自己的下挂层级: %+v %v", childGateway, err)
 	}
-	groups, err = store.ListGatewayGroups(ctx, "network:home", "peer-home")
-	if err != nil || len(groups) != 1 || groups[0].DeviceCount != 2 {
-		t.Fatalf("网关组设备计数错误: %+v %v", groups, err)
+	grandchild, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "客厅电视", GatewayGroupID: childGateway.OwnedGatewayGroupID,
+		NetworkKey: "network:home", PeerID: "peer-home",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 
-	created, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "备用路由器", NetworkKey: "network:home", PeerID: "peer-home",
-		CreateGatewayGroup: true, GatewayGroupName: "备用网关组",
+	disabledNode, err := store.UpdateDevice(ctx, nodeGateway.ID, DeviceInput{
+		Name: "节点基础设备", IsGateway: false, NetworkKey: "network:home", PeerID: "peer-home",
 	})
-	if err != nil || !created.IsGateway || created.GatewayGroupID == "" {
-		t.Fatalf("创建直属设备时自动创建网关组失败: %+v %v", created, err)
+	if err != nil || disabledNode.IsGateway || disabledNode.OwnedGatewayGroupID != "" {
+		t.Fatalf("取消节点设备的网关属性失败: %+v %v", disabledNode, err)
 	}
-	if _, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "重复网关", NetworkKey: "network:home", PeerID: "peer-home",
-		CreateGatewayGroup: true, GatewayGroupName: "上海-OWRT 网关组",
-	}); !errors.Is(err, ErrInvalidGatewayGroup) {
-		t.Fatalf("同一节点下不应允许重复网关组名称: %v", err)
+	movedChild, err := store.Device(ctx, childGateway.ID)
+	if err != nil || movedChild.GatewayGroupID != "" || !movedChild.IsGateway || movedChild.OwnedGatewayGroupID == "" {
+		t.Fatalf("取消节点设备网关属性后，下级网关应提升为直属设备: %+v %v", movedChild, err)
 	}
-	groups, err = store.ListGatewayGroups(ctx, "network:home", "peer-home")
-	if err != nil || len(groups) != 2 {
-		t.Fatalf("重复创建失败后留下了多余网关组: %+v %v", groups, err)
+	movedGrandchild, err := store.Device(ctx, grandchild.ID)
+	if err != nil || movedGrandchild.GatewayGroupID != movedChild.OwnedGatewayGroupID {
+		t.Fatalf("取消上级网关后更深层设备仍应归属于下级网关: %+v %v", movedGrandchild, err)
+	}
+
+	movedChild, err = store.UpdateDevice(ctx, childGateway.ID, DeviceInput{
+		Name: "下挂路由器", IsGateway: true, NetworkKey: "network:other", PeerID: "peer-other",
+	})
+	if err != nil || movedChild.NetworkKey != "network:other" || movedChild.PeerID != "peer-other" {
+		t.Fatalf("迁移普通网关设备失败: %+v %v", movedChild, err)
+	}
+	movedGrandchild, err = store.Device(ctx, grandchild.ID)
+	if err != nil || movedGrandchild.NetworkKey != "network:other" || movedGrandchild.PeerID != "peer-other" {
+		t.Fatalf("迁移网关时应递归迁移下挂设备: %+v %v", movedGrandchild, err)
+	}
+	groups, err = store.ListGatewayGroups(ctx, "network:other", "peer-other")
+	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != childGateway.ID || groups[0].DeviceCount != 1 {
+		t.Fatalf("迁移后网关组范围和层级错误: %+v %v", groups, err)
+	}
+	disabledChild, err := store.UpdateDevice(ctx, childGateway.ID, DeviceInput{
+		Name: "下挂路由器", IsGateway: false, NetworkKey: "network:other", PeerID: "peer-other",
+	})
+	if err != nil || disabledChild.IsGateway || disabledChild.OwnedGatewayGroupID != "" {
+		t.Fatalf("取消普通网关设备属性失败: %+v %v", disabledChild, err)
+	}
+	movedGrandchild, err = store.Device(ctx, grandchild.ID)
+	if err != nil || movedGrandchild.GatewayGroupID != "" {
+		t.Fatalf("取消网关属性后，下挂设备应提升为直属设备: %+v %v", movedGrandchild, err)
+	}
+}
+
+func TestLegacyGatewayGroupMigrationPromotesGatewayOwner(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-gateway.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	for _, stmt := range []string{
+		`CREATE TABLE devices (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, group_id TEXT,
+			gateway_group_id TEXT, device_type TEXT NOT NULL DEFAULT '通用设备',
+			semantic_kinds TEXT NOT NULL DEFAULT '[]', is_node_device INTEGER NOT NULL DEFAULT 0,
+			is_gateway INTEGER NOT NULL DEFAULT 0, manufacturer TEXT NOT NULL DEFAULT '',
+			model TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '',
+			mac_address TEXT NOT NULL DEFAULT '', note TEXT NOT NULL DEFAULT '',
+			is_openwrt INTEGER NOT NULL DEFAULT 0, network_key TEXT NOT NULL DEFAULT '',
+			peer_id TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`,
+		`CREATE TABLE device_gateway_groups (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`,
+		`CREATE UNIQUE INDEX idx_devices_gateway_group_gateway ON devices(gateway_group_id)
+			WHERE gateway_group_id IS NOT NULL AND gateway_group_id<>'' AND is_gateway=1`,
+		`INSERT INTO device_gateway_groups(id,name,network_key,peer_id,created_at,updated_at)
+			VALUES('legacy-group','旧网关组','network:legacy','peer-legacy','2026-01-01','2026-01-01')`,
+		`INSERT INTO devices(id,name,gateway_group_id,is_gateway,network_key,peer_id,created_at,updated_at)
+			VALUES('legacy-gateway','旧网关','legacy-group',1,'network:legacy','peer-legacy','2026-01-01','2026-01-01')`,
+		`INSERT INTO devices(id,name,gateway_group_id,is_gateway,network_key,peer_id,created_at,updated_at)
+			VALUES('legacy-child','旧下挂设备','legacy-group',0,'network:legacy','peer-legacy','2026-01-01','2026-01-01')`,
+	} {
+		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.Device(ctx, "legacy-gateway")
+	if err != nil || !gateway.IsGateway || gateway.GatewayGroupID != "" || gateway.OwnedGatewayGroupID != "legacy-group" {
+		t.Fatalf("旧网关设备没有迁移为网关组所有者: %+v %v", gateway, err)
+	}
+	child, err := store.Device(ctx, "legacy-child")
+	if err != nil || child.GatewayGroupID != "legacy-group" || child.GatewayGroupName != "旧网关" {
+		t.Fatalf("旧下挂设备关系没有保留: %+v %v", child, err)
+	}
+	groups, err := store.ListGatewayGroups(ctx, "network:legacy", "peer-legacy")
+	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != "legacy-gateway" || groups[0].DeviceCount != 1 {
+		t.Fatalf("旧网关组迁移后的所有者和设备数量错误: %+v %v", groups, err)
 	}
 }
