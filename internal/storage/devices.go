@@ -678,18 +678,29 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 }
 
 func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
-	result, err := s.store.db.ExecContext(ctx, "DELETE FROM devices WHERE id=?", id)
+	tx, err := s.store.db.BeginTx(ctx, nil)
 	if err != nil {
 		return err
 	}
-	n, err := result.RowsAffected()
-	if err != nil {
+	defer tx.Rollback()
+
+	var networkKey, peerID string
+	if err := tx.QueryRowContext(ctx, "SELECT network_key,peer_id FROM devices WHERE id=?", id).Scan(&networkKey, &peerID); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return ErrDeviceNotFound
+		}
 		return err
 	}
-	if n == 0 {
-		return ErrDeviceNotFound
+	if networkKey != "" && peerID != "" {
+		if _, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
+			networkKey, peerID, time.Now().UTC().Format(time.RFC3339)); err != nil {
+			return err
+		}
 	}
-	return nil
+	if _, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", id); err != nil {
+		return err
+	}
+	return tx.Commit()
 }
 
 func (s *DeviceStore) DeviceOpenWrtConfig(ctx context.Context, id string) (DeviceOpenWrtConfig, error) {

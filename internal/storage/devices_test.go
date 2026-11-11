@@ -233,13 +233,25 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if err := store.DeleteDevice(ctx, deletedID); err != nil {
 		t.Fatal(err)
 	}
+	preDeleted, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "提前删除的节点", DeviceType: "通用设备", NetworkKey: "network:home", PeerID: "peer-predeleted",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteDevice(ctx, preDeleted.ID); err != nil {
+		t.Fatal(err)
+	}
 
-	withNew := append(nodes, NetworkNodeDeviceInput{Name: "新增节点", NetworkKey: "network:home", PeerID: "peer-new"})
+	withNew := append(nodes,
+		NetworkNodeDeviceInput{Name: "新增节点", NetworkKey: "network:home", PeerID: "peer-new"},
+		NetworkNodeDeviceInput{Name: "提前删除的节点", NetworkKey: "network:home", PeerID: "peer-predeleted"},
+	)
 	third, err := store.SyncNetworkNodeDevices(ctx, withNew)
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Created != 1 || third.Existing != 1 || third.Skipped != 1 {
+	if third.Created != 1 || third.Existing != 1 || third.Skipped != 2 {
 		t.Fatalf("自动补充新节点结果错误: %+v", third)
 	}
 	items, err = store.ListDevices(ctx)
