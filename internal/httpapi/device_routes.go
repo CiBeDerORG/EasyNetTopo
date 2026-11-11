@@ -324,7 +324,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				}
 				var req struct {
 					Nodes          []storage.NetworkNodeDeviceInput `json:"nodes"`
-					EnableAutoSync *bool                           `json:"enable_auto_sync"`
+					EnableAutoSync *bool                            `json:"enable_auto_sync"`
 				}
 				if !decode(w, r, &req) {
 					return
