@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, HomeFilled, Connection, Monitor } from '@element-plus/icons-vue'
+import { ArrowLeft, HomeFilled, Connection, Monitor, Location } from '@element-plus/icons-vue'
 
 defineProps<{ collapsed: boolean }>()
 import { useRoute, useRouter } from 'vue-router'
@@ -58,6 +58,11 @@ defineEmits<{ toggle: [] }>()
       <el-tooltip content="网络节点" placement="right" :disabled="!collapsed">
         <button class="nav-item" type="button" :aria-current="route.path === '/network-nodes' ? 'page' : undefined" @click="router.push('/network-nodes')">
           <el-icon><Connection /></el-icon><span>网络节点</span>
+        </button>
+      </el-tooltip>
+      <el-tooltip content="网络地图" placement="right" :disabled="!collapsed">
+        <button class="nav-item" type="button" :aria-current="route.path === '/network-map' ? 'page' : undefined" @click="router.push('/network-map')">
+          <el-icon><Location /></el-icon><span>网络地图</span>
         </button>
       </el-tooltip>
       <el-tooltip content="设备列表" placement="right" :disabled="!collapsed">
