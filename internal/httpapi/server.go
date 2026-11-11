@@ -24,7 +24,9 @@ func NewHandler(webDir string, db *storage.Store, providers ...*catalog.Service)
 
 func NewHandlerWithHosts(webDir string, db *storage.Store, catalogSvc *catalog.Service, hostSvc *hosts.Service, taskServices ...*tasks.Service) http.Handler {
 	var taskSvc *tasks.Service
-	if len(taskServices) > 0 { taskSvc = taskServices[0] }
+	if len(taskServices) > 0 {
+		taskSvc = taskServices[0]
+	}
 	return newHandler(webDir, db, catalogSvc, hostSvc, taskSvc, nil)
 }
 
