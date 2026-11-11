@@ -149,8 +149,6 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
 			CHECK ((network_key='' AND peer_id='') OR (network_key<>'' AND peer_id<>''))
 		)`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_network_node
-			ON devices(network_key,peer_id) WHERE network_key<>'' AND peer_id<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_group ON devices(group_id,name)`,
 		`CREATE TABLE IF NOT EXISTS device_gateway_groups (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL,
