@@ -110,4 +110,9 @@ export type OpenWrtDiscoverySnapshot = {
   message?: string
   errors?: Array<{ source?: string; code?: string; message?: string }>
   devices?: OpenWrtDiscoveryDevice[]
+  import?: {
+    created: number
+    existing: number
+    skipped: number
+  }
 }

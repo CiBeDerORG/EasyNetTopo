@@ -427,6 +427,13 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				reply(w, callErr.status, map[string]string{"code": callErr.code, "message": callErr.message})
 				return
 			}
+			if action == "scan" {
+				result, callErr = importOpenWrtDiscoverySnapshot(r.Context(), devices, device.ID, kind, result)
+				if callErr != nil {
+					reply(w, callErr.status, map[string]string{"code": callErr.code, "message": callErr.message})
+					return
+				}
+			}
 			reply(w, http.StatusOK, result)
 			return
 		}

@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { useQueryClient } from '@tanstack/vue-query'
 import { formatApiError } from '../../lib/api-client'
 import { getOpenWrtDiscoverySnapshot, scanOpenWrtDiscovery } from './api'
 import type { Device, OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot } from './types'
 
 const props = defineProps<{ modelValue: boolean; device: Device; kind: OpenWrtDiscoveryKind }>()
+const queryClient = useQueryClient()
 const emit = defineEmits<{ 'update:modelValue': [value: boolean] }>()
 const visible = computed({
   get: () => props.modelValue,
@@ -39,7 +41,15 @@ async function scan() {
   requestError.value = ''
   try {
     const result = await scanOpenWrtDiscovery(props.device.id, props.kind)
-    if (current === requestNumber) snapshot.value = result
+    if (current === requestNumber) {
+      snapshot.value = result
+      if (result.import) {
+        await Promise.all([
+          queryClient.invalidateQueries({ queryKey: ['devices'] }),
+          queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
+        ])
+      }
+    }
   } catch (error) {
     if (current === requestNumber) requestError.value = formatApiError(error)
   } finally {
@@ -70,14 +80,16 @@ function addresses(value?: string[]) {
   <el-dialog v-model="visible" :title="title + ' · ' + device.name" width="min(980px, 94vw)" destroy-on-close>
     <el-alert type="info" :closable="false" show-icon
       :title="kind === 'adb'
-        ? '读取该 OpenWrt 网关的无线 ADB 服务端点。这里只发现地址，不会自动配对、连接或执行 ADB 指令。'
-        : '通过该 OpenWrt 网关的 Easy Discovery 服务采集局域网设备。扫描结果仅供预览，不会自动添加到设备列表。'" />
+        ? '扫描会将发现的无线 ADB 设备自动添加到该网关下的设备列表；不执行配对、连接或 ADB 指令。'
+        : '点击开始扫描后，发现的设备会自动添加到当前 OpenWrt 网关下；已登记设备不覆盖、不重复添加。'" />
     <div class="discovery-toolbar">
       <span>上次快照：{{ snapshotTime(snapshot?.scanned_at) }}</span>
       <span v-if="snapshot">记录 {{ snapshot.count ?? snapshot.devices?.length ?? 0 }} 条</span>
       <el-tag v-if="snapshot?.truncated" size="small" type="warning">结果已截断</el-tag>
       <el-tag v-if="snapshot?.status === 'partial'" size="small" type="warning">部分成功</el-tag>
     </div>
+    <el-alert v-if="snapshot?.import" type="success" :closable="false" show-icon
+      :title="'自动入库完成：新增 ' + snapshot.import.created + ' 台，已存在 ' + snapshot.import.existing + ' 台，跳过 ' + snapshot.import.skipped + ' 条。'" />
     <el-alert v-if="requestError" :title="requestError" type="error" :closable="false" show-icon />
     <el-alert v-if="snapshot?.status === 'error'" type="error" :closable="false" show-icon
       :title="snapshot.message || '本次发现未成功；以下可能是之前的历史快照，请检查错误详情。'" />
