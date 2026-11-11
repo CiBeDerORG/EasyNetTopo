@@ -404,7 +404,6 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 		t.Fatalf("二级网关下挂设备关系不应被破坏: %+v %v", updatedGrandchild, err)
 	}
 
-
 	if _, err := store.CreateDevice(ctx, DeviceInput{Name: "非法标签", DeviceType: "测试", SemanticKinds: []string{"unknown-kind"}}); !errors.Is(err, ErrInvalidDevice) {
 		t.Fatalf("非法语义标签未被拒绝: %v", err)
 	}

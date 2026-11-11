@@ -55,33 +55,32 @@ type GatewayGroup struct {
 }
 
 type Device struct {
-	ID                string   `json:"id"`
-	Name              string   `json:"name"`
-	GroupID           string   `json:"group_id,omitempty"`
-	GroupName         string   `json:"group_name,omitempty"`
-	GatewayGroupID    string   `json:"gateway_group_id,omitempty"`
+	ID                  string   `json:"id"`
+	Name                string   `json:"name"`
+	GroupID             string   `json:"group_id,omitempty"`
+	GroupName           string   `json:"group_name,omitempty"`
+	GatewayGroupID      string   `json:"gateway_group_id,omitempty"`
 	GatewayGroupName    string   `json:"gateway_group_name,omitempty"`
 	OwnedGatewayGroupID string   `json:"owned_gateway_group_id,omitempty"`
 	DeviceType          string   `json:"device_type"`
-	SemanticKinds     []string `json:"semantic_kinds"`
-	IsNodeDevice      bool     `json:"is_node_device"`
-	IsGateway         bool     `json:"is_gateway"`
-	Manufacturer      string   `json:"manufacturer,omitempty"`
-	Model             string   `json:"model,omitempty"`
-	IPAddress         string   `json:"ip_address,omitempty"`
-	MACAddress        string   `json:"mac_address,omitempty"`
-	Note              string   `json:"note,omitempty"`
-	IsOpenWrt         bool     `json:"is_openwrt"`
-	NetworkKey        string   `json:"network_key,omitempty"`
-	PeerID            string   `json:"peer_id,omitempty"`
-	OpenWrtConfigured bool     `json:"openwrt_configured"`
-	OpenWrtRPCDPort   int      `json:"openwrt_rpcd_port,omitempty"`
-	OpenWrtHTTPS      bool     `json:"openwrt_https,omitempty"`
-	OpenWrtUsername   string   `json:"openwrt_username,omitempty"`
-	CreatedAt         string   `json:"created_at"`
-	UpdatedAt         string   `json:"updated_at"`
+	SemanticKinds       []string `json:"semantic_kinds"`
+	IsNodeDevice        bool     `json:"is_node_device"`
+	IsGateway           bool     `json:"is_gateway"`
+	Manufacturer        string   `json:"manufacturer,omitempty"`
+	Model               string   `json:"model,omitempty"`
+	IPAddress           string   `json:"ip_address,omitempty"`
+	MACAddress          string   `json:"mac_address,omitempty"`
+	Note                string   `json:"note,omitempty"`
+	IsOpenWrt           bool     `json:"is_openwrt"`
+	NetworkKey          string   `json:"network_key,omitempty"`
+	PeerID              string   `json:"peer_id,omitempty"`
+	OpenWrtConfigured   bool     `json:"openwrt_configured"`
+	OpenWrtRPCDPort     int      `json:"openwrt_rpcd_port,omitempty"`
+	OpenWrtHTTPS        bool     `json:"openwrt_https,omitempty"`
+	OpenWrtUsername     string   `json:"openwrt_username,omitempty"`
+	CreatedAt           string   `json:"created_at"`
+	UpdatedAt           string   `json:"updated_at"`
 }
-
 type DeviceInput struct {
 	Name               string   `json:"name"`
 	GroupID            string   `json:"group_id"`
