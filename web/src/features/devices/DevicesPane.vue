@@ -87,7 +87,7 @@ const sections = computed(() => {
     items: filteredDevices.value.filter(device => device.group_id === group.id)
   }))
   const ungrouped = filteredDevices.value.filter(device => !device.group_id)
-  if (ungrouped.length || !result.length) {
+  if (ungrouped.length) {
     result.push({ id: '__ungrouped__', name: '未分组', group: null, items: ungrouped })
   }
   return result
@@ -466,7 +466,7 @@ async function refreshAll() {
         </div>
       </el-alert>
 
-      <el-empty v-if="!devices.length && !search" description="设备列表还没有设备" :image-size="120">
+      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
         <div class="empty-initialize">
           <p v-if="!networkEntries.length">尚未设置组网入口，请先在主机列表中设置组网入口。</p>
           <p v-else-if="nodesQuery.isPending.value">正在读取现有网络节点…</p>
@@ -479,7 +479,6 @@ async function refreshAll() {
           </el-button>
         </div>
       </el-empty>
-      <template v-else>
       <div v-for="section in sections" :key="section.id" class="device-group">
         <div class="group-heading">
           <button class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
@@ -536,8 +535,7 @@ async function refreshAll() {
           <el-empty v-if="!section.items.length" description="该分组还没有设备" :image-size="54" />
         </div>
       </div>
-      <el-empty v-if="!sections.some(section => section.items.length) && search" description="没有匹配的设备" />
-      </template>
+      <el-empty v-if="devices.length && !sections.some(section => section.items.length) && search" description="没有匹配的设备" />
     </template>
 
     <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '添加设备'" width="min(620px, 94vw)" destroy-on-close>
