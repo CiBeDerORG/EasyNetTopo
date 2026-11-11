@@ -304,7 +304,7 @@ function truncateDeviceName(value: string, length: number): string {
   return Array.from(value).slice(0, length).join('')
 }
 function uniqueNodeDeviceName(node: (typeof nodeOptions.value)[number], used: Set<string>): string {
-  const raw = node.label && node.label !== '—' ? node.label
+  const raw = node.label && node.label.trim() && node.label !== '—' ? node.label.trim()
     : node.row.hostname && node.row.hostname !== '—' ? node.row.hostname
       : 'EasyTier 节点 ' + node.row.id.slice(0, 8)
   let name = truncateDeviceName(raw, 100)
@@ -453,19 +453,19 @@ async function refreshAll() {
     <div v-if="devicesQuery.isPending.value || groupsQuery.isPending.value" class="devices-loading">
       <el-skeleton :rows="5" animated />
     </div>
-    <el-alert v-if="failedNodeInitializations.length" type="warning" :closable="false" show-icon
-      title="部分网络节点没有成功初始化">
-      <div class="initialization-failures">
-        <span v-for="item in failedNodeInitializations" :key="item.input.network_key + '|' + item.input.peer_id">
-          {{ item.input.name }}：{{ item.message }}
-        </span>
-        <el-button text type="warning" :loading="initializingDevices" @click="retryFailedNodeInitializations">
-          重试失败项（{{ failedNodeInitializations.length }}）
-        </el-button>
-      </div>
-    </el-alert>
-
     <template v-else>
+      <el-alert v-if="failedNodeInitializations.length" type="warning" :closable="false" show-icon
+        title="部分网络节点没有成功初始化">
+        <div class="initialization-failures">
+          <span v-for="item in failedNodeInitializations" :key="item.input.network_key + '|' + item.input.peer_id">
+            {{ item.input.name }}：{{ item.message }}
+          </span>
+          <el-button text type="warning" :loading="initializingDevices" @click="retryFailedNodeInitializations">
+            重试失败项（{{ failedNodeInitializations.length }}）
+          </el-button>
+        </div>
+      </el-alert>
+
       <el-empty v-if="!devices.length && !search" description="设备列表还没有设备" :image-size="120">
         <div class="empty-initialize">
           <p v-if="!networkEntries.length">尚未设置组网入口，请先在主机列表中设置组网入口。</p>
