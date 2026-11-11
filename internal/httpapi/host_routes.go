@@ -174,7 +174,7 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 				methodNotAllowed(w, "GET")
 				return
 			}
-			if parts[2] != "node" && parts[2] != "peer" && parts[2] != "route" {
+			if parts[2] != "node" && parts[2] != "peer" && parts[2] != "route" && parts[2] != "peer-center" {
 				http.NotFound(w, r)
 				return
 			}
