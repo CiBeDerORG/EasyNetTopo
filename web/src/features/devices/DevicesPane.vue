@@ -221,7 +221,7 @@ async function deleteSelectedDevices() {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
 }
-legacy group management functionsconst openWrtDialogOpen = ref(false)
+const openWrtDialogOpen = ref(false)
 const openWrtTarget = ref<Device | null>(null)
 const openWrtSaving = ref(false)
 const openWrtForm = ref({ rpcd_port: 80, https: false, username: 'easy-device', password: '' })
