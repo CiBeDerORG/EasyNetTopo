@@ -49,12 +49,12 @@ func TestOpenWrtDiscoveryScanAutomaticallyImportsAndNeverImportsOldSnapshot(t *t
 		!strings.Contains(string(again), `"existing":1`) {
 		t.Fatalf("重复扫描应幂等: %s %v", again, callErr)
 	}
-	for _, stale := range []json.RawMessage{
+	for _, stale := range []string{
 		`{"status":"error","has_snapshot":true,"devices":[{"name":"旧缓存","ipv4":["192.168.10.30"]}]}`,
 		`{"status":"ok","has_snapshot":false,"devices":[{"name":"无快照","ipv4":["192.168.10.31"]}]}`,
 	} {
-		reply, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", stale)
-		if callErr != nil || string(reply) != string(stale) {
+		reply, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", json.RawMessage(stale))
+		if callErr != nil || string(reply) != stale {
 			t.Fatalf("失败或未采集时不得导入旧结果: %s %v", reply, callErr)
 		}
 	}
@@ -120,12 +120,12 @@ func TestOpenWrtDiscoveryImportRejectsMalformedPayload(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	for _, invalid := range []json.RawMessage{
+	for _, invalid := range []string{
 		`{"status":"ok","has_snapshot":true,"count":1}`,
 		`{"status":"ok","has_snapshot":true,"devices":"not-an-array"}`,
 		`{"status":"ok","has_snapshot":true,"devices":[{"ipv4":3}]}`,
 	} {
-		_, e := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", invalid)
+		_, e := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", json.RawMessage(invalid))
 		if e == nil || e.code != "openwrt_discovery_invalid_response" {
 			t.Fatalf("非法结构应拒绝自动入库: %s -> %v", invalid, e)
 		}

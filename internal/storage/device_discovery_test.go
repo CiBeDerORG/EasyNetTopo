@@ -140,7 +140,7 @@ func TestGatewayDiscoveryAutoImportRejectsWrongScopeAndMalformedRecords(t *testi
 		{Name: "只有名称"},
 		{Name: "无效 IP", IPAddress: "192.168.10.999"},
 		{Name: "无名但有 IP", IPAddress: "192.168.10.23"},
-		{Name: "名称含换行", IPAddress: "192.168.10.24", Name: "电视\n盒子"},
+		{Name: "电视\n盒子", IPAddress: "192.168.10.24"},
 	})
 	if err != nil || result.Created != 2 || result.Skipped != 3 {
 		t.Fatalf("应跳过无定位信息和非法字段: %+v %v", result, err)
