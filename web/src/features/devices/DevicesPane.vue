@@ -60,6 +60,14 @@ const nodeErrors = computed(() => nodesQuery.data.value?.errors || 0)
 const search = ref('')
 const selectedDeviceIds = ref<string[]>([])
 watch(search, () => { selectedDeviceIds.value = [] })
+const filteredDevices = computed(() => {
+  const keyword = search.value.trim().toLocaleLowerCase()
+  if (!keyword) return devices.value
+  return devices.value.filter(device => [
+    device.name, device.group_name, device.device_type, device.manufacturer, device.model,
+    device.ip_address, device.mac_address, device.note, device.peer_id
+  ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
+})
 const allFilteredSelected = computed(() => filteredDevices.value.length > 0 &&
   filteredDevices.value.every(device => selectedDeviceIds.value.includes(device.id)))
 function toggleDeviceSelection(id: string, checked: boolean) {
@@ -73,14 +81,6 @@ function toggleSelectAll(checked: boolean) {
     ? [...new Set([...selectedDeviceIds.value, ...visible])]
     : selectedDeviceIds.value.filter(id => !visible.includes(id))
 }
-const filteredDevices = computed(() => {
-  const keyword = search.value.trim().toLocaleLowerCase()
-  if (!keyword) return devices.value
-  return devices.value.filter(device => [
-    device.name, device.group_name, device.device_type, device.manufacturer, device.model,
-    device.ip_address, device.mac_address, device.note, device.peer_id
-  ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
-})
 const sections = computed(() => {
   const result: Array<{ id: string; name: string; group: DeviceGroup | null; items: Device[] }> = groups.value.map(group => ({
     id: group.id, name: group.name, group,
