@@ -25,8 +25,9 @@ var (
 	ErrGatewayGroupNotFound  = errors.New("网关组不存在")
 	ErrInvalidGatewayGroup   = errors.New("网关组名称或节点范围不合法")
 	ErrGatewayDeviceConflict = errors.New("该网关组已经绑定网关设备")
-	ErrNodeDeviceProtected   = errors.New("网络节点基础设备不能删除")
-	ErrInvalidDevice         = errors.New("设备信息不合法")
+	ErrNodeDeviceProtected        = errors.New("网络节点基础设备不能删除")
+	ErrNetworkNodeAutoSyncDisabled = errors.New("网络节点自动补充已关闭")
+	ErrInvalidDevice              = errors.New("设备信息不合法")
 	ErrInvalidDeviceGroup    = errors.New("设备分组名称不合法")
 	ErrDeviceNotOpenWrt      = errors.New("该设备未标记为 OpenWrt")
 	ErrOpenWrtConfigNotFound = errors.New("OpenWrt 发现服务尚未配置")
@@ -180,21 +181,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			return nil, fmt.Errorf("迁移设备字段 %s 失败: %w", column.name, err)
 		}
 	}
-	if _, err := db.db.ExecContext(ctx, `UPDATE devices SET semantic_kinds=CASE device_type
-		WHEN 'router' THEN '["router"]' WHEN 'computer' THEN '["computer"]'
-		WHEN 'phone' THEN '["phone"]' WHEN 'tablet' THEN '["tablet"]'
-		WHEN 'tv' THEN '["tv"]' WHEN 'nas' THEN '["nas"]'
-		WHEN 'other' THEN '["other"]' ELSE semantic_kinds END
-		WHERE semantic_kinds='[]'`); err != nil {
-		return nil, fmt.Errorf("迁移设备类型标签失败: %w", err)
-	}
-	if _, err := db.db.ExecContext(ctx, `UPDATE devices SET semantic_kinds='["router","openwrt"]'
-		WHERE is_openwrt=1 AND semantic_kinds='["router"]'`); err != nil {
-		return nil, fmt.Errorf("迁移 OpenWrt 语义标签失败: %w", err)
-	}
-	if _, err := db.db.ExecContext(ctx, "UPDATE devices SET is_node_device=1 WHERE network_key<>'' AND peer_id<>''"); err != nil {
-		return nil, fmt.Errorf("迁移节点设备标识失败: %w", err)
-	}
+	// 启动时只补齐数据库结构，不自动转换或重写历史设备记录。
 	if _, err := db.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_devices_network_node"); err != nil {
 		return nil, fmt.Errorf("迁移节点设备唯一索引失败: %w", err)
 	}
@@ -830,6 +817,29 @@ func (s *DeviceStore) DeleteGatewayGroup(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
+// ClearDeviceData 原子清理 EasyNetTopo 设备管理模块的数据，不影响节点属性、主机和控制端设置。
+func (s *DeviceStore) ClearDeviceData(ctx context.Context) error {
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+
+	for _, statement := range []string{
+		"DELETE FROM device_openwrt_configs",
+		"DELETE FROM devices",
+		"DELETE FROM device_gateway_groups",
+		"DELETE FROM device_groups",
+		"DELETE FROM network_node_sync_seen",
+		"DELETE FROM settings WHERE key='device_network_node_auto_sync'",
+	} {
+		if _, err := tx.ExecContext(ctx, statement); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 func (s *DeviceStore) NetworkNodeSyncEnabled(ctx context.Context) (bool, error) {
 	var value string
 	err := s.store.db.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='device_network_node_auto_sync'").Scan(&value)
@@ -840,6 +850,15 @@ func (s *DeviceStore) NetworkNodeSyncEnabled(ctx context.Context) (bool, error) 
 }
 
 func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []NetworkNodeDeviceInput) (NetworkNodeSyncResult, error) {
+	return s.syncNetworkNodeDevices(ctx, nodes, true)
+}
+
+// SyncNetworkNodeDevicesIfEnabled 仅在自动补充仍启用时执行，避免清空数据后并发中的后台同步重新创建记录。
+func (s *DeviceStore) SyncNetworkNodeDevicesIfEnabled(ctx context.Context, nodes []NetworkNodeDeviceInput) (NetworkNodeSyncResult, error) {
+	return s.syncNetworkNodeDevices(ctx, nodes, false)
+}
+
+func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []NetworkNodeDeviceInput, enableAutoSync bool) (NetworkNodeSyncResult, error) {
 	if len(nodes) == 0 || len(nodes) > 500 {
 		return NetworkNodeSyncResult{}, ErrInvalidDevice
 	}
@@ -848,9 +867,22 @@ func (s *DeviceStore) SyncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		return NetworkNodeSyncResult{}, err
 	}
 	defer tx.Rollback()
-	if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES('device_network_node_auto_sync','1')
-		ON CONFLICT(key) DO UPDATE SET value='1'`); err != nil {
-		return NetworkNodeSyncResult{}, err
+	if enableAutoSync {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO settings(key,value) VALUES('device_network_node_auto_sync','1')
+			ON CONFLICT(key) DO UPDATE SET value='1'`); err != nil {
+			return NetworkNodeSyncResult{}, err
+		}
+	} else {
+		var enabled string
+		if err := tx.QueryRowContext(ctx, "SELECT value FROM settings WHERE key='device_network_node_auto_sync'").Scan(&enabled); err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				return NetworkNodeSyncResult{}, ErrNetworkNodeAutoSyncDisabled
+			}
+			return NetworkNodeSyncResult{}, err
+		}
+		if enabled != "1" {
+			return NetworkNodeSyncResult{}, ErrNetworkNodeAutoSyncDisabled
+		}
 	}
 	result := NetworkNodeSyncResult{Enabled: true}
 	now := time.Now().UTC().Format(time.RFC3339)

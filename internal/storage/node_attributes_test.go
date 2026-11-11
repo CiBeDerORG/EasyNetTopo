@@ -55,3 +55,39 @@ func TestNetworkNodeAttributesPersistAndValidate(t *testing.T) {
 		t.Fatalf("重启后属性丢失: %+v, %v", got, err)
 	}
 }
+
+func TestDeleteNodeAttributesOnlyClearsNodeAttributeRecords(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	lat, lng := 31.23, 121.47
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{
+		NetworkKey: "network:home", PeerID: "peer-1", Alias: "客厅节点",
+		Location: NodeLocation{Latitude: &lat, Longitude: &lng},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	deviceStore, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.CreateDevice(ctx, DeviceInput{Name: "保留设备"}); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := db.DeleteNodeAttributes(ctx); err != nil {
+		t.Fatal(err)
+	}
+	attributes, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attributes) != 0 {
+		t.Fatalf("节点属性未清空: %+v %v", attributes, err)
+	}
+	devices, err := deviceStore.ListDevices(ctx)
+	if err != nil || len(devices) != 1 || devices[0].Name != "保留设备" {
+		t.Fatalf("清除节点属性误删设备: %+v %v", devices, err)
+	}
+}

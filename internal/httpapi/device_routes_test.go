@@ -204,3 +204,83 @@ func TestNetworkNodeSyncAPI(t *testing.T) {
 		t.Fatalf("不应允许删除节点基础设备: %d %s", deleted.Code, deleted.Body.String())
 	}
 }
+
+func TestClearDeviceDataAPIAndKeepsNetworkNodeAttributes(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	deviceStore, err := storage.NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveNodeAttributes(ctx, storage.NodeAttributes{
+		NetworkKey: "network:home", PeerID: "peer-1", Alias: "保留节点属性",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.SyncNetworkNodeDevices(ctx, []storage.NetworkNodeDeviceInput{
+		{Name: "节点设备", NetworkKey: "network:home", PeerID: "peer-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := deviceStore.CreateDevice(ctx, storage.DeviceInput{Name: "历史设备"}); err != nil {
+		t.Fatal(err)
+	}
+
+	handler := NewHandlerWithDevices(t.TempDir(), db, nil, nil, nil, deviceStore)
+	token, _, err := db.NewSession(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request := func(method, path, body string, auth, csrf bool) *httptest.ResponseRecorder {
+		t.Helper()
+		req := httptest.NewRequest(method, path, strings.NewReader(body))
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if auth {
+			req.AddCookie(&http.Cookie{Name: authCookie, Value: token})
+		}
+		if csrf {
+			req.Header.Set("X-ENT-Request", "1")
+		}
+		w := httptest.NewRecorder()
+		handler.ServeHTTP(w, req)
+		return w
+	}
+	if got := request(http.MethodDelete, "/api/v1/devices", "", false, true); got.Code != http.StatusUnauthorized {
+		t.Fatalf("未登录仍可清除设备数据: %d", got.Code)
+	}
+	if got := request(http.MethodDelete, "/api/v1/devices", "", true, false); got.Code != http.StatusForbidden {
+		t.Fatalf("清除设备数据接口缺少同源校验: %d", got.Code)
+	}
+	cleared := request(http.MethodDelete, "/api/v1/devices", "", true, true)
+	if cleared.Code != http.StatusNoContent || cleared.Body.Len() != 0 {
+		t.Fatalf("清除设备数据失败: %d %s", cleared.Code, cleared.Body.String())
+	}
+	list := request(http.MethodGet, "/api/v1/devices", "", true, false)
+	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), `"devices":[]`) {
+		t.Fatalf("清空后仍存在设备: %d %s", list.Code, list.Body.String())
+	}
+	status := request(http.MethodGet, "/api/v1/devices/network-nodes/sync", "", true, false)
+	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"enabled":false`) {
+		t.Fatalf("清空后自动补充未关闭: %d %s", status.Code, status.Body.String())
+	}
+	backgroundSync := request(http.MethodPost, "/api/v1/devices/network-nodes/sync",
+		`{"nodes":[{"name":"节点设备","network_key":"network:home","peer_id":"peer-1"}],"enable_auto_sync":false}`, true, true)
+	if backgroundSync.Code != http.StatusConflict {
+		t.Fatalf("清空后后台同步应被拒绝: %d %s", backgroundSync.Code, backgroundSync.Body.String())
+	}
+	attributes, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attributes) != 1 || attributes[0].Alias != "保留节点属性" {
+		t.Fatalf("清除设备数据误删网络节点属性: %+v %v", attributes, err)
+	}
+	manualSync := request(http.MethodPost, "/api/v1/devices/network-nodes/sync",
+		`{"nodes":[{"name":"节点设备","network_key":"network:home","peer_id":"peer-1"}]}`, true, true)
+	if manualSync.Code != http.StatusOK {
+		t.Fatalf("清空后手动重新初始化失败: %d %s", manualSync.Code, manualSync.Body.String())
+	}
+}

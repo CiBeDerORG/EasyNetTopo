@@ -97,8 +97,18 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			} else {
 				jsonReply(w, 200, saved)
 			}
+		case http.MethodDelete:
+			if !mutation(w, r) {
+				return
+			}
+			if err := db.DeleteNodeAttributes(r.Context()); err != nil {
+				jsonReply(w, 503, map[string]string{"code": "storage_unavailable", "message": "清除节点属性失败"})
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNoContent)
 		default:
-			methodNotAllowed(w, "GET, PUT")
+			methodNotAllowed(w, "GET, PUT, DELETE")
 		}
 	})
 	mux.HandleFunc("/api/v1/hosts", func(w http.ResponseWriter, r *http.Request) {

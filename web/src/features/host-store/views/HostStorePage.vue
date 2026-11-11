@@ -6,8 +6,10 @@ import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { SwitchButton } from '@element-plus/icons-vue'
+import { Delete, SwitchButton } from '@element-plus/icons-vue'
 import { formatApiError } from '../../../lib/api-client'
+import { clearDeviceData as clearDeviceDataApi } from '../../devices/api'
+import { clearNodeAttributes } from '../../network-nodes/attributes'
 import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
 import {
@@ -195,6 +197,8 @@ const busySourceId = ref('')
 const deletingSourceId = ref('')
 const actionBusyKey = ref('')
 const configBusy = ref(false)
+const dataManagementDialogOpen = ref(false)
+const dataClearBusy = ref<'' | 'nodes' | 'devices'>('')
 const configDialogOpen = ref(false)
 const configState = ref<{ app: CatalogApp; config: AppConfig } | null>(null)
 
@@ -702,6 +706,60 @@ async function submitLogin() {
   if (loginPending.value || !loginForm.username.trim() || !loginForm.password) return
   loginMutation.mutate()
 }
+async function clearNetworkNodeData() {
+  if (dataClearBusy.value) return
+  try {
+    await ElMessageBox.confirm(
+      '将删除 EasyNetTopo 本地保存的全部网络节点属性，包括节点别名、公网 IP 标记及地址、地理位置和经纬度。不会删除实时 EasyTier 节点、设备记录、主机或 Agent 配对。此操作不可恢复，是否继续？',
+      '确认清除节点数据',
+      { type: 'warning', confirmButtonText: '确认清除', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  dataClearBusy.value = 'nodes'
+  try {
+    await clearNodeAttributes()
+    await queryClient.invalidateQueries({ queryKey: ['network-node-attributes'] })
+    dataManagementDialogOpen.value = false
+    ElMessage.success('EasyNetTopo 网络节点数据已清除。')
+  } catch (error) {
+    ElMessage.error('清除网络节点数据失败：' + errorMessage(error))
+  } finally {
+    dataClearBusy.value = ''
+  }
+}
+
+async function clearAllDeviceData() {
+  if (dataClearBusy.value) return
+  try {
+    await ElMessageBox.confirm(
+      '将删除 EasyNetTopo 本地全部设备记录，包括网络节点基础设备、普通设备、历史设备、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录，并关闭节点自动补充。不会删除网络节点属性、主机登记、Agent 配对或远端资源。此操作不可恢复，是否继续？',
+      '确认清除设备数据',
+      { type: 'warning', confirmButtonText: '确认清除全部设备', cancelButtonText: '取消' }
+    )
+  } catch { return }
+
+  dataClearBusy.value = 'devices'
+  try {
+    await clearDeviceDataApi()
+    queryClient.setQueryData(['device-network-node-sync'], { enabled: false })
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-node-devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-groups'] }),
+      queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
+    ])
+    dataManagementDialogOpen.value = false
+    ElMessage.success('EasyNetTopo 设备数据已全部清除；需要时可重新初始化网络节点。')
+  } catch (error) {
+    await queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] })
+    ElMessage.error('清除设备数据失败：' + errorMessage(error))
+  } finally {
+    dataClearBusy.value = ''
+  }
+}
+
 async function logout() {
   try {
     await logoutApi()
@@ -782,6 +840,11 @@ async function logout() {
             <el-option label="深色模式" value="dark" />
           </el-select>
           <span v-if="controllerId" class="controller-id">控制端 {{ controllerId.slice(0, 8) }}</span>
+          <el-tooltip content="删除 EasyNetTopo 本地节点及设备数据" placement="bottom">
+            <el-button text aria-label="删除数据" :disabled="!!dataClearBusy" @click="dataManagementDialogOpen = true">
+              <el-icon><Delete /></el-icon>删除数据
+            </el-button>
+          </el-tooltip>
           <el-tooltip content="退出登录" placement="bottom">
             <el-button text circle aria-label="退出登录" @click="logout">
               <el-icon><SwitchButton /></el-icon>
@@ -871,6 +934,54 @@ async function logout() {
       :saving="configBusy || !!actionBusyKey"
       @submit="submitInstallConfig"
     />
+    <el-dialog
+      v-model="dataManagementDialogOpen"
+      title="删除数据"
+      width="560px"
+      :close-on-click-modal="!dataClearBusy"
+      :close-on-press-escape="!dataClearBusy"
+    >
+      <div class="data-management-dialog">
+        <el-alert
+          title="这里只清除 EasyNetTopo 本地保存的数据，不会操作远程 EasyTier、Agent 或主机资源。删除后不可恢复。"
+          type="warning"
+          :closable="false"
+          show-icon
+        />
+        <section class="data-clear-item">
+          <div class="data-clear-copy">
+            <h3>清除节点数据</h3>
+            <p>仅清除 EasyNetTopo 网络节点属性：节点别名、公网 IP 标记及地址、国家地区、经纬度位置。</p>
+            <span>保留设备记录、主机登记、Agent 配对及实时网络节点。</span>
+          </div>
+          <el-button
+            type="danger"
+            plain
+            :loading="dataClearBusy === 'nodes'"
+            :disabled="!!dataClearBusy"
+            @click="clearNetworkNodeData"
+          >清除节点数据</el-button>
+        </section>
+        <el-divider />
+        <section class="data-clear-item">
+          <div class="data-clear-copy">
+            <h3>清除设备数据</h3>
+            <p>清除节点基础设备、普通及历史设备、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录。</p>
+            <span>同时关闭节点自动补充；网络节点属性、主机和 Agent 配对保持不变。</span>
+          </div>
+          <el-button
+            type="danger"
+            plain
+            :loading="dataClearBusy === 'devices'"
+            :disabled="!!dataClearBusy"
+            @click="clearAllDeviceData"
+          >清除设备数据</el-button>
+        </section>
+      </div>
+      <template #footer>
+        <el-button :disabled="!!dataClearBusy" @click="dataManagementDialogOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -954,6 +1065,16 @@ async function logout() {
 .theme-switcher { width: 120px; flex: none; }
 .controller-id { color: var(--ent-dim); font-size: 10px; }
 .topbar-actions :deep(.el-button) { color: #9ab6cf; }
+.data-management-dialog { display: flex; flex-direction: column; gap: 16px; }
+.data-clear-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
+.data-clear-copy { min-width: 0; }
+.data-clear-copy h3 { margin: 0 0 7px; font-size: 14px; font-weight: 700; }
+.data-clear-copy p { margin: 0 0 6px; color: var(--el-text-color-regular); font-size: 13px; line-height: 1.65; }
+.data-clear-copy span { color: var(--ent-dim); font-size: 11px; line-height: 1.5; }
+@media (max-width: 560px) {
+  .data-clear-item { align-items: stretch; flex-direction: column; }
+  .data-clear-item :deep(.el-button) { align-self: flex-start; }
+}
 .main-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: var(--ent-host-pane-width) minmax(0, 1fr); }
 @media (max-width: 1460px) { .main-layout { grid-template-columns: 286px minmax(0, 1fr); } }
 @media (max-width: 1110px) { .main-layout { grid-template-columns: 250px minmax(0, 1fr); } }

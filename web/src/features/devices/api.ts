@@ -66,8 +66,13 @@ export function deleteGatewayGroup(id: string) {
 export function getNetworkNodeSyncStatus() {
   return apiRequest<NetworkNodeSyncStatus>('/api/v1/devices/network-nodes/sync')
 }
-export function syncNetworkNodeDevices(nodes: NetworkNodeDeviceInput[]) {
-  return apiRequest<NetworkNodeSyncResult>('/api/v1/devices/network-nodes/sync', { method: 'POST', body: { nodes } })
+export function syncNetworkNodeDevices(nodes: NetworkNodeDeviceInput[], enableAutoSync = true) {
+  return apiRequest<NetworkNodeSyncResult>('/api/v1/devices/network-nodes/sync', {
+    method: 'POST', body: { nodes, enable_auto_sync: enableAutoSync }
+  })
+}
+export function clearDeviceData() {
+  return apiRequest<void>('/api/v1/devices', { method: 'DELETE' })
 }
 
 export function getDeviceOpenWrtConfig(id: string) {

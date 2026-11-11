@@ -101,6 +101,11 @@ func normalizeNodeAttributes(attr *NodeAttributes) error {
 	return nil
 }
 
+func (s *Store) DeleteNodeAttributes(ctx context.Context) error {
+	_, err := s.db.ExecContext(ctx, "DELETE FROM network_node_attributes")
+	return err
+}
+
 func (s *Store) SaveNodeAttributes(ctx context.Context, attr NodeAttributes) (NodeAttributes, error) {
 	if err := normalizeNodeAttributes(&attr); err != nil {
 		return NodeAttributes{}, err

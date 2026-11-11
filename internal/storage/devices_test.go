@@ -379,3 +379,136 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 		t.Fatalf("非法语义标签未被拒绝: %v", err)
 	}
 }
+
+func TestClearDeviceDataIsScopedAndDisablesAutomaticNodeSync(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lat, lng := 31.23, 121.47
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{
+		NetworkKey: "network:home", PeerID: "peer-1", Alias: "保留节点属性",
+		Location: NodeLocation{Latitude: &lat, Longitude: &lng},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	group, err := store.CreateDeviceGroup(ctx, "家庭")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "网络节点", NetworkKey: "network:home", PeerID: "peer-1"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gatewayGroup, err := store.CreateGatewayGroup(ctx, "家庭网关", "network:home", "peer-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "OpenWrt", GroupID: group.ID, GatewayGroupID: gatewayGroup.ID,
+		DeviceType: "router", SemanticKinds: []string{"router", "openwrt"},
+		IsOpenWrt: true, IPAddress: "192.168.1.1",
+		NetworkKey: "network:home", PeerID: "peer-1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDeviceOpenWrtConfig(ctx, router.ID, 80, false, "easy-device", "secret-value"); err != nil {
+		t.Fatal(err)
+	}
+	controllerID := db.ControllerID()
+
+	if err := store.ClearDeviceData(ctx); err != nil {
+		t.Fatal(err)
+	}
+	devices, err := store.ListDevices(ctx)
+	if err != nil || len(devices) != 0 {
+		t.Fatalf("设备记录未清空: %+v %v", devices, err)
+	}
+	groups, err := store.ListDeviceGroups(ctx)
+	if err != nil || len(groups) != 0 {
+		t.Fatalf("设备分组未清空: %+v %v", groups, err)
+	}
+	gatewayGroups, err := store.ListGatewayGroups(ctx, "network:home", "peer-1")
+	if err != nil || len(gatewayGroups) != 0 {
+		t.Fatalf("网关组未清空: %+v %v", gatewayGroups, err)
+	}
+	enabled, err := store.NetworkNodeSyncEnabled(ctx)
+	if err != nil || enabled {
+		t.Fatalf("清空后自动补充仍启用: enabled=%v err=%v", enabled, err)
+	}
+	for table, want := range map[string]int{
+		"device_openwrt_configs": 0,
+		"network_node_sync_seen": 0,
+	} {
+		var count int
+		if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM "+table).Scan(&count); err != nil || count != want {
+			t.Fatalf("%s 未清空: count=%d err=%v", table, count, err)
+		}
+	}
+	attributes, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attributes) != 1 || attributes[0].Alias != "保留节点属性" {
+		t.Fatalf("清除设备数据误删节点属性: %+v %v", attributes, err)
+	}
+	if db.ControllerID() != controllerID {
+		t.Fatal("清除设备数据改变了控制端 ID")
+	}
+	if _, err := store.SyncNetworkNodeDevicesIfEnabled(ctx, []NetworkNodeDeviceInput{
+		{Name: "网络节点", NetworkKey: "network:home", PeerID: "peer-1"},
+	}); !errors.Is(err, ErrNetworkNodeAutoSyncDisabled) {
+		t.Fatalf("清空后后台同步未被阻止: %v", err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "网络节点", NetworkKey: "network:home", PeerID: "peer-1"},
+	}); err != nil {
+		t.Fatalf("手动初始化应仍可重新创建节点设备: %v", err)
+	}
+}
+
+func TestNewDeviceStoreDoesNotRewriteHistoricalDeviceRows(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+
+	for _, statement := range []string{
+		`CREATE TABLE devices (
+			id TEXT PRIMARY KEY, name TEXT NOT NULL, group_id TEXT,
+			device_type TEXT NOT NULL DEFAULT '通用设备', semantic_kinds TEXT NOT NULL DEFAULT '[]',
+			is_node_device INTEGER NOT NULL DEFAULT 0, is_gateway INTEGER NOT NULL DEFAULT 0,
+			manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
+			ip_address TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
+			note TEXT NOT NULL DEFAULT '', is_openwrt INTEGER NOT NULL DEFAULT 0,
+			network_key TEXT NOT NULL DEFAULT '', peer_id TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+		)`,
+		`INSERT INTO devices(id,name,device_type,semantic_kinds,is_node_device,is_openwrt,network_key,peer_id,created_at,updated_at)
+			VALUES('legacy','历史路由器','router','[]',0,1,'network:legacy','peer-legacy','2026-01-01','2026-01-01')`,
+	} {
+		if _, err := db.db.ExecContext(ctx, statement); err != nil {
+			t.Fatal(err)
+		}
+	}
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := store.Device(ctx, "legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if legacy.IsNodeDevice || len(legacy.SemanticKinds) != 0 {
+		t.Fatalf("启动时不应自动改写历史设备标识或类型标签: %+v", legacy)
+	}
+}

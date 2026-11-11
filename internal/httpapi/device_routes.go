@@ -73,6 +73,8 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			reply(w, http.StatusConflict, map[string]string{"code": "gateway_device_conflict", "message": "该网关组已经绑定网关自身设备"})
 		case errors.Is(err, storage.ErrNodeDeviceProtected):
 			reply(w, http.StatusConflict, map[string]string{"code": "node_device_protected", "message": "网络节点基础设备不能删除"})
+		case errors.Is(err, storage.ErrNetworkNodeAutoSyncDisabled):
+			reply(w, http.StatusConflict, map[string]string{"code": "network_node_auto_sync_disabled", "message": "网络节点自动补充已关闭，请重新初始化后再执行自动同步"})
 		case errors.Is(err, storage.ErrDeviceGroupExists):
 			reply(w, http.StatusConflict, map[string]string{"code": "device_group_exists", "message": "同名设备分组已存在"})
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):
@@ -275,8 +277,18 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				return
 			}
 			reply(w, http.StatusCreated, item)
+		case http.MethodDelete:
+			if !mutation(w, r) {
+				return
+			}
+			if err := devices.ClearDeviceData(r.Context()); err != nil {
+				mapError(w, err)
+				return
+			}
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusNoContent)
 		default:
-			methodNotAllowed(w, "GET, POST")
+			methodNotAllowed(w, "GET, POST, DELETE")
 		}
 	})
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
@@ -311,12 +323,19 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 					return
 				}
 				var req struct {
-					Nodes []storage.NetworkNodeDeviceInput `json:"nodes"`
+					Nodes          []storage.NetworkNodeDeviceInput `json:"nodes"`
+					EnableAutoSync *bool                              `json:"enable_auto_sync"`
 				}
 				if !decode(w, r, &req) {
 					return
 				}
-				result, err := devices.SyncNetworkNodeDevices(r.Context(), req.Nodes)
+				var result storage.NetworkNodeSyncResult
+				var err error
+				if req.EnableAutoSync != nil && !*req.EnableAutoSync {
+					result, err = devices.SyncNetworkNodeDevicesIfEnabled(r.Context(), req.Nodes)
+				} else {
+					result, err = devices.SyncNetworkNodeDevices(r.Context(), req.Nodes)
+				}
 				if err != nil {
 					mapError(w, err)
 					return

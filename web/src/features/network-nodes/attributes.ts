@@ -24,3 +24,6 @@ export function listNodeAttributes() {
 export function saveNodeAttributes(value: NodeAttributes) {
   return apiRequest<NodeAttributes>('/api/v1/network-nodes/attributes', { method: 'PUT', body: value })
 }
+export function clearNodeAttributes() {
+  return apiRequest<void>('/api/v1/network-nodes/attributes', { method: 'DELETE' })
+}

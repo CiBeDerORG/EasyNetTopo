@@ -499,7 +499,7 @@ async function runNetworkNodeSync(showMessage: boolean) {
   }
   initializingDevices.value = true
   try {
-    const result = await syncNetworkNodeDevices(inputs)
+    const result = await syncNetworkNodeDevices(inputs, showMessage)
     queryClient.setQueryData(['device-network-node-sync'], { enabled: result.enabled })
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['devices'] }),

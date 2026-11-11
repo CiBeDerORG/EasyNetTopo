@@ -59,4 +59,16 @@ func TestNetworkNodeAttributesAPI(t *testing.T) {
 	if got := request("PUT", strings.Replace(payload, "8.8.8.8", "127.0.0.1", 1), true, true); got.Code != 400 {
 		t.Fatal("非法公网 IP 未拦截", got.Code)
 	}
+	if got := request("DELETE", "", false, true); got.Code != 401 {
+		t.Fatal("未登录仍可清除节点数据", got.Code)
+	}
+	if got := request("DELETE", "", true, false); got.Code != 403 {
+		t.Fatal("清除节点数据接口缺少同源校验", got.Code)
+	}
+	if got := request("DELETE", "", true, true); got.Code != 204 || got.Body.Len() != 0 {
+		t.Fatal("清除节点数据失败", got.Code, got.Body.String())
+	}
+	if got := request("GET", "", true, false); got.Code != 200 || !strings.Contains(got.Body.String(), `"attributes":[]`) {
+		t.Fatal("节点数据未清空", got.Code, got.Body.String())
+	}
 }
