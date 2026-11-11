@@ -21,7 +21,8 @@ test('route 数据构建本机、P2P、中继及未知路由，且没有位置�
   const graph = buildMapTopology(route, [attribute(100, 31, 121), attribute(200, 35, 139)], 'entry')
   assert.equal(graph.nodes.length, 4)
   assert.deepEqual(graph.links.map(link => link.kind).sort(), ['p2p', 'relay', 'unknown'].sort())
-  const direct = graph.links.find(link => link.kind === 'p2p')!
+  const direct = graph.links.find(link => link.kind === 'p2p')
+  assert.ok(direct)
   assert.equal(direct.latencyMs, 20)
   assert.equal(direct.rxBytes, 400)
   assert.equal(direct.txBytes, 600)
@@ -42,8 +43,9 @@ test('Peer Center 的真实直连优先级高于同一节点对的入口路由�
   assert.equal(extra.length, 2)
   assert.ok(extra.every(link => link.kind === 'p2p'))
   assert.ok(extra.some(link => link.latencyMs === 11))
-  const local = graph.nodes.find(node => node.id === '100')!
-  const relayPeer = graph.nodes.find(node => node.id === '300')!
+  const local = graph.nodes.find(node => node.id === '100')
+  const relayPeer = graph.nodes.find(node => node.id === '300')
+  assert.ok(local && relayPeer)
   const overridden = graph.links.find(link =>
     (link.from === local.key && link.to === relayPeer.key) ||
     (link.from === relayPeer.key && link.to === local.key))
