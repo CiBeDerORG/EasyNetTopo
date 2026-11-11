@@ -233,7 +233,7 @@ func (s *Service) SetNetworkEntry(ctx context.Context, id string, enabled bool) 
 // NetworkData 复用已配对 Agent，只读固定能力；不接受远端地址或命令。
 func (s *Service) NetworkData(ctx context.Context, id, capability string) (json.RawMessage, error) {
 	switch capability {
-	case "node", "peer", "route":
+	case "node", "peer", "route", "peer-center":
 	default:
 		return nil, errors.New("不支持的网络查询")
 	}
