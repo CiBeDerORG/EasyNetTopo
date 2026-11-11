@@ -17,7 +17,7 @@ on:
       - '.github/workflows/foundation-ci.yml'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   backend:
@@ -33,28 +33,6 @@ jobs:
           go mod tidy
           git diff -- go.mod go.sum
           git diff --exit-code -- go.mod go.sum
-      - name: Format Go sources for migration review
-        run: |
-          gofmt -w internal/httpapi/device_routes.go internal/httpapi/device_routes_test.go internal/httpapi/server.go internal/storage/devices.go internal/storage/devices_test.go
-      - name: Commit formatted Go sources
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add internal/httpapi/device_routes.go internal/httpapi/device_routes_test.go internal/httpapi/server.go internal/storage/devices.go internal/storage/devices_test.go
-          if ! git diff --cached --quiet; then
-            git commit -m "chore: format device management Go sources [skip ci]"
-            git push origin "HEAD:${GITHUB_REF_NAME}"
-          fi
-      - name: Upload formatted Go sources
-        uses: actions/upload-artifact@v4
-        with:
-          name: device-management-gofmt
-          path: |
-            internal/httpapi/device_routes.go
-            internal/httpapi/device_routes_test.go
-            internal/httpapi/server.go
-            internal/storage/devices.go
-            internal/storage/devices_test.go
       - name: Check gofmt
         run: |
           gofmt -l cmd internal | tee /tmp/unformatted-go-files

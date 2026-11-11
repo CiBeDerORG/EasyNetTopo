@@ -84,6 +84,7 @@ func TestDeviceValidationAndOpenWrtCredentialSealing(t *testing.T) {
 		{Name: "bad mac", DeviceType: "other", MACAddress: "invalid"},
 		{Name: "invalid node link", DeviceType: "other", NetworkKey: "network:home"},
 		{Name: "bad OpenWrt", DeviceType: "other", IsOpenWrt: true, IPAddress: "192.168.1.1"},
+		{Name: "public OpenWrt", DeviceType: "router", IsOpenWrt: true, IPAddress: "8.8.8.8"},
 	} {
 		if _, err := store.CreateDevice(ctx, input); !errors.Is(err, ErrInvalidDevice) {
 			t.Fatalf("非法设备通过校验: %+v err=%v", input, err)

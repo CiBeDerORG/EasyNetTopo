@@ -255,8 +255,11 @@ func normalizeDevice(v *DeviceInput) error {
 		}
 		v.MACAddress = strings.ToLower(mac.String())
 	}
-	if v.IsOpenWrt && v.IPAddress == "" {
-		return ErrInvalidDevice
+	if v.IsOpenWrt {
+		ip, err := netip.ParseAddr(v.IPAddress)
+		if err != nil || !isPrivateIPv4(ip) {
+			return ErrInvalidDevice
+		}
 	}
 	return nil
 }
