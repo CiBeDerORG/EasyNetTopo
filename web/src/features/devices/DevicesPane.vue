@@ -9,16 +9,15 @@ import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey } from '../network-nodes/identity'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
 import {
-  createDevice, createDeviceGroup, deleteDevice, deleteDeviceGroup, getDeviceGroups, getDevices,
-  getDeviceOpenWrtConfig, getNetworkNodeSyncStatus, syncNetworkNodeDevices, saveDeviceOpenWrtConfig,
-  clearDeviceOpenWrtConfig, updateDevice, updateDeviceGroup
+  createDevice, deleteDevice, getDevices, getDeviceOpenWrtConfig,
+  getNetworkNodeSyncStatus, syncNetworkNodeDevices, saveDeviceOpenWrtConfig,
+  clearDeviceOpenWrtConfig, updateDevice
 } from './api'
-import type { Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, NetworkNodeDeviceInput } from './types'
+import type { Device, DeviceInput, DeviceOpenWrtConfig, NetworkNodeDeviceInput } from './types'
 
 const props = defineProps<{ hosts: Host[] }>()
 const queryClient = useQueryClient()
 const devicesQuery = useQuery({ queryKey: ['devices'], queryFn: getDevices, retry: 0 })
-const groupsQuery = useQuery({ queryKey: ['device-groups'], queryFn: getDeviceGroups, retry: 0 })
 const networkNodeSyncQuery = useQuery({ queryKey: ['device-network-node-sync'], queryFn: getNetworkNodeSyncStatus, retry: 0 })
 const attributesQuery = useQuery({ queryKey: ['network-node-attributes'], queryFn: listNodeAttributes, retry: 0 })
 const networkEntries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -50,7 +49,6 @@ const nodesQuery = useQuery({
   refetchInterval: 15_000
 })
 const devices = computed(() => devicesQuery.data.value || [])
-const groups = computed(() => groupsQuery.data.value || [])
 const attributesByKey = computed(() => new Map<string, NodeAttributes>(
   (attributesQuery.data.value?.attributes || []).map(item => [item.network_key + '|' + item.peer_id, item])
 ))
@@ -196,8 +194,7 @@ async function saveDeviceRecord() {
     if (editingDeviceId.value) await updateDevice(editingDeviceId.value, draft)
     else await createDevice(draft)
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
     ])
     deviceDialogOpen.value = false
     ElMessage.success(editingDeviceId.value ? '设备资料已更新' : '设备已添加')
@@ -216,8 +213,7 @@ async function deleteSelectedDevices() {
     const failed = ids.filter((_, index) => results[index].status === 'rejected')
     selectedDeviceIds.value = failed
     await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['device-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['devices'] })
     ])
     if (failed.length) ElMessage.warning('已删除 ' + succeeded.length + ' 台，失败 ' + failed.length + ' 台；失败项仍保留在选择中')
     else ElMessage.success('已删除 ' + succeeded.length + ' 台设备')
@@ -225,41 +221,7 @@ async function deleteSelectedDevices() {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
 }
-const groupDialogOpen = ref(false)
-const savingGroup = ref(false)
-const editingGroupId = ref('')
-const groupNameDraft = ref('')
-function openCreateGroup() { editingGroupId.value = ''; groupNameDraft.value = ''; groupDialogOpen.value = true }
-function openEditGroup(group: DeviceGroup) { editingGroupId.value = group.id; groupNameDraft.value = group.name; groupDialogOpen.value = true }
-async function saveGroup() {
-  if (savingGroup.value) return
-  if (!groupNameDraft.value.trim()) { ElMessage.warning('请填写分组名称'); return }
-  savingGroup.value = true
-  try {
-    if (editingGroupId.value) await updateDeviceGroup(editingGroupId.value, groupNameDraft.value)
-    else await createDeviceGroup(groupNameDraft.value)
-    await queryClient.invalidateQueries({ queryKey: ['device-groups'] })
-    groupDialogOpen.value = false
-    ElMessage.success(editingGroupId.value ? '分组已更新' : '分组已创建')
-  } catch (error) { ElMessage.error(formatApiError(error)) }
-  finally { savingGroup.value = false }
-}
-async function removeGroup(group: DeviceGroup) {
-  try {
-    await ElMessageBox.confirm('删除分组「' + group.name + '」后，组内设备会自动转入未分组，不会删除设备。',
-      '确认删除分组', { type: 'warning', confirmButtonText: '删除分组', cancelButtonText: '取消' })
-    await deleteDeviceGroup(group.id)
-    await Promise.all([
-      queryClient.invalidateQueries({ queryKey: ['device-groups'] }),
-      queryClient.invalidateQueries({ queryKey: ['devices'] })
-    ])
-    ElMessage.success('分组已删除，设备已转入未分组')
-  } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
-  }
-}
-
-const openWrtDialogOpen = ref(false)
+legacy group management functionsconst openWrtDialogOpen = ref(false)
 const openWrtTarget = ref<Device | null>(null)
 const openWrtSaving = ref(false)
 const openWrtForm = ref({ rpcd_port: 80, https: false, username: 'easy-device', password: '' })
@@ -389,11 +351,10 @@ function onOpenWrtChange(enabled: boolean | string | number) {
     : kinds.filter(kind => kind !== 'openwrt')
 }
 const isRefreshing = computed(() =>
-  devicesQuery.isFetching.value || groupsQuery.isFetching.value || nodesQuery.isFetching.value)
+  devicesQuery.isFetching.value || nodesQuery.isFetching.value)
 async function refreshAll() {
   await Promise.all([
-    devicesQuery.refetch(), groupsQuery.refetch(), nodesQuery.refetch(), attributesQuery.refetch(),
-    networkNodeSyncQuery.refetch()
+    devicesQuery.refetch(), nodesQuery.refetch(), attributesQuery.refetch(), networkNodeSyncQuery.refetch()
   ])
 }
 watch(
@@ -412,7 +373,7 @@ watch(
     <div class="devices-intro">
       <div>
         <h2>设备列表</h2>
-        <p>统一登记和分组管理设备；网络节点仅建立关联，不重复管理网络信息。</p>
+        <p>统一登记设备，按网关/非网关分类；网络节点作为基础设备并保留独立标识。</p>
       </div>
       <div class="devices-actions">
         <el-button @click="refreshAll" :loading="isRefreshing"><el-icon><Refresh /></el-icon>刷新</el-button>
@@ -440,8 +401,8 @@ watch(
       </div>
     </div>
 
-    <el-alert v-if="devicesQuery.isError.value || groupsQuery.isError.value"
-      :title="formatApiError(devicesQuery.error.value || groupsQuery.error.value)"
+    <el-alert v-if="devicesQuery.isError.value"
+      :title="formatApiError(devicesQuery.error.value)"
       type="error" :closable="false" show-icon />
     <el-alert v-if="networkEntries.length && nodesQuery.isError.value"
       title="网络节点关联列表暂时无法读取；设备资料仍可正常管理。" type="warning" :closable="false" show-icon />
@@ -450,11 +411,11 @@ watch(
     <el-alert v-if="!networkEntries.length" title="尚未设置组网入口，设备仍可独立登记；设置入口后可关联现有网络节点。"
       type="info" :closable="false" show-icon />
 
-    <div v-if="devicesQuery.isPending.value || groupsQuery.isPending.value" class="devices-loading">
+    <div v-if="devicesQuery.isPending.value" class="devices-loading">
       <el-skeleton :rows="5" animated />
     </div>
     <template v-else>
-      remove failure list      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
+      <el-empty v-if="!devices.length" description="设备列表还没有设备" :image-size="120">
         <div class="empty-initialize">
           <p v-if="!networkEntries.length">尚未设置组网入口，请先在主机列表中设置组网入口。</p>
           <p v-else-if="nodesQuery.isPending.value">正在读取现有网络节点…</p>
@@ -588,19 +549,7 @@ watch(
       </template>
     </el-dialog>
 
-    <el-dialog v-model="groupDialogOpen" :title="editingGroupId ? '重命名分组' : '新建分组'" width="min(420px, 92vw)">
-      <el-form label-position="top" @submit.prevent="saveGroup">
-        <el-form-item label="分组名称" required>
-          <el-input v-model="groupNameDraft" maxlength="64" show-word-limit placeholder="例如：家庭网络" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <el-button @click="groupDialogOpen = false">取消</el-button>
-        <el-button type="primary" :loading="savingGroup" @click="saveGroup">保存分组</el-button>
-      </template>
-    </el-dialog>
-
-    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
+legacy group dialog    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
       <template v-if="openWrtTarget">
         <el-alert type="info" :closable="false" show-icon
           title="此配置属于设备「{{ openWrtTarget.name }}」，不会挂在分组上。RPCD 密钥在服务端加密保存，不会回传。" />

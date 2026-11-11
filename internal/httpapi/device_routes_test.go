@@ -111,22 +111,35 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 func TestNetworkNodeSyncAPI(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	deviceStore, err := storage.NewDeviceStore(ctx, db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandlerWithDevices(t.TempDir(), db, nil, nil, nil, deviceStore)
 	token, _, err := db.NewSession(ctx)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := func(method, path, body string, auth, csrf bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, strings.NewReader(body))
-		if body != "" { req.Header.Set("Content-Type", "application/json") }
-		if auth { req.AddCookie(&http.Cookie{Name: authCookie, Value: token}) }
-		if csrf { req.Header.Set("X-ENT-Request", "1") }
+		if body != "" {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		if auth {
+			req.AddCookie(&http.Cookie{Name: authCookie, Value: token})
+		}
+		if csrf {
+			req.Header.Set("X-ENT-Request", "1")
+		}
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		return w
 	}
+
 	status := request("GET", "/api/v1/devices/network-nodes/sync", "", true, false)
 	if status.Code != http.StatusOK || !strings.Contains(status.Body.String(), `"enabled":false`) {
 		t.Fatalf("读取自动补充状态失败: %d %s", status.Code, status.Body.String())

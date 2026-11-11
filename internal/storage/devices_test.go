@@ -174,33 +174,47 @@ func TestDeviceStoreDoesNotRegenerateMissingKeyWithSavedCredentials(t *testing.T
 func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	store, err := NewDeviceStore(ctx, db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 
 	enabled, err := store.NetworkNodeSyncEnabled(ctx)
-	if err != nil || enabled { t.Fatalf("自动补充初始状态错误: enabled=%v err=%v", enabled, err) }
+	if err != nil || enabled {
+		t.Fatalf("自动补充初始状态错误: enabled=%v err=%v", enabled, err)
+	}
 
 	nodes := []NetworkNodeDeviceInput{
 		{Name: "入口节点", NetworkKey: "network:home", PeerID: "peer-entry"},
 		{Name: "远端节点", NetworkKey: "network:home", PeerID: "peer-remote"},
 	}
 	first, err := store.SyncNetworkNodeDevices(ctx, nodes)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if first.Created != 2 || first.Existing != 0 || !first.Enabled {
 		t.Fatalf("首次初始化结果错误: %+v", first)
 	}
 	enabled, err = store.NetworkNodeSyncEnabled(ctx)
-	if err != nil || !enabled { t.Fatalf("自动补充未持久化: enabled=%v err=%v", enabled, err) }
+	if err != nil || !enabled {
+		t.Fatalf("自动补充未持久化: enabled=%v err=%v", enabled, err)
+	}
 
 	second, err := store.SyncNetworkNodeDevices(ctx, nodes)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if second.Created != 0 || second.Existing != 2 {
 		t.Fatalf("重复同步没有幂等: %+v", second)
 	}
 	items, err := store.ListDevices(ctx)
-	if err != nil || len(items) != 2 { t.Fatalf("设备数量错误: %d err=%v", len(items), err) }
+	if err != nil || len(items) != 2 {
+		t.Fatalf("设备数量错误: %d err=%v", len(items), err)
+	}
 	for _, item := range items {
 		if !item.IsNodeDevice || item.IsGateway || item.DeviceType != "通用设备" {
 			t.Fatalf("节点设备初始属性错误: %+v", item)
@@ -209,27 +223,41 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 
 	var deletedID string
 	for _, item := range items {
-		if item.PeerID == "peer-entry" { deletedID = item.ID }
+		if item.PeerID == "peer-entry" {
+			deletedID = item.ID
+		}
 	}
-	if deletedID == "" { t.Fatal("未找到待删除节点设备") }
-	if err := store.DeleteDevice(ctx, deletedID); err != nil { t.Fatal(err) }
+	if deletedID == "" {
+		t.Fatal("未找到待删除节点设备")
+	}
+	if err := store.DeleteDevice(ctx, deletedID); err != nil {
+		t.Fatal(err)
+	}
 
 	withNew := append(nodes, NetworkNodeDeviceInput{Name: "新增节点", NetworkKey: "network:home", PeerID: "peer-new"})
 	third, err := store.SyncNetworkNodeDevices(ctx, withNew)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if third.Created != 1 || third.Existing != 2 {
 		t.Fatalf("自动补充新节点结果错误: %+v", third)
 	}
 	items, err = store.ListDevices(ctx)
-	if err != nil || len(items) != 2 { t.Fatalf("删除的节点被自动重建或新节点未创建: count=%d err=%v", len(items), err) }
+	if err != nil || len(items) != 2 {
+		t.Fatalf("删除的节点被自动重建或新节点未创建: count=%d err=%v", len(items), err)
+	}
 	for _, item := range items {
-		if item.PeerID == "peer-entry" { t.Fatal("用户删除的节点设备被自动重建") }
+		if item.PeerID == "peer-entry" {
+			t.Fatal("用户删除的节点设备被自动重建")
+		}
 	}
 
 	custom, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "X86 软路由", DeviceType: "X86 软路由", SemanticKinds: []string{"router", "server"}, IsGateway: true,
 	})
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if !custom.IsGateway || len(custom.SemanticKinds) != 2 || custom.SemanticKinds[0] != "router" || custom.SemanticKinds[1] != "server" {
 		t.Fatalf("自定义类型/多语义标签/网关分类保存错误: %+v", custom)
 	}

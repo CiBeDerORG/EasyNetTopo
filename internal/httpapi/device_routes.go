@@ -191,14 +191,26 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			switch r.Method {
 			case http.MethodGet:
 				enabled, err := devices.NetworkNodeSyncEnabled(r.Context())
-				if err != nil { mapError(w, err); return }
+				if err != nil {
+					mapError(w, err)
+					return
+				}
 				reply(w, http.StatusOK, map[string]bool{"enabled": enabled})
 			case http.MethodPost:
-				if !mutation(w, r) { return }
-				var req struct { Nodes []storage.NetworkNodeDeviceInput `json:"nodes"` }
-				if !decode(w, r, &req) { return }
+				if !mutation(w, r) {
+					return
+				}
+				var req struct {
+					Nodes []storage.NetworkNodeDeviceInput `json:"nodes"`
+				}
+				if !decode(w, r, &req) {
+					return
+				}
 				result, err := devices.SyncNetworkNodeDevices(r.Context(), req.Nodes)
-				if err != nil { mapError(w, err); return }
+				if err != nil {
+					mapError(w, err)
+					return
+				}
 				reply(w, http.StatusOK, result)
 			default:
 				methodNotAllowed(w, "GET, POST")
