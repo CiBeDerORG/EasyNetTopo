@@ -31,6 +31,7 @@ var (
 	ErrInvalidDeviceGroup          = errors.New("设备分组名称不合法")
 	ErrDeviceNotOpenWrt            = errors.New("该设备未标记为 OpenWrt")
 	ErrOpenWrtConfigNotFound       = errors.New("OpenWrt 发现服务尚未配置")
+	ErrInvalidOpenWrtConfig        = errors.New("OpenWrt 发现服务配置不合法")
 )
 
 type DeviceGroup struct {
