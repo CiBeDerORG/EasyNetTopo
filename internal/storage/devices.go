@@ -120,6 +120,18 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			return nil, fmt.Errorf("初始化设备管理数据失败: %w", err)
 		}
 	}
+	keyPath := filepath.Join(db.DataDir(), ".device-openwrt-sealing-key")
+	if _, statErr := os.Lstat(keyPath); errors.Is(statErr, os.ErrNotExist) {
+		var saved int
+		if err := db.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM device_openwrt_configs").Scan(&saved); err != nil {
+			return nil, err
+		}
+		if saved > 0 {
+			return nil, errors.New("OpenWrt 凭据密钥缺失但数据库仍有已保存配置；拒绝生成新密钥，请从备份恢复密钥文件")
+		}
+	} else if statErr != nil {
+		return nil, statErr
+	}
 	key, err := loadDeviceSealingKey(db.DataDir())
 	if err != nil {
 		return nil, err

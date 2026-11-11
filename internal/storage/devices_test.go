@@ -141,3 +141,32 @@ func TestDeviceValidationAndOpenWrtCredentialSealing(t *testing.T) {
 		t.Fatalf("密钥文件权限错误: %v %v", info, err)
 	}
 }
+
+func TestDeviceStoreDoesNotRegenerateMissingKeyWithSavedCredentials(t *testing.T) {
+	ctx := context.Background()
+	dir := t.TempDir()
+	db, err := Open(filepath.Join(dir, "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	router, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "OpenWrt", DeviceType: "router", IPAddress: "192.168.1.1", IsOpenWrt: true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDeviceOpenWrtConfig(ctx, router.ID, 80, false, "easy-device", "secret-value"); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Remove(filepath.Join(dir, ".device-openwrt-sealing-key")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := NewDeviceStore(ctx, db); err == nil {
+		t.Fatal("凭据密钥丢失时不应生成新密钥并继续启动")
+	}
+}
