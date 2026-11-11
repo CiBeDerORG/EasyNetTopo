@@ -249,7 +249,7 @@ const deviceDialogOpen = ref(false)
 const savingDevice = ref(false)
 const editingDeviceId = ref('')
 const deviceDraft = ref<DeviceInput>(emptyDevice())
-const isOpenWrtDraft = computed(() => deviceDraft.value.semantic_kinds.includes("openwrt"))
+const isOpenWrtDraft = computed(() => deviceDraft.value.semantic_kinds.includes('openwrt'))
 function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
@@ -632,7 +632,7 @@ watch(
                   <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <el-tag v-if="device.is_gateway" size="small" type="success" effect="dark">网关设备</el-tag>
                   <el-tag v-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
-                                  </div>
+                </div>
                 <div class="device-subtitle">
                   <span>{{ [device.manufacturer, device.model].filter(Boolean).join(' · ') || '未填写厂商与型号' }}</span>
                   <span v-if="device.ip_address">{{ device.ip_address }}</span>
