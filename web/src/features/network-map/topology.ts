@@ -1,6 +1,6 @@
 import type { NodeAttributes } from '../network-nodes/attributes'
-import { mergedNetworkRows, record, list, type NetworkRow } from '../network-nodes/data'
-import { networkNodeAttributeKey } from '../network-nodes/identity'
+import { mergedNetworkRows, record, list, type NetworkRow } from '../network-nodes/data.ts'
+import { networkNodeAttributeKey } from '../network-nodes/identity.ts'
 
 export type MapLinkKind = 'p2p' | 'relay' | 'unknown'
 export type MapNode = {
