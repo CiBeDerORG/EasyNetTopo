@@ -59,12 +59,17 @@ func TestOpenWrtDiscoveryRPCUsesFixedObjectsAndStoredCredential(t *testing.T) {
 	defer server.Close()
 
 	secret := storage.DeviceOpenWrtSecret{URL: server.URL + "/ubus", Username: "easyadb", Password: "private-secret"}
-	for _, item := range []struct{ kind, action, object string }{
-		{"devices", "list", "easy-discovery.devices"},
-		{"devices", "scan", "easy-discovery.devices"},
-		{"adb", "list", "easy-discovery.adb"},
-		{"adb", "scan", "easy-discovery.adb"},
-	} {
+	cases := []struct {
+		kind   string
+		action string
+		object string
+	}{
+		{kind: "devices", action: "list", object: "easy-discovery.devices"},
+		{kind: "devices", action: "scan", object: "easy-discovery.devices"},
+		{kind: "adb", action: "list", object: "easy-discovery.adb"},
+		{kind: "adb", action: "scan", object: "easy-discovery.adb"},
+	}
+	for _, item := range cases {
 		data, err := callOpenWrtDiscoveryRPC(context.Background(), server.Client(), secret, item.kind, item.action)
 		if err != nil || !strings.Contains(string(data), `"测试设备"`) {
 			t.Fatalf("%s.%s 调用失败: %s %v", item.kind, item.action, data, err)
@@ -75,12 +80,7 @@ func TestOpenWrtDiscoveryRPCUsesFixedObjectsAndStoredCredential(t *testing.T) {
 	if len(calls) != 8 {
 		t.Fatalf("预期 4 次登录和 4 次发现，实际：%v", calls)
 	}
-	for i, item := range []struct{ kind, action, object string }{
-		{"devices", "list", "easy-discovery.devices"},
-		{"devices", "scan", "easy-discovery.devices"},
-		{"adb", "list", "easy-discovery.adb"},
-		{"adb", "scan", "easy-discovery.adb"},
-	} {
+	for i, item := range cases {
 		if calls[i*2] != "session.login" || calls[i*2+1] != item.object+"."+item.action {
 			t.Fatalf("固定对象/方法不正确: %v", calls)
 		}
@@ -88,17 +88,22 @@ func TestOpenWrtDiscoveryRPCUsesFixedObjectsAndStoredCredential(t *testing.T) {
 }
 
 func TestOpenWrtDiscoveryRPCRejectsRemoteErrors(t *testing.T) {
-	for _, tc := range []struct {
-		name, reply, want string
+	cases := []struct {
+		name  string
+		reply string
+		want  string
 	}{
-		{"权限不足", `{"result":[6,{}]}`, "openwrt_rpcd_permission_denied"},
-		{"缺少插件", `{"result":[4,{}]}`, "openwrt_discovery_unavailable"},
-		{"JSON-RPC 错误", `{"error":{"code":-32603,"message":"bad"}}`, "openwrt_rpcd_invalid_response"},
-		{"不支持结果", `{"result":[0,{"unexpected":true}]}`, "openwrt_discovery_invalid_response"},
-	} {
+		{name: "权限不足", reply: `{"result":[6,{}]}`, want: "openwrt_rpcd_permission_denied"},
+		{name: "缺少插件", reply: `{"result":[4,{}]}`, want: "openwrt_discovery_unavailable"},
+		{name: "JSON-RPC 错误", reply: `{"error":{"code":-32603,"message":"bad"}}`, want: "openwrt_rpcd_invalid_response"},
+		{name: "不支持结果", reply: `{"result":[0,{"unexpected":true}]}`, want: "openwrt_discovery_invalid_response"},
+	}
+	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-				var request struct { Params []json.RawMessage `json:"params"` }
+				var request struct {
+					Params []json.RawMessage `json:"params"`
+				}
 				_ = json.NewDecoder(r.Body).Decode(&request)
 				var object string
 				_ = json.Unmarshal(request.Params[1], &object)
@@ -109,9 +114,12 @@ func TestOpenWrtDiscoveryRPCRejectsRemoteErrors(t *testing.T) {
 				}
 			}))
 			defer server.Close()
-			_, err := callOpenWrtDiscoveryRPC(context.Background(), server.Client(),
-				storage.DeviceOpenWrtSecret{URL: server.URL+"/ubus", Username:"easyadb", Password:"safe"},
-				"devices", "scan")
+			secret := storage.DeviceOpenWrtSecret{
+				URL:      server.URL + "/ubus",
+				Username: "easyadb",
+				Password: "safe",
+			}
+			_, err := callOpenWrtDiscoveryRPC(context.Background(), server.Client(), secret, "devices", "scan")
 			if err == nil || err.code != tc.want {
 				t.Fatalf("应返回 %s，实际：%v", tc.want, err)
 			}
@@ -122,36 +130,67 @@ func TestOpenWrtDiscoveryRPCRejectsRemoteErrors(t *testing.T) {
 func TestOpenWrtDiscoveryRouteGuards(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	ds, err := storage.NewDeviceStore(ctx, db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	handler := NewHandlerWithDevices(t.TempDir(), db, nil, nil, nil, ds)
 	session, _, err := db.NewSession(ctx)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	request := func(method, path string, authenticated, csrf bool) *httptest.ResponseRecorder {
 		req := httptest.NewRequest(method, path, nil)
-		if authenticated { req.AddCookie(&http.Cookie{Name: authCookie, Value: session}) }
-		if csrf { req.Header.Set("X-ENT-Request", "1") }
+		if authenticated {
+			req.AddCookie(&http.Cookie{Name: authCookie, Value: session})
+		}
+		if csrf {
+			req.Header.Set("X-ENT-Request", "1")
+		}
 		w := httptest.NewRecorder()
 		handler.ServeHTTP(w, req)
 		return w
 	}
-	normal, err := ds.CreateDevice(ctx, storage.DeviceInput{Name:"普通设备", SemanticKinds:[]string{"router"}, IPAddress:"192.168.1.30"})
-	if err != nil { t.Fatal(err) }
-	notGateway, err := ds.CreateDevice(ctx, storage.DeviceInput{Name:"非网关 OpenWrt", SemanticKinds:[]string{"openwrt"}, IPAddress:"192.168.1.31"})
-	if err != nil { t.Fatal(err) }
-	gateway, err := ds.CreateDevice(ctx, storage.DeviceInput{Name:"网关 OpenWrt", SemanticKinds:[]string{"openwrt"}, IPAddress:"192.168.1.32",
-		IsGateway:true, NetworkKey:"network:home", PeerID:"peer-a"})
-	if err != nil { t.Fatal(err) }
-	base := "/api/v1/devices/"+gateway.ID+"/openwrt/discovery/devices"
+	normal, err := ds.CreateDevice(ctx, storage.DeviceInput{
+		Name:          "普通设备",
+		SemanticKinds: []string{"router"},
+		IPAddress:     "192.168.1.30",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	notGateway, err := ds.CreateDevice(ctx, storage.DeviceInput{
+		Name:          "非网关 OpenWrt",
+		SemanticKinds: []string{"openwrt"},
+		IPAddress:     "192.168.1.31",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := ds.CreateDevice(ctx, storage.DeviceInput{
+		Name:          "网关 OpenWrt",
+		SemanticKinds: []string{"openwrt"},
+		IPAddress:     "192.168.1.32",
+		IsGateway:     true,
+		NetworkKey:    "network:home",
+		PeerID:        "peer-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	base := "/api/v1/devices/" + gateway.ID + "/openwrt/discovery/devices"
 	if got := request("GET", base, false, false); got.Code != http.StatusUnauthorized {
 		t.Fatalf("未经授权读取：%d", got.Code)
 	}
 	if got := request("POST", base, true, false); got.Code != http.StatusForbidden {
 		t.Fatalf("未做同源验证仍允许扫描：%d", got.Code)
 	}
-	if got := request("GET", base, true, false); got.Code != http.StatusConflict || !strings.Contains(got.Body.String(), "openwrt_discovery_not_configured") {
+	if got := request("GET", base, true, false); got.Code != http.StatusConflict ||
+		!strings.Contains(got.Body.String(), "openwrt_discovery_not_configured") {
 		t.Fatalf("没有 RPCD 配置仍允许读取：%d %s", got.Code, got.Body.String())
 	}
 	if got := request("GET", "/api/v1/devices/"+notGateway.ID+"/openwrt/discovery/adb", true, false); got.Code != http.StatusConflict ||
