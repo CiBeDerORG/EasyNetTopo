@@ -6,6 +6,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"crypto/x509"
+	"database/sql"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -32,6 +33,33 @@ type DiscoveredAgent struct {
 type DiscoveryState struct {
 	Enabled   bool   `json:"enabled"`
 	ExpiresAt string `json:"expires_at,omitempty"`
+}
+
+func ensureReverseHostColumns(ctx context.Context, db *sql.DB) error {
+	columns := []struct{ name, definition string }{
+		{"connection_mode", "TEXT NOT NULL DEFAULT 'direct'"},
+		{"host_type", "TEXT NOT NULL DEFAULT 'permanent'"},
+		{"accepted_at", "TEXT NOT NULL DEFAULT ''"},
+		{"expires_at", "TEXT NOT NULL DEFAULT ''"},
+		{"last_seen_at", "TEXT NOT NULL DEFAULT ''"},
+		{"next_poll_at", "TEXT NOT NULL DEFAULT ''"},
+		{"platform", "TEXT NOT NULL DEFAULT ''"},
+		{"arch", "TEXT NOT NULL DEFAULT ''"},
+		{"agent_version", "TEXT NOT NULL DEFAULT ''"},
+		{"revoked_at", "TEXT NOT NULL DEFAULT ''"},
+	}
+	for _, column := range columns {
+		var count int
+		if err := db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('hosts') WHERE name=?", column.name).Scan(&count); err != nil {
+			return err
+		}
+		if count == 0 {
+			if _, err := db.ExecContext(ctx, "ALTER TABLE hosts ADD COLUMN "+column.name+" "+column.definition); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 func (s *HostStore) initReverseSchema(ctx context.Context) error {
@@ -85,7 +113,8 @@ func (s *HostStore) OpenDiscovery(ctx context.Context) (string, DiscoveryState, 
 }
 
 func (s *HostStore) CloseDiscovery(ctx context.Context) error {
-	_, err := s.store.db.ExecContext(ctx, `UPDATE agent_discovery_config SET enabled=0,token_hash='',expires_at='' WHERE id=1`)
+	// 保留短时凭据至发现窗口自然过期，已接受但暂时离线的 Agent 仍可取回自己的专属 Token。
+	_, err := s.store.db.ExecContext(ctx, `UPDATE agent_discovery_config SET enabled=0 WHERE id=1`)
 	return err
 }
 
@@ -96,15 +125,12 @@ func (s *HostStore) Discovery(ctx context.Context) (DiscoveryState, error) {
 	if err != nil {
 		return DiscoveryState{}, err
 	}
-	if enabled != 1 {
-		return DiscoveryState{Enabled: false}, nil
-	}
 	deadline, err := time.Parse(time.RFC3339Nano, expires)
 	if err != nil || !time.Now().UTC().Before(deadline) {
 		_, _ = s.store.db.ExecContext(ctx, `UPDATE agent_discovery_config SET enabled=0,token_hash='' WHERE id=1`)
 		return DiscoveryState{Enabled: false}, nil
 	}
-	return DiscoveryState{Enabled: true, ExpiresAt: expires}, nil
+	return DiscoveryState{Enabled: enabled == 1, ExpiresAt: expires}, nil
 }
 
 func validAgentCertificate(agentID, fingerprint string, der []byte) error {
@@ -138,8 +164,20 @@ func (s *HostStore) RegisterDiscovery(ctx context.Context, token string, item Di
 		return "", ErrDiscoveryClosed
 	}
 	deadline, err := time.Parse(time.RFC3339Nano, expires)
-	if err != nil || enabled != 1 || !time.Now().UTC().Before(deadline) ||
+	if err != nil || !time.Now().UTC().Before(deadline) ||
 		subtle.ConstantTimeCompare([]byte(tokenHash), []byte(digest(token))) != 1 {
+		return "", ErrDiscoveryClosed
+	}
+	var existingPin, status string
+	err = s.store.db.QueryRowContext(ctx, `SELECT spki_sha256,status FROM agent_discoveries WHERE agent_id=?`, item.AgentID).
+		Scan(&existingPin, &status)
+	if err == nil && existingPin != item.SPKISHA256 {
+		return "", ErrHostBinding
+	}
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
+	if enabled != 1 && status != "accepted" {
 		return "", ErrDiscoveryClosed
 	}
 	if item.Hostname == "" || len(item.Hostname) > 255 || item.Platform == "" || len(item.Platform) > 32 ||
@@ -147,15 +185,6 @@ func (s *HostStore) RegisterDiscovery(ctx context.Context, token string, item Di
 		return "", errors.New("Agent 主机信息无效")
 	}
 	now := time.Now().UTC().Format(time.RFC3339Nano)
-	var existingPin, status string
-	err = s.store.db.QueryRowContext(ctx, `SELECT spki_sha256,status FROM agent_discoveries WHERE agent_id=?`, item.AgentID).
-		Scan(&existingPin, &status)
-	if err == nil && existingPin != item.SPKISHA256 {
-		return "", ErrHostBinding
-	}
-	if err != nil && err.Error() != "sql: no rows in result set" {
-		return "", err
-	}
 	firstSeen := now
 	if err == nil {
 		_ = s.store.db.QueryRowContext(ctx, `SELECT first_seen_at FROM agent_discoveries WHERE agent_id=?`, item.AgentID).Scan(&firstSeen)
@@ -304,10 +333,6 @@ func (s *HostStore) TemporaryActive(h Host) bool {
 	}
 	expires, err := time.Parse(time.RFC3339Nano, h.ExpiresAt)
 	return err == nil && time.Now().UTC().Before(expires)
-}
-
-func (s *HostStore) DebugReverseSchema(ctx context.Context) error {
-	return s.initReverseSchema(ctx)
 }
 
 func (s *HostStore) ReverseToken(ctx context.Context, agentID string) (string, error) {
