@@ -26,35 +26,7 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-var reverseAgentID = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}package httpapi
-
-import (
-	"bytes"
-	"crypto/ecdsa"
-	"crypto/sha256"
-	"crypto/subtle"
-	"crypto/x509"
-	"encoding/base64"
-	"encoding/hex"
-	"encoding/json"
-	"errors"
-	"io"
-	"math"
-	"net/http"
-	"regexp"
-	"net/url"
-	"os"
-	"strconv"
-	"strings"
-	"sync"
-	"time"
-
-	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
-	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
-)
-
-)
+var reverseAgentID = regexp.MustCompile(`^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$`)
 
 type reverseGuard struct {
 	mu sync.Mutex
