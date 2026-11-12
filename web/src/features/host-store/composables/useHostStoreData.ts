@@ -24,7 +24,7 @@ export function useHostStoreData(
     if (authenticated.value && tasks && detectSelfUpdate(tasks)) window.location.reload()
   }, { immediate: true })
   const hostsQuery = useQuery({
-    queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000
+    queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000, refetchInterval: 5000
   })
   const sourcesQuery = useQuery({
     queryKey: ['catalog-sources'], queryFn: getSources, enabled: computed(() => authenticated.value && storePage.value), staleTime: 15_000
@@ -45,7 +45,7 @@ export function useHostStoreData(
   const snapshotQuery = useQuery({
     queryKey: computed(() => ['host-snapshot', selectedHostId.value]),
     queryFn: () => getHostSnapshot(selectedHostId.value),
-    enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value && !!selectedHost.value?.agent_id),
+    enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value && !!selectedHost.value?.agent_id && selectedHost.value?.host_type !== 'temporary'),
     retry: 0,
     staleTime: 10_000,
     refetchInterval: computed(() => agentRestarting.value || tasks.value.some(task =>
@@ -57,7 +57,7 @@ export function useHostStoreData(
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),
     queryFn: () => getAppStatuses(selectedHostId.value, catalogApps.value),
     enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value &&
-      !!selectedHost.value?.agent_id && appsQuery.isSuccess.value),
+      !!selectedHost.value?.agent_id && selectedHost.value?.host_type !== 'temporary' && appsQuery.isSuccess.value),
     retry: 0,
     refetchInterval: query => shouldPoll.value ||
       (query.state.data as AppStatus[] | undefined)?.some(row => row.result === 'running') ? 1800 : false
@@ -67,7 +67,7 @@ export function useHostStoreData(
     queryFn: () => getDockerInventory(selectedHostId.value),
     // 应用卡片也需要使用同一份 Docker 快照展示宿主机映射端口，
     // 不再等到用户打开资源抽屉时才读取。
-    enabled: computed(() => authenticated.value && storePage.value && !!selectedHost.value?.agent_id),
+    enabled: computed(() => authenticated.value && storePage.value && !!selectedHost.value?.agent_id && selectedHost.value?.host_type !== 'temporary'),
     retry: 0,
     staleTime: 10_000
   })
