@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildMapTopology, trafficRates } from '../src/features/network-map/topology.ts'
+import { buildMapTopology, linkCurveLanes, trafficRates } from '../src/features/network-map/topology.ts'
 
 const route = {
   node_info: { hostname: 'yun', peer_id: 100, inst_id: 'a', network_name: 'prod', ipv4_addr: '10.10.10.1' },
@@ -17,6 +17,17 @@ const attribute = (id, latitude, longitude) => ({
   location: { country: '中国', province: '', city: '', county: '', latitude, longitude }
 })
 
+const mapNode = (key, latitude, longitude) => ({
+  key, id: key, instanceID: 'a', instance: 'prod', networkKey: 'network:prod',
+  hostname: key, label: key, ip: '', latitude, longitude, location: '',
+  publicIP: '', natType: '', flags: [], version: '', subnets: '', visible: true
+})
+const mapLink = (key, from, to) => ({
+  key, from, to, via: null, kind: 'p2p', source: 'peer-center',
+  latencyMs: null, lossPercent: null, cost: null, protocol: '—', nextHop: '—',
+  rxBytes: null, txBytes: null, rxBps: null, txBps: null
+})
+
 test('route 数据构建本机、P2P、中继及未知路由，且没有位置时不猜测坐标', () => {
   const graph = buildMapTopology(route, [attribute(100, 31, 121), attribute(200, 35, 139)], 'entry')
   assert.equal(graph.nodes.length, 4)
@@ -29,6 +40,26 @@ test('route 数据构建本机、P2P、中继及未知路由，且没有位置�
   assert.equal(graph.links.find(link => link.kind === 'relay')?.via, graph.nodes.find(node => node.id === '200')?.key)
   assert.equal(graph.nodes[2].latitude, null)
   assert.equal(graph.nodes[3].longitude, null)
+})
+
+test('同一节点发往相近方向的直连线路分配相反曲率，其他方向不受影响', () => {
+  const nodes = [
+    mapNode('source', 31, 118),
+    mapNode('target-a', 31.2, 121.2),
+    mapNode('target-b', 31.21, 121.25),
+    mapNode('target-c', 28, 121)
+  ]
+  const links = [
+    mapLink('direct-a', 'source', 'target-a'),
+    mapLink('direct-b', 'source', 'target-b'),
+    mapLink('other-direction', 'source', 'target-c')
+  ]
+  const lanes = linkCurveLanes(nodes, links)
+  const first = lanes.get('direct-a')
+  const second = lanes.get('direct-b')
+  assert.ok(first !== undefined && second !== undefined)
+  assert.equal(first, -second)
+  assert.equal(lanes.has('other-direction'), false)
 })
 
 test('Peer Center 的真实直连优先级高于同一节点对的入口路由推断', () => {
