@@ -764,7 +764,7 @@ watch(
               : '暂无设备'" :image-size="54" />
         </div>
       </div>
-      <el-empty v-if="devices.length && !deviceSections.some(section => section.items.length) && search" description="没有匹配的设备" />
+      <el-empty v-if="devices.length && !deviceSections.length && search" description="没有匹配的设备" />
     </template>
 
     <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '新增设备'" width="min(620px, 94vw)" destroy-on-close>
