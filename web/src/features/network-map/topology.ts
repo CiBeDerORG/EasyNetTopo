@@ -42,6 +42,9 @@ export type MapLink = {
 export type MapTopology = { nodes: MapNode[]; links: MapLink[] }
 
 const CURVE_PARALLEL_ANGLE_DEGREES = 18
+const CURVE_SEPARATION_SCALE = 0.01
+const CURVE_SEPARATION_MIN_METERS = 900
+const CURVE_SEPARATION_MAX_METERS = 240000
 
 function bearingDegrees(from: MapNode, to: MapNode): number {
   const radians = Math.PI / 180
@@ -51,7 +54,7 @@ function bearingDegrees(from: MapNode, to: MapNode): number {
   const y = Math.sin(deltaLon) * Math.cos(lat2)
   const x = Math.cos(lat1) * Math.sin(lat2) -
     Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon)
-  return Math.atan2(y, x) * 180 / Math.PI
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360
 }
 
 function angularDistance(a: number, b: number): number {
@@ -59,19 +62,33 @@ function angularDistance(a: number, b: number): number {
   return Math.min(difference, 360 - difference)
 }
 
-// 同一节点发往相近方向的直连线路使用对称曲率分车道，避免相邻节点间的线段重叠。
-// 返回值以 link.from -> link.to 的方向为基准；反向链路会自动翻转符号。
+function relativeBearing(bearing: number, center: number): number {
+  return ((bearing - center + 540) % 360) - 180
+}
+
+// 地图初始全球视角时给出明显的线路间距；放大到节点附近时按相机高度同比缩小。
+export function curveSeparationMeters(cameraHeight: number): number {
+  if (!Number.isFinite(cameraHeight) || cameraHeight <= 0) return CURVE_SEPARATION_MIN_METERS
+  return Math.max(
+    CURVE_SEPARATION_MIN_METERS,
+    Math.min(CURVE_SEPARATION_MAX_METERS, cameraHeight * CURVE_SEPARATION_SCALE)
+  )
+}
+
+// 只给共享端点、方向相近的 P2P 线路分配车道。
+// 车道严格按真实方位角排序：目标越偏顺时针，横向车道越靠右，保持扇出顺序，避免线路交叉。
 export function linkCurveLanes(nodes: MapNode[], links: MapLink[]): Map<string, number> {
   type Candidate = { link: MapLink; bearing: number; direction: number }
+  type CurveGroup = { anchorKey: string; candidates: Candidate[] }
   const byKey = new Map(nodes.map(node => [node.key, node]))
-  const groups = new Map<string, Candidate[]>()
+  const byAnchor = new Map<string, Candidate[]>()
 
   const add = (anchor: MapNode, other: MapNode, link: MapLink, direction: number) => {
     if (anchor.latitude === null || anchor.longitude === null ||
         other.latitude === null || other.longitude === null) return
-    const candidates = groups.get(anchor.key) || []
+    const candidates = byAnchor.get(anchor.key) || []
     candidates.push({ link, bearing: bearingDegrees(anchor, other), direction })
-    groups.set(anchor.key, candidates)
+    byAnchor.set(anchor.key, candidates)
   }
 
   for (const link of links) {
@@ -83,8 +100,8 @@ export function linkCurveLanes(nodes: MapNode[], links: MapLink[]): Map<string, 
     add(to, from, link, -1)
   }
 
-  const clusters: Candidate[][] = []
-  for (const candidates of groups.values()) {
+  const groups: CurveGroup[] = []
+  for (const [anchorKey, candidates] of byAnchor) {
     const parents = candidates.map((_, index) => index)
     const root = (index: number): number => {
       while (parents[index] !== index) {
@@ -109,26 +126,57 @@ export function linkCurveLanes(nodes: MapNode[], links: MapLink[]): Map<string, 
       components.set(key, component)
     }
     for (const component of components.values()) {
-      if (component.length > 1) clusters.push(component)
+      if (component.length > 1) groups.push({ anchorKey, candidates: component })
     }
   }
 
-  // 优先处理更大的平行线路组，避免三角形拓扑中的同一条边被重复分配。
-  clusters.sort((a, b) => b.length - a.length)
+  // 一条边可能同时属于两端的邻近线路组，只选择一个主锚点，避免重复分配导致车道顺序冲突。
+  const choices = new Map<string, Array<{ group: CurveGroup; candidate: Candidate }>>()
+  for (const group of groups) {
+    for (const candidate of group.candidates) {
+      const items = choices.get(candidate.link.key) || []
+      items.push({ group, candidate })
+      choices.set(candidate.link.key, items)
+    }
+  }
+
+  const selectedGroups = new Map<CurveGroup, Candidate[]>()
+  for (const [linkKey, items] of choices) {
+    items.sort((a, b) => {
+      // Route 的 from 是入口节点，优先沿用这个稳定的扇出锚点。
+      const aPreferred = a.candidate.link.source === 'route' && a.candidate.direction === 1 ? 1 : 0
+      const bPreferred = b.candidate.link.source === 'route' && b.candidate.direction === 1 ? 1 : 0
+      return bPreferred - aPreferred ||
+        b.group.candidates.length - a.group.candidates.length ||
+        b.candidate.direction - a.candidate.direction ||
+        a.group.anchorKey.localeCompare(b.group.anchorKey)
+    })
+    const selected = items[0]
+    const assigned = selectedGroups.get(selected.group) || []
+    assigned.push(selected.candidate)
+    selectedGroups.set(selected.group, assigned)
+  }
+
   const lanes = new Map<string, number>()
-  for (const cluster of clusters) {
-    const pending = cluster.filter(item => !lanes.has(item.link.key))
-    if (pending.length < 2) continue
-    pending.sort((a, b) => a.link.key.localeCompare(b.link.key))
-    const half = (pending.length - 1) / 2
-    pending.forEach((item, index) => {
-      const lane = half === 0 ? 0 : (index - half) / half
-      if (lane !== 0) lanes.set(item.link.key, lane * item.direction)
+  for (const [group, candidates] of selectedGroups) {
+    if (candidates.length < 2) continue
+
+    // 用圆周平均角作为排序中心，正确处理 0°/360° 附近的线路。
+    const sin = candidates.reduce((sum, item) => sum + Math.sin(item.bearing * Math.PI / 180), 0)
+    const cos = candidates.reduce((sum, item) => sum + Math.cos(item.bearing * Math.PI / 180), 0)
+    const center = (Math.atan2(sin, cos) * 180 / Math.PI + 360) % 360
+    const ordered = [...candidates].sort((a, b) =>
+      relativeBearing(a.bearing, center) - relativeBearing(b.bearing, center)
+    )
+    const middle = (ordered.length - 1) / 2
+    ordered.forEach((candidate, index) => {
+      const lane = index - middle
+      // 反向链路需要翻转符号，使其相对于共同锚点仍处于正确的地理侧。
+      lanes.set(candidate.link.key, lane * candidate.direction)
     })
   }
   return lanes
 }
-
 function numerical(value: unknown): number | null {
   if (value === null || value === undefined || value === '—' || value === '') return null
   const result = Number(value)
