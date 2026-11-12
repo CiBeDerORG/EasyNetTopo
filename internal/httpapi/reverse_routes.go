@@ -201,6 +201,10 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			return
 		}
 		h, err := service.AuthenticateReverseTaskAgent(r.Context(), req.AgentID, token)
+		if errors.Is(err, storage.ErrTemporaryHostExpired) {
+			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
+			return
+		}
 		if err != nil {
 			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 身份或授权无效"})
 			return
