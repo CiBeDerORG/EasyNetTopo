@@ -123,7 +123,11 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		if !admin(w, r) || !mutation(w, r) {
 			return
 		}
-		err := service.RevokeTemporary(r.Context(), r.PathValue("id"))
+		hostID := r.PathValue("id")
+		err := service.RevokeTemporary(r.Context(), hostID)
+		if err == nil && taskSvc != nil {
+			err = taskSvc.CancelRevokedTemporaryTasks(r.Context(), hostID)
+		}
 		if errors.Is(err, storage.ErrTemporaryHostExpired) || errors.Is(err, storage.ErrHostNotFound) {
 			jsonReply(w, http.StatusNotFound, map[string]string{"code": "temporary_host_not_found", "message": "临时主机不存在、已过期或已剔除"})
 			return
