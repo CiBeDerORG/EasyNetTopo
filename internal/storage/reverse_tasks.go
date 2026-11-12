@@ -74,7 +74,7 @@ func (s *TaskStore) openConfig(taskID string, sealed []byte) (map[string]string,
 }
 
 func (s *TaskStore) saveReverseBundle(digest string, bundle []byte) (string, error) {
-	if len(digest) != 64 || len(bundle) == 0 || len(bundle) > 128<<20 {
+	if len(digest) != 64 || len(bundle) == 0 || len(bundle) > 64<<20 {
 		return "", errors.New("反向安装包无效或超出大小限制")
 	}
 	sum := sha256.Sum256(bundle)
