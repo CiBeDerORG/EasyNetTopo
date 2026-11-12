@@ -89,6 +89,9 @@ func (s *HostStore) initReverseSchema(ctx context.Context) error {
 			return err
 		}
 	}
+	if _, err := s.store.db.ExecContext(ctx, `INSERT OR IGNORE INTO agent_discovery_config(id,enabled,token_hash,expires_at) VALUES(1,0,'','')`); err != nil {
+		return err
+	}
 	return nil
 }
 
@@ -235,6 +238,9 @@ func (s *HostStore) AcceptDiscovery(ctx context.Context, agentID string) (Host, 
 		h, err := s.Get(ctx, item.HostID)
 		if err != nil {
 			return Host{}, "", err
+		}
+		if !s.TemporaryActive(h) {
+			return Host{}, "", ErrTemporaryHostExpired
 		}
 		token, err := s.Credentials(ctx, h)
 		return h, token, err
