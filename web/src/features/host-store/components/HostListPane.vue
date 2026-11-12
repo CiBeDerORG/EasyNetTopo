@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
-import { Plus, Refresh, Search, Setting } from '@element-plus/icons-vue'
+import { computed, ref, onMounted, onUnmounted } from 'vue'
+import { Plus, Refresh, Search, Setting, Radar } from '@element-plus/icons-vue'
 import HostCard from './HostCard.vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { currentHostTask } from '../task-status'
@@ -11,6 +11,8 @@ const props = defineProps<{
   selectedHostId: string
   selectedHealthStatus: HostHealthStatus
   refreshing: boolean
+  discoveryEnabled?: boolean
+  candidateCount?: number
 }>()
 
 defineEmits<{
@@ -18,6 +20,7 @@ defineEmits<{
   add: []
   refresh: []
   settings: []
+  discovery: []
   edit: [host: Host]
   docker: [host: Host]
   delete: [host: Host]
@@ -25,6 +28,10 @@ defineEmits<{
 }>()
 
 const search = ref('')
+const clock = ref(Date.now())
+let timer: ReturnType<typeof setInterval> | undefined
+onMounted(() => { timer = setInterval(() => { clock.value = Date.now() }, 1000) })
+onUnmounted(() => { if (timer) clearInterval(timer) })
 const filteredHosts = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
   if (!query) return props.hosts
@@ -54,6 +61,11 @@ const filteredHosts = computed(() => {
             <el-icon><Setting /></el-icon>
           </el-button>
         </el-tooltip>
+        <el-tooltip :content="'主机发现' + (candidateCount ? ' · ' + candidateCount + ' 台待确认' : '')" placement="top">
+          <el-button class="glyph-btn" text circle aria-label="主机发现" @click="$emit('discovery')">
+            <el-icon><Radar /></el-icon>
+          </el-button>
+        </el-tooltip>
         <el-tooltip content="添加主机" placement="top">
           <el-button class="glyph-btn primary" circle aria-label="添加主机" @click="$emit('add')">
             <el-icon><Plus /></el-icon>
@@ -71,6 +83,7 @@ const filteredHosts = computed(() => {
         v-for="host in filteredHosts"
         :key="host.id"
         :host="host"
+        :now="clock"
         :task="currentHostTask(tasks, host.id)"
         :selected="host.id === selectedHostId"
         :health-status="host.id === selectedHostId ? selectedHealthStatus : host.agent_id ? 'paired' : 'unpaired'"
