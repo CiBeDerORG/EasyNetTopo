@@ -24,7 +24,7 @@ const props = defineProps<{ hosts: Host[] }>()
 const queryClient = useQueryClient()
 const route = useRoute()
 const router = useRouter()
-const UNASSIGNED_SCOPE = '__unassigned__'
+const ALL_SCOPE = '__all__'
 
 type LiveNodeOption = {
   networkKey: string
@@ -123,15 +123,15 @@ const nodeOptions = computed<NodeOption[]>(() => {
 function nodeValue(node: Pick<NodeOption, 'networkKey' | 'peerId'>) {
   return JSON.stringify([node.networkKey, node.peerId])
 }
-const selectedNodeKey = ref(typeof route.query.node === 'string' ? route.query.node : '')
+const selectedNodeKey = ref(typeof route.query.node === 'string' && route.query.node !== '__unassigned__' ? route.query.node : ALL_SCOPE)
 const selectedNode = computed(() => nodeOptions.value.find(node => nodeValue(node) === selectedNodeKey.value))
-const isUnassignedScope = computed(() => selectedNodeKey.value === UNASSIGNED_SCOPE)
+const isAllScope = computed(() => selectedNodeKey.value === ALL_SCOPE)
 watch(
   () => [nodeOptions.value, nodesQuery.isFetched.value, nodeDevicesQuery.isFetched.value] as const,
   ([items, liveFetched, storedFetched]) => {
     if ((networkEntries.value.length > 0 && !liveFetched) || !storedFetched) return
-    if (selectedNodeKey.value === UNASSIGNED_SCOPE || items.some(node => nodeValue(node) === selectedNodeKey.value)) return
-    selectedNodeKey.value = items.length ? nodeValue(items[0]) : UNASSIGNED_SCOPE
+    if (selectedNodeKey.value === ALL_SCOPE || items.some(node => nodeValue(node) === selectedNodeKey.value)) return
+    selectedNodeKey.value = ALL_SCOPE
   },
   { immediate: true }
 )
@@ -142,28 +142,38 @@ watch(selectedNodeKey, value => {
   if (route.query.node !== value) void router.replace({ query: next })
 })
 watch(() => route.query.node, value => {
-  if (typeof value === 'string' && value !== selectedNodeKey.value) selectedNodeKey.value = value
+  selectedNodeKey.value = typeof value === 'string' && value !== '__unassigned__' ? value : ALL_SCOPE
 })
 
 const devicesQuery = useQuery({
   queryKey: computed(() => ['devices', selectedNodeKey.value]),
-  queryFn: () => isUnassignedScope.value
-    ? getDevices({ unassigned: true })
+  queryFn: () => isAllScope.value
+    ? getDevices()
     : selectedNode.value
       ? getDevices({ networkKey: selectedNode.value.networkKey, peerId: selectedNode.value.peerId })
       : Promise.resolve([] as Device[]),
-  enabled: computed(() => isUnassignedScope.value || !!selectedNode.value),
-  retry: 0
-})
-const gatewayGroupsQuery = useQuery({
-  queryKey: computed(() => ['gateway-groups', selectedNode.value?.networkKey || '', selectedNode.value?.peerId || '']),
-  queryFn: () => selectedNode.value
-    ? getGatewayGroups(selectedNode.value.networkKey, selectedNode.value.peerId)
-    : Promise.resolve([] as GatewayGroup[]),
-  enabled: computed(() => !!selectedNode.value),
+  enabled: computed(() => isAllScope.value || !!selectedNode.value),
   retry: 0
 })
 const devices = computed(() => devicesQuery.data.value || [])
+const gatewayScopes = computed(() => {
+  if (selectedNode.value) return [{ networkKey: selectedNode.value.networkKey, peerId: selectedNode.value.peerId }]
+  const scopes = new Map<string, { networkKey: string; peerId: string }>()
+  for (const device of devices.value) {
+    if (device.network_key && device.peer_id) {
+      const scope = { networkKey: device.network_key, peerId: device.peer_id }
+      scopes.set(nodeValue(scope), scope)
+    }
+  }
+  return [...scopes.values()]
+})
+const gatewayGroupsQuery = useQuery({
+  queryKey: computed(() => ['gateway-groups', selectedNodeKey.value, gatewayScopes.value]),
+  queryFn: async () => (await Promise.all(gatewayScopes.value.map(scope =>
+    getGatewayGroups(scope.networkKey, scope.peerId)))).flat(),
+  enabled: computed(() => isAllScope.value || !!selectedNode.value),
+  retry: 0
+})
 const gatewayGroups = computed(() => gatewayGroupsQuery.data.value || [])
 const nodeErrors = computed(() => nodesQuery.data.value?.errors || 0)
 const search = ref('')
@@ -196,8 +206,8 @@ const directDevices = computed(() => {
 })
 const deviceSections = computed<DeviceSection[]>(() => {
   const result: DeviceSection[] = []
-  if (directDevices.value.length) {
-    result.push({ id: 'direct-devices', name: '直属设备', kind: 'direct', items: directDevices.value })
+  for (const device of directDevices.value) {
+    result.push({ id: 'direct-' + device.id, name: device.name, kind: 'direct', items: [], gatewayDevice: device })
   }
   for (const group of gatewayGroupSections.value) {
     result.push({
@@ -375,9 +385,9 @@ async function saveDeviceRecord() {
     await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
     await queryClient.invalidateQueries({ queryKey: ['device-node-devices'] })
     const targetScope = draft.network_key && draft.peer_id
-      ? JSON.stringify([draft.network_key, draft.peer_id]) : UNASSIGNED_SCOPE
+      ? JSON.stringify([draft.network_key, draft.peer_id]) : ALL_SCOPE
     deviceDialogOpen.value = false
-    if (targetScope !== selectedNodeKey.value) selectedNodeKey.value = targetScope
+    if (!isAllScope.value && targetScope !== selectedNodeKey.value) selectedNodeKey.value = targetScope
     ElMessage.success(editingDeviceId.value ? '设备资料已更新' : '设备已添加')
   } catch (error) { ElMessage.error(formatApiError(error)) }
   finally { savingDevice.value = false }
@@ -563,7 +573,7 @@ watch(
     <div class="devices-intro">
       <div>
         <h2>设备列表</h2>
-        <p>先选择 EasyTier 网络节点，再管理节点直属设备及各网关设备的下挂设备。</p>
+        <p>查看全部设备，或选择 EasyTier 网络节点管理直属设备及网关下挂设备。</p>
       </div>
       <div class="devices-actions">
         <el-button @click="refreshAll" :loading="isRefreshing"><el-icon><Refresh /></el-icon>刷新</el-button>
@@ -578,7 +588,7 @@ watch(
     <div class="node-scope-toolbar">
       <div class="node-scope-label">所处节点</div>
       <el-select v-model="selectedNodeKey" filterable class="node-scope-select" placeholder="选择网络节点">
-        <el-option label="未关联网络节点（旧设备）" :value="UNASSIGNED_SCOPE" />
+        <el-option label="全部" :value="ALL_SCOPE" />
         <el-option v-for="node in nodeOptions" :key="node.networkKey + '|' + node.peerId"
           :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
           <div class="node-option">
@@ -595,7 +605,7 @@ watch(
         <span>{{ selectedNode.instance || '历史节点信息' }}</span>
         <span>{{ selectedNode.ip || selectedNode.peerId }}</span>
       </div>
-      <div v-else class="node-scope-meta">用于查看未关联网络节点的旧设备记录</div>
+      <div v-else class="node-scope-meta">显示所有网络节点及未关联节点的设备</div>
     </div>
 
     <el-alert v-if="devicesQuery.isError.value"
@@ -605,7 +615,7 @@ watch(
     <el-alert v-else-if="nodeErrors" :title="nodeErrors + ' 个组网入口暂时不可用，已显示其他入口可读取的节点。'"
       type="warning" :closable="false" show-icon />
     <el-alert v-if="!networkEntries.length && !nodeOptions.length"
-      title="尚未设置组网入口；可以先管理未关联节点的旧设备，设置入口后即可选择网络节点。" type="info" :closable="false" />
+      title="尚未设置组网入口；可以先查看全部设备，设置入口后即可选择网络节点。" type="info" :closable="false" />
 
     <div class="devices-toolbar">
       <el-input v-model="search" clearable placeholder="搜索设备名称 / IP / MAC / 型号" aria-label="搜索设备">
@@ -631,7 +641,7 @@ watch(
       <el-empty v-if="!devices.length && !gatewayGroups.length" description="当前节点还没有登记设备" :image-size="120">
         <div class="empty-initialize">
           <p v-if="selectedNode && !nodeDevices.length">该节点尚未生成基础节点设备记录，可以同步网络节点后继续。</p>
-          <p v-else-if="isUnassignedScope">这里保留尚未关联网络节点的旧设备记录。</p>
+          <p v-else-if="isAllScope">暂无设备记录。</p>
           <p v-else>先编辑当前节点的基础设备，将其设置为网关设备，再从该设备卡片新增下挂设备。</p>
           <el-button v-if="selectedNode && !nodeDevices.length && networkEntries.length"
             :loading="initializingDevices" :disabled="!canInitializeNetworkNodes" @click="initializeNetworkNodes">
@@ -642,21 +652,23 @@ watch(
 
       <div v-for="section in deviceSections" :key="section.id" class="device-group">
         <div class="group-heading">
-          <div v-if="section.kind === 'gateway' && section.gatewayDevice" class="gateway-heading-main">
+          <div v-if="section.gatewayDevice" class="gateway-heading-main">
             <el-checkbox class="gateway-heading-select"
               :model-value="selectedDeviceIds.includes(section.gatewayDevice.id)"
               :disabled="section.gatewayDevice.is_node_device"
               :aria-label="'选择设备 ' + section.gatewayDevice.name"
               @update:model-value="toggleDeviceSelection(section.gatewayDevice.id, $event)" />
             <button class="group-toggle gateway-group-toggle" type="button"
-              :aria-expanded="!collapsed.includes(section.id)" @click="toggleGroup(section.id)">
-              <span class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
+              :aria-expanded="section.kind === 'gateway' ? !collapsed.includes(section.id) : undefined" @click="section.kind === 'gateway' ? toggleGroup(section.id) : openEditDevice(section.gatewayDevice)">
+              <span v-if="section.kind === 'gateway'" class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
               <span class="device-avatar gateway-heading-avatar">
                 <el-icon><component :is="deviceIcon(section.gatewayDevice)" /></el-icon>
               </span>
               <span class="gateway-heading-info">
                 <span class="gateway-heading-title">
-                  <strong>{{ section.gatewayDevice.name }} 下挂设备</strong>
+                  <strong>{{ section.gatewayDevice.name }}{{ section.kind === 'gateway' ? ' 下挂设备' : '' }}</strong>
+                  <el-tag v-for="kind in section.gatewayDevice.semantic_kinds" :key="kind" size="small" effect="plain">{{ semanticKindLabels[kind] || kind }}</el-tag>
+                  <el-tag v-if="section.gatewayDevice.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <span v-if="[section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).length">
                     {{ [section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).join(' · ') }}
                   </span>
@@ -676,19 +688,19 @@ watch(
                   </span>
                 </span>
               </span>
-              <span class="group-count">{{ section.items.length }}</span>
+              <span v-if="section.kind === 'gateway'" class="group-count">{{ section.items.length }}</span>
             </button>
           </div>
           <button v-else class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
             @click="toggleGroup(section.id)">
-            <span class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
+            <span v-if="section.kind === 'gateway'" class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
             <strong>{{ section.name }}</strong>
-            <span class="group-count">{{ section.items.length }}</span>
+            <span v-if="section.kind === 'gateway'" class="group-count">{{ section.items.length }}</span>
           </button>
-          <div v-if="section.kind === 'gateway' && section.gatewayDevice" class="gateway-heading-actions">
-            <el-button text circle aria-label="新增下挂设备" title="新增下挂设备"
+          <div v-if="section.gatewayDevice" class="gateway-heading-actions">
+            <el-button v-if="section.gatewayDevice.is_gateway && section.gatewayDevice.owned_gateway_group_id" text circle aria-label="新增下挂设备" title="新增下挂设备"
               @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
-            <el-button text circle aria-label="编辑网关设备" title="编辑网关设备"
+            <el-button text circle aria-label="编辑设备" title="编辑设备"
               @click="openEditDevice(section.gatewayDevice)"><el-icon><Edit /></el-icon></el-button>
             <el-button v-if="isOpenWrtDevice(section.gatewayDevice)" text circle
               aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
@@ -701,7 +713,7 @@ watch(
               @click="openDiscovery(section.gatewayDevice, 'adb')"><el-icon><Iphone /></el-icon></el-button>
           </div>
         </div>
-        <div v-if="!collapsed.includes(section.id)" class="device-grid">
+        <div v-if="section.items.length && !collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
             <div class="device-card-head">
               <el-checkbox class="device-select" :model-value="selectedDeviceIds.includes(device.id)"
