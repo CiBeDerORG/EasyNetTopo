@@ -136,7 +136,6 @@ func TestOpenWrtDiscoveryImportRejectsMalformedPayload(t *testing.T) {
 	}
 }
 
-
 func TestOpenWrtDiscoveryImportSynchronizesOnlineAndOfflineStatus(t *testing.T) {
 	ctx := context.Background()
 	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
