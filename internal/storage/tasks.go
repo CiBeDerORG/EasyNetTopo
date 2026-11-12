@@ -41,7 +41,7 @@ const NativeAgentSourceID = "native"
 const NativeAgentAppID = "easyhostagent"
 
 type TaskStore struct {
-	db *sql.DB
+	db      *sql.DB
 	dataDir string
 	sealKey []byte
 }
