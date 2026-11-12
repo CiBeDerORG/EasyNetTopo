@@ -401,8 +401,12 @@ func (s *Store) AddReverseInstall(ctx context.Context, hostID, sourceID, appID, 
 	}
 	var sameApp int
 	err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM execution_tasks WHERE host_id=? AND source_id=? AND app_id=? AND trigger_source='reverse_discovery' AND state IN ('queued','preparing','running')", hostID, sourceID, appID).Scan(&sameApp)
-	if err != nil { return "", err }
-	if sameApp > 0 { return "", errors.New("该应用已有等待领取或执行中的预安装任务") }
+	if err != nil {
+		return "", err
+	}
+	if sameApp > 0 {
+		return "", errors.New("该应用已有等待领取或执行中的预安装任务")
+	}
 	if _, err = tx.ExecContext(ctx, `INSERT INTO execution_tasks(id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at) VALUES(?,'','application',?,?,?,'install','reverse_discovery','queued','',?,'','')`,
 		taskID, hostID, sourceID, appID, now); err != nil {
 		return "", err
