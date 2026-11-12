@@ -3,6 +3,7 @@ package storage
 import (
 	"context"
 	"crypto/aes"
+	"crypto/rand"
 	"crypto/cipher"
 	"crypto/sha256"
 	"crypto/subtle"
@@ -12,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"database/sql"
 	"time"
 )
 
@@ -39,10 +41,7 @@ func (s *TaskStore) sealConfig(taskID string, config map[string]string) ([]byte,
 		return nil, err
 	}
 	nonce := make([]byte, aead.NonceSize())
-	if _, err := os.ReadFile("/dev/urandom"); err == nil {
-		// crypto/rand is used below; this branch intentionally has no side effect.
-	}
-	if _, err := randRead(nonce); err != nil {
+	if _, err := rand.Read(nonce); err != nil {
 		return nil, err
 	}
 	return aead.Seal(nonce, nonce, plain, []byte("reverse-task|"+taskID)), nil
