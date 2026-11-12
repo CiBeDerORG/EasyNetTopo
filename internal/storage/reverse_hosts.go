@@ -81,11 +81,21 @@ func (s *HostStore) initReverseSchema(ctx context.Context) error {
 			first_seen_at TEXT NOT NULL,
 			last_seen_at TEXT NOT NULL,
 			status TEXT NOT NULL DEFAULT 'pending',
-			host_id TEXT NOT NULL DEFAULT ''
+			host_id TEXT NOT NULL DEFAULT '',
+			bootstrap_token_hash TEXT NOT NULL DEFAULT ''
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_agent_discoveries_status ON agent_discoveries(status,last_seen_at)`,
 	} {
 		if _, err := s.store.db.ExecContext(ctx, q); err != nil {
+			return err
+		}
+	}
+	var tokenColumn int
+	if err := s.store.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_table_info('agent_discoveries') WHERE name='bootstrap_token_hash'").Scan(&tokenColumn); err != nil {
+		return err
+	}
+	if tokenColumn == 0 {
+		if _, err := s.store.db.ExecContext(ctx, "ALTER TABLE agent_discoveries ADD COLUMN bootstrap_token_hash TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}
@@ -160,44 +170,52 @@ func (s *HostStore) RegisterDiscovery(ctx context.Context, token string, item Di
 	if err := validAgentCertificate(item.AgentID, item.SPKISHA256, certificateDER); err != nil {
 		return "", err
 	}
+	nowTime := time.Now().UTC()
+	now := nowTime.Format(time.RFC3339Nano)
+	requestHash := digest(token)
+
+	// 新 Agent 必须使用当前发现窗口的 Bootstrap Token；已发现的 Agent
+	// 可以继续使用首次报到时的 Token，确保关闭/重新开启窗口不会切断待确认主机。
 	var enabled int
-	var tokenHash, expires string
+	var currentHash, expires string
+	globalAllowed := false
 	if err := s.store.db.QueryRowContext(ctx, `SELECT enabled,token_hash,expires_at FROM agent_discovery_config WHERE id=1`).
-		Scan(&enabled, &tokenHash, &expires); err != nil {
-		return "", ErrDiscoveryClosed
+		Scan(&enabled, &currentHash, &expires); err == nil {
+		deadline, parseErr := time.Parse(time.RFC3339Nano, expires)
+		globalAllowed = parseErr == nil && enabled == 1 && nowTime.Before(deadline) &&
+			subtle.ConstantTimeCompare([]byte(currentHash), []byte(requestHash)) == 1
 	}
-	deadline, err := time.Parse(time.RFC3339Nano, expires)
-	if err != nil || !time.Now().UTC().Before(deadline) ||
-		subtle.ConstantTimeCompare([]byte(tokenHash), []byte(digest(token))) != 1 {
-		return "", ErrDiscoveryClosed
-	}
-	var existingPin, status string
-	err = s.store.db.QueryRowContext(ctx, `SELECT spki_sha256,status FROM agent_discoveries WHERE agent_id=?`, item.AgentID).
-		Scan(&existingPin, &status)
-	if err == nil && existingPin != item.SPKISHA256 {
+
+	var existingPin, status, existingTokenHash, firstSeen string
+	err := s.store.db.QueryRowContext(ctx, `SELECT spki_sha256,status,bootstrap_token_hash,first_seen_at
+		FROM agent_discoveries WHERE agent_id=?`, item.AgentID).
+		Scan(&existingPin, &status, &existingTokenHash, &firstSeen)
+	existing := err == nil
+	if existing && existingPin != item.SPKISHA256 {
 		return "", ErrHostBinding
 	}
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	if enabled != 1 && status != "accepted" {
+	existingAllowed := existing && existingTokenHash != "" &&
+		subtle.ConstantTimeCompare([]byte(existingTokenHash), []byte(requestHash)) == 1
+	if !globalAllowed && !existingAllowed {
 		return "", ErrDiscoveryClosed
 	}
 	if item.Hostname == "" || len(item.Hostname) > 255 || item.Platform == "" || len(item.Platform) > 32 ||
 		item.Arch == "" || len(item.Arch) > 32 || len(item.Version) > 80 {
 		return "", errors.New("Agent 主机信息无效")
 	}
-	now := time.Now().UTC().Format(time.RFC3339Nano)
-	firstSeen := now
-	if err == nil {
-		_ = s.store.db.QueryRowContext(ctx, `SELECT first_seen_at FROM agent_discoveries WHERE agent_id=?`, item.AgentID).Scan(&firstSeen)
+	if !existing {
+		firstSeen = now
 	}
 	_, err = s.store.db.ExecContext(ctx, `INSERT INTO agent_discoveries
-		(agent_id,hostname,spki_sha256,certificate_der,platform,arch,version,first_seen_at,last_seen_at,status)
-		VALUES(?,?,?,?,?,?,?,?,?,?)
+		(agent_id,hostname,spki_sha256,certificate_der,platform,arch,version,first_seen_at,last_seen_at,status,bootstrap_token_hash)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(agent_id) DO UPDATE SET hostname=excluded.hostname,certificate_der=excluded.certificate_der,
-		platform=excluded.platform,arch=excluded.arch,version=excluded.version,last_seen_at=excluded.last_seen_at`,
-		item.AgentID, item.Hostname, item.SPKISHA256, certificateDER, item.Platform, item.Arch, item.Version, firstSeen, now, "pending")
+		platform=excluded.platform,arch=excluded.arch,version=excluded.version,last_seen_at=excluded.last_seen_at,
+		bootstrap_token_hash=CASE WHEN agent_discoveries.bootstrap_token_hash='' THEN excluded.bootstrap_token_hash ELSE agent_discoveries.bootstrap_token_hash END`,
+		item.AgentID, item.Hostname, item.SPKISHA256, certificateDER, item.Platform, item.Arch, item.Version, firstSeen, now, "pending", requestHash)
 	if err != nil {
 		return "", err
 	}
