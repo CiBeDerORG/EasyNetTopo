@@ -343,7 +343,9 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 授权无效"})
 			return
 		}
-		var req struct { AgentID string `json:"agent_id"` }
+		var req struct {
+			AgentID string `json:"agent_id"`
+		}
 		if !decode(w, r, &req, 2048) {
 			return
 		}
