@@ -152,7 +152,8 @@ func validAgentCertificate(agentID, fingerprint string, der []byte) error {
 	}
 	cert, err := x509.ParseCertificate(der)
 	if err != nil || cert.Subject.CommonName != "EasyHostAgent "+agentID ||
-		cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 || cert.CheckSignatureFrom(cert) != nil {
+		cert.KeyUsage&x509.KeyUsageDigitalSignature == 0 ||
+		cert.CheckSignature(cert.SignatureAlgorithm, cert.RawTBSCertificate, cert.Signature) != nil {
 		return ErrDiscoveryIdentity
 	}
 	spki, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
