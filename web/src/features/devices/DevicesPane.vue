@@ -674,7 +674,6 @@ watch(
                 <span class="gateway-heading-title">
                   <strong>{{ section.gatewayDevice.name }}</strong>
                   <el-tag v-for="kind in section.gatewayDevice.semantic_kinds" :key="kind" size="small" effect="plain">{{ semanticKindLabels[kind] || kind }}</el-tag>
-                  <el-tag v-if="section.gatewayDevice.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <span v-if="[section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).length">
                     {{ [section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).join(' · ') }}
                   </span>
@@ -738,7 +737,6 @@ watch(
                   <el-tag v-for="kind in device.semantic_kinds" :key="kind" size="small" effect="plain">
                     {{ semanticKindLabels[kind] || kind }}
                   </el-tag>
-                  <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <el-tag v-if="device.is_gateway" size="small" type="success" effect="dark">网关设备</el-tag>
                   <el-tag v-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
                   <el-tag v-if="device.discovery_status === 'online'" size="small" type="success" effect="dark">在线</el-tag>
