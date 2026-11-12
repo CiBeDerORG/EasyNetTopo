@@ -64,6 +64,9 @@ func (s *Service) Enqueue(ctx context.Context, trigger string, targets []storage
 }
 
 func (s *Service) List(ctx context.Context) ([]storage.Task, error) {
+	if err := s.store.CancelExpiredTemporaryTasks(ctx); err != nil {
+		return nil, err
+	}
 	return s.store.ListLatest(ctx)
 }
 
@@ -93,6 +96,9 @@ func (s *Service) Wait() {
 }
 
 func (s *Service) schedule() {
+	if err := s.store.CancelExpiredTemporaryTasks(s.ctx); err != nil && s.ctx.Err() == nil {
+		slog.Warn("清理过期临时主机任务失败", "error", err)
+	}
 	ids, err := s.store.PendingHosts(s.ctx)
 	if err != nil {
 		if s.ctx.Err() == nil {
@@ -506,4 +512,35 @@ func (s *Service) monitorNativeAgent(ctx context.Context, task storage.Task) {
 		case <-ticker.C:
 		}
 	}
+}
+
+func (s *Service) EnqueueTemporaryInstall(ctx context.Context, hostID, sourceID, appID, revision, digest string, config map[string]string, bundle []byte) ([]storage.Task, error) {
+	h, err := s.hosts.Get(ctx, hostID)
+	if err != nil {
+		return nil, err
+	}
+	if h.HostType != "temporary" || h.ConnectionMode != "reverse" || !s.hosts.TemporaryActive(h) {
+		return nil, storage.ErrReverseTaskUnavailable
+	}
+	return s.store.EnqueueReverseInstall(ctx, hostID, sourceID, appID, revision, digest, config, bundle)
+}
+
+func (s *Service) ClaimReverseTask(ctx context.Context, agentID string) (*storage.ReverseTaskPayload, error) {
+	return s.store.ClaimReverseTask(ctx, agentID)
+}
+
+func (s *Service) AcknowledgeReverseTask(ctx context.Context, agentID, taskID string) (storage.Task, error) {
+	return s.store.AcknowledgeReverseTask(ctx, agentID, taskID)
+}
+
+func (s *Service) UpdateReverseTaskState(ctx context.Context, agentID, taskID, state, message string) error {
+	return s.store.UpdateReverseTaskState(ctx, agentID, taskID, state, message)
+}
+
+func (s *Service) ReverseBundle(ctx context.Context, agentID, taskID string) ([]byte, string, error) {
+	return s.store.ReverseBundle(ctx, agentID, taskID)
+}
+
+func (s *Service) CancelRevokedTemporaryTasks(ctx context.Context, hostID string) error {
+	return s.store.CancelRevokedTemporaryTasks(ctx, hostID)
 }
