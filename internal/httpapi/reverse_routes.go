@@ -196,19 +196,18 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		if !decode(w, r, &req, 2048) {
 			return
 		}
-		h, err := service.AuthenticateReverseAgent(r.Context(), req.AgentID, token)
-		if errors.Is(err, storage.ErrTemporaryHostExpired) {
-			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
-			return
-		}
+		h, err := service.AuthenticateReverseTaskAgent(r.Context(), req.AgentID, token)
 		if err != nil {
 			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 身份或授权无效"})
 			return
 		}
-		h, err = service.UpdateReversePoll(r.Context(), req.AgentID)
-		if err != nil {
-			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
-			return
+		active := service.TemporaryActive(h)
+		if active {
+			h, err = service.UpdateReversePoll(r.Context(), req.AgentID)
+			if err != nil {
+				jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
+				return
+			}
 		}
 		var taskValue any
 		if taskSvc != nil {
@@ -225,6 +224,10 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 					"bundle_url": "/api/v1/agent/tasks/" + payload.Task.ID + "/bundle",
 				}
 			}
+		}
+		if !active && taskValue == nil {
+			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已到期，且没有待收尾任务"})
+			return
 		}
 		jsonReply(w, http.StatusOK, map[string]any{
 			"status": "accepted", "controller_id": db.ControllerID(),
