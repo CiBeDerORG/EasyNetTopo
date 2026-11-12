@@ -50,7 +50,7 @@ const installedCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
 const runningCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
-const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
+const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + (props.host?.host_type === 'temporary' ? 0 : 1))
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
   if (props.host?.host_type === 'temporary') {
