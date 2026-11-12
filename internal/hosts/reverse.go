@@ -111,3 +111,7 @@ func (s *Service) AuthenticateReverseTaskAgent(ctx context.Context, agentID, tok
 	}
 	return h, nil
 }
+
+func (s *Service) UpdateReverseReport(ctx context.Context, item storage.DiscoveredAgent, certificateDER []byte) (storage.Host, error) {
+	return s.hosts.UpdateAgentReport(ctx, item, certificateDER)
+}
