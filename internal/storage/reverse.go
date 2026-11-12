@@ -502,3 +502,11 @@ func (s *Store) TouchReverse(ctx context.Context, agentID string) error {
 		now, now+ReversePollSeconds, agentID, now)
 	return err
 }
+
+ // IsReverseHost blocks legacy direct-only APIs from touching a temporary Agent.
+ // Revoked/expired records remain recognizable to avoid accidental fallbacks.
+ func (s *Store) IsReverseHost(ctx context.Context,hostID string)(bool,error){
+    var count int
+    err:=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM reverse_agents WHERE host_id=?",hostID).Scan(&count)
+    return count>0,err
+ }
