@@ -292,8 +292,14 @@ func (s *TaskStore) AcknowledgeReverseTask(ctx context.Context, agentID, taskID 
 	if err != nil {
 		return Task{}, err
 	}
-	if n == 0 && task.State != "running" {
+	if task.State == "cancelled" || task.State == "failed" || task.State == "succeeded" || task.State == "interrupted" {
 		return Task{}, ErrReverseTaskUnavailable
+	}
+	if n == 0 && task.State != "running" {
+		var acknowledged string
+		if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM reverse_task_payloads WHERE task_id=?`, taskID).Scan(&acknowledged); err != nil || acknowledged == "" {
+			return Task{}, ErrReverseTaskUnavailable
+		}
 	}
 	if task.State == "queued" {
 		if err := s.SetState(ctx, task, "running", "Agent 已领取预安装任务"); err != nil {
@@ -312,6 +318,12 @@ func (s *TaskStore) UpdateReverseTaskState(ctx context.Context, agentID, taskID,
 	}
 	var acknowledged string
 	if err := s.db.QueryRowContext(ctx, `SELECT acknowledged_at FROM reverse_task_payloads WHERE task_id=?`, taskID).Scan(&acknowledged); err != nil || acknowledged == "" {
+		return ErrReverseTaskUnavailable
+	}
+	if task.State == state {
+		return nil
+	}
+	if task.State != "running" || state == "running" {
 		return ErrReverseTaskUnavailable
 	}
 	return s.SetState(ctx, task, state, message)
