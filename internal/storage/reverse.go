@@ -477,7 +477,9 @@ func (s *Store) ReverseComplete(ctx context.Context, agentID, taskID, state, mes
 		}
 		return ErrReverseInactive
 	}
-	return nil
+	// 已完成的安装任务只保留必要的索引与审计记录，不长期保存大 ZIP 与明文可还原的密钥密文。
+	_, err = s.db.ExecContext(ctx, "UPDATE reverse_jobs SET bundle=x'',config_sealed=x'' WHERE task_id=? AND agent_id=?", taskID, agentID)
+	return err
 }
 
 func (s *Store) ReverseBundle(ctx context.Context, agentID, taskID string) (string, []byte, error) {
