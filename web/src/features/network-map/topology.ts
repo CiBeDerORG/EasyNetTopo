@@ -41,6 +41,94 @@ export type MapLink = {
 }
 export type MapTopology = { nodes: MapNode[]; links: MapLink[] }
 
+const CURVE_PARALLEL_ANGLE_DEGREES = 18
+
+function bearingDegrees(from: MapNode, to: MapNode): number {
+  const radians = Math.PI / 180
+  const lat1 = from.latitude! * radians
+  const lat2 = to.latitude! * radians
+  const deltaLon = (to.longitude! - from.longitude!) * radians
+  const y = Math.sin(deltaLon) * Math.cos(lat2)
+  const x = Math.cos(lat1) * Math.sin(lat2) -
+    Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLon)
+  return Math.atan2(y, x) * 180 / Math.PI
+}
+
+function angularDistance(a: number, b: number): number {
+  const difference = Math.abs(a - b) % 360
+  return Math.min(difference, 360 - difference)
+}
+
+// 同一节点发往相近方向的直连线路使用对称曲率分车道，避免相邻节点间的线段重叠。
+// 返回值以 link.from -> link.to 的方向为基准；反向链路会自动翻转符号。
+export function linkCurveLanes(nodes: MapNode[], links: MapLink[]): Map<string, number> {
+  type Candidate = { link: MapLink; bearing: number; direction: number }
+  const byKey = new Map(nodes.map(node => [node.key, node]))
+  const groups = new Map<string, Candidate[]>()
+
+  const add = (anchor: MapNode, other: MapNode, link: MapLink, direction: number) => {
+    if (anchor.latitude === null || anchor.longitude === null ||
+        other.latitude === null || other.longitude === null) return
+    const candidates = groups.get(anchor.key) || []
+    candidates.push({ link, bearing: bearingDegrees(anchor, other), direction })
+    groups.set(anchor.key, candidates)
+  }
+
+  for (const link of links) {
+    if (link.kind !== 'p2p' || link.via) continue
+    const from = byKey.get(link.from)
+    const to = byKey.get(link.to)
+    if (!from || !to) continue
+    add(from, to, link, 1)
+    add(to, from, link, -1)
+  }
+
+  const clusters: Candidate[][] = []
+  for (const candidates of groups.values()) {
+    const parents = candidates.map((_, index) => index)
+    const root = (index: number): number => {
+      while (parents[index] !== index) {
+        parents[index] = parents[parents[index]]
+        index = parents[index]
+      }
+      return index
+    }
+    for (let i = 0; i < candidates.length; i++) {
+      for (let j = i + 1; j < candidates.length; j++) {
+        if (angularDistance(candidates[i].bearing, candidates[j].bearing) >
+            CURVE_PARALLEL_ANGLE_DEGREES) continue
+        const left = root(i), right = root(j)
+        if (left !== right) parents[right] = left
+      }
+    }
+    const components = new Map<number, Candidate[]>()
+    for (let i = 0; i < candidates.length; i++) {
+      const key = root(i)
+      const component = components.get(key) || []
+      component.push(candidates[i])
+      components.set(key, component)
+    }
+    for (const component of components.values()) {
+      if (component.length > 1) clusters.push(component)
+    }
+  }
+
+  // 优先处理更大的平行线路组，避免三角形拓扑中的同一条边被重复分配。
+  clusters.sort((a, b) => b.length - a.length)
+  const lanes = new Map<string, number>()
+  for (const cluster of clusters) {
+    const pending = cluster.filter(item => !lanes.has(item.link.key))
+    if (pending.length < 2) continue
+    pending.sort((a, b) => a.link.key.localeCompare(b.link.key))
+    const half = (pending.length - 1) / 2
+    pending.forEach((item, index) => {
+      const lane = half === 0 ? 0 : (index - half) / half
+      if (lane !== 0) lanes.set(item.link.key, lane * item.direction)
+    })
+  }
+  return lanes
+}
+
 function numerical(value: unknown): number | null {
   if (value === null || value === undefined || value === '—' || value === '') return null
   const result = Number(value)
