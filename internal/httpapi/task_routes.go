@@ -215,7 +215,7 @@ func resolveTargets(req []hookTarget, registered []storage.Host, apps []storage.
 				host, hostCount = h, hostCount+1
 			}
 		}
-		if hostCount != 1 || host.AgentID == "" {
+		if hostCount != 1 || host.AgentID == "" || host.HostType == "temporary" {
 			return nil, errors.New("目标主机不存在、名称重复或未配对: " + item.HostName)
 		}
 		// 原生 Agent 是保留的服务目标，不需要 Docker/Git 应用清单。
