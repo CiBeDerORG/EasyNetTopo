@@ -2,9 +2,13 @@ package storage
 
 import (
 	"context"
+	"crypto/aes"
+	"crypto/cipher"
 	"database/sql"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -38,7 +42,11 @@ type TaskTarget struct {
 const NativeAgentSourceID = "native"
 const NativeAgentAppID = "easyhostagent"
 
-type TaskStore struct{ db *sql.DB }
+type TaskStore struct {
+	db *sql.DB
+	dataDir string
+	sealKey []byte
+}
 
 var ErrTaskSuperseded = errors.New("任务已被更新任务替代")
 
@@ -71,7 +79,32 @@ func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
 			return nil, fmt.Errorf("初始化任务索引: %w", err)
 		}
 	}
-	return &TaskStore{db: store.db}, nil
+	for _, query := range []string{
+		`CREATE TABLE IF NOT EXISTS reverse_task_payloads (
+			task_id TEXT PRIMARY KEY REFERENCES execution_tasks(id) ON DELETE CASCADE,
+			config_sealed BLOB NOT NULL,
+			bundle_sha256 TEXT NOT NULL,
+			bundle_path TEXT NOT NULL,
+			revision TEXT NOT NULL,
+			claimed_at TEXT NOT NULL DEFAULT '',
+			lease_expires_at TEXT NOT NULL DEFAULT '',
+			acknowledged_at TEXT NOT NULL DEFAULT ''
+		)`,
+	} {
+		if _, err := store.db.ExecContext(ctx, query); err != nil {
+			return nil, fmt.Errorf("初始化反向任务载荷: %w", err)
+		}
+	}
+	keyPath := filepath.Join(store.DataDir(), ".agent-sealing-key")
+	keyInfo, err := os.Lstat(keyPath)
+	if err != nil || !keyInfo.Mode().IsRegular() || keyInfo.Mode().Perm() != 0600 {
+		return nil, errors.New("反向任务密钥文件不可用")
+	}
+	key, err := os.ReadFile(keyPath)
+	if err != nil || len(key) != 32 {
+		return nil, errors.New("反向任务密钥内容无效")
+	}
+	return &TaskStore{db: store.db, dataDir: store.DataDir(), sealKey: key}, nil
 }
 
 // 旧版本任务表的 CHECK 约束不包含 cancelled；SQLite 需要重建表才能扩展状态集合。
@@ -216,9 +249,11 @@ func (s *TaskStore) ListLatest(ctx context.Context) ([]Task, error) {
 }
 
 func (s *TaskStore) PendingHosts(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT host_id FROM execution_tasks
-		WHERE type='application' AND state IN ('queued','preparing','running')
-		ORDER BY host_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.host_id FROM execution_tasks t
+		LEFT JOIN hosts h ON h.id=t.host_id
+		WHERE t.type='application' AND t.state IN ('queued','preparing','running')
+		AND COALESCE(h.connection_mode,'direct')<>'reverse'
+		ORDER BY t.host_id`)
 	if err != nil {
 		return nil, err
 	}
