@@ -747,7 +747,7 @@ async function runAppAction(
         ? { source_id: app.source_id, app_id: app.app_id, revision: app.revision }
         : { source_id: app.source_id, app_id: app.app_id }
     if (host.host_type === 'temporary') {
-      const queued = await preinstallTemporary(host.id, payload as {
+      await preinstallTemporary(host.id, payload as {
         source_id: string; app_id: string; revision: string; config: Record<string, string>
       })
       configDialogOpen.value = false
