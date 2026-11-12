@@ -123,6 +123,12 @@ const nodeOptions = computed<NodeOption[]>(() => {
 function nodeValue(node: Pick<NodeOption, 'networkKey' | 'peerId'>) {
   return JSON.stringify([node.networkKey, node.peerId])
 }
+// 组网地址取实时节点数据，不使用设备管理地址冒充。
+const networkIPs = computed(() => new Map(liveNodeOptions.value.map(node => [nodeValue(node), node.ip])))
+function deviceNetworkIP(device: Device) {
+  if (!device.network_key || !device.peer_id) return ''
+  return networkIPs.value.get(nodeValue({ networkKey: device.network_key, peerId: device.peer_id })) || ''
+}
 const selectedNodeKey = ref(typeof route.query.node === 'string' && route.query.node !== '__unassigned__' ? route.query.node : ALL_SCOPE)
 const selectedNode = computed(() => nodeOptions.value.find(node => nodeValue(node) === selectedNodeKey.value))
 const isAllScope = computed(() => selectedNodeKey.value === ALL_SCOPE)
@@ -212,7 +218,7 @@ const deviceSections = computed<DeviceSection[]>(() => {
   for (const group of gatewayGroupSections.value) {
     result.push({
       id: group.id,
-      name: (group.gatewayDevice?.name || group.name) + ' 下挂设备',
+      name: group.gatewayDevice?.name || group.name,
       kind: 'gateway',
       items: group.items,
       gatewayGroup: group,
@@ -666,13 +672,16 @@ watch(
               </span>
               <span class="gateway-heading-info">
                 <span class="gateway-heading-title">
-                  <strong>{{ section.gatewayDevice.name }}{{ section.kind === 'gateway' ? ' 下挂设备' : '' }}</strong>
+                  <strong>{{ section.gatewayDevice.name }}</strong>
                   <el-tag v-for="kind in section.gatewayDevice.semantic_kinds" :key="kind" size="small" effect="plain">{{ semanticKindLabels[kind] || kind }}</el-tag>
                   <el-tag v-if="section.gatewayDevice.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <span v-if="[section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).length">
                     {{ [section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).join(' · ') }}
                   </span>
-                  <span v-if="section.gatewayDevice.ip_address">{{ section.gatewayDevice.ip_address }}</span>
+                  <span v-if="section.gatewayDevice.network_key && section.gatewayDevice.peer_id" class="device-network-ip">
+                    组网 IP：{{ deviceNetworkIP(section.gatewayDevice) || '暂不可用' }}
+                  </span>
+                  <span v-if="section.gatewayDevice.ip_address">管理 IP：{{ section.gatewayDevice.ip_address }}</span>
                   <span v-if="section.gatewayDevice.mac_address">MAC · {{ section.gatewayDevice.mac_address }}</span>
                   <span v-if="section.gatewayDevice.discovery_status === 'online'" class="gateway-discovery-state online">在线</span>
                   <span v-else-if="section.gatewayDevice.discovery_status === 'offline'" class="gateway-discovery-state offline">离线</span>
@@ -908,6 +917,7 @@ watch(
 .gateway-heading-avatar { width:34px; height:34px; border-radius:10px; font-size:16px; }
 .gateway-heading-info { display:flex; min-width:0; flex:1; flex-direction:column; gap:4px; }
 .gateway-heading-title { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:4px 11px; color:var(--ent-muted); font-size:11px; }
+.device-network-ip { color:var(--ent-text); font-variant-numeric:tabular-nums; }
 .gateway-heading-title strong { color:var(--ent-text); font-size:14px; }
 .gateway-discovery-state { display:inline-flex; align-items:center; gap:4px; }
 .gateway-discovery-state::before { width:6px; height:6px; border-radius:50%; background:currentColor; content:""; }
