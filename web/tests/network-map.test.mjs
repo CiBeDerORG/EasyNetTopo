@@ -79,8 +79,8 @@ test('反向链路也保持相对于共同节点的地理车道顺序', () => {
 
 test('线路互斥距离随相机高度缩放，全球视角大、节点近景小', () => {
   assert.equal(curveSeparationMeters(25_500_000), 240_000)
-  assert.equal(curveSeparationMeters(780_000), 7_800)
-  assert.equal(curveSeparationMeters(50_000), 900)
+  assert.ok(curveSeparationMeters(780_000) > 50_000)
+  assert.ok(curveSeparationMeters(50_000) > 3_000)
 })
 
 test('Peer Center 的真实直连优先级高于同一节点对的入口路由推断', () => {
@@ -129,4 +129,16 @@ test('累计流量必须有连续采样，回退或重置不产生负速率', ()
     {rx: 1524, tx: 612, time: 11000}), {rxBps: 1024, txBps: 512})
   assert.deepEqual(trafficRates({rx: 500, tx: 100, time: 10000},
     {rx: 0, tx: null, time: 11000}), {rxBps: null, txBps: null})
+})
+
+test('相近线路中段保持约 48 像素车道间距，适应不同窗口和视野', () => {
+  for (const height of [200000, 780000]) {
+    for (const pixels of [400, 800, 1200]) {
+      for (const fov of [Math.PI / 4, Math.PI / 3]) {
+        const metersPerPixel = 2 * height * Math.tan(fov / 2) / pixels
+        assert.ok(Math.abs(curveSeparationMeters(height, pixels, fov) / metersPerPixel - 48) < 1e-8)
+      }
+    }
+  }
+  assert.ok(Number.isFinite(curveSeparationMeters(200000, 0, NaN)))
 })

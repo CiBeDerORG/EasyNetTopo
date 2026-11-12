@@ -42,7 +42,7 @@ export type MapLink = {
 export type MapTopology = { nodes: MapNode[]; links: MapLink[] }
 
 const CURVE_PARALLEL_ANGLE_DEGREES = 18
-const CURVE_SEPARATION_SCALE = 0.01
+const CURVE_SEPARATION_PIXELS = 48
 const CURVE_SEPARATION_MIN_METERS = 900
 const CURVE_SEPARATION_MAX_METERS = 240000
 
@@ -66,12 +66,15 @@ function relativeBearing(bearing: number, center: number): number {
   return ((bearing - center + 540) % 360) - 180
 }
 
-// 地图初始全球视角时给出明显的线路间距；放大到节点附近时按相机高度同比缩小。
-export function curveSeparationMeters(cameraHeight: number): number {
+// 将目标屏幕间距换算为地面距离，避免局部视角的线路光晕挤在一起。
+export function curveSeparationMeters(cameraHeight: number, viewportHeight = 800, verticalFov = Math.PI / 3): number {
   if (!Number.isFinite(cameraHeight) || cameraHeight <= 0) return CURVE_SEPARATION_MIN_METERS
+  const pixels = Number.isFinite(viewportHeight) && viewportHeight > 0 ? viewportHeight : 800
+  const fov = Number.isFinite(verticalFov) && verticalFov > 0 && verticalFov < Math.PI ? verticalFov : Math.PI / 3
+  const metersPerPixel = 2 * cameraHeight * Math.tan(fov / 2) / pixels
   return Math.max(
     CURVE_SEPARATION_MIN_METERS,
-    Math.min(CURVE_SEPARATION_MAX_METERS, cameraHeight * CURVE_SEPARATION_SCALE)
+    Math.min(CURVE_SEPARATION_MAX_METERS, metersPerPixel * CURVE_SEPARATION_PIXELS)
   )
 }
 

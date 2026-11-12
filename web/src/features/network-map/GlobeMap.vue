@@ -194,7 +194,8 @@ function redraw() {
   viewer.entities.removeAll()
   nodeEntities.clear()
   const byKey = new Map(props.nodes.map(node => [node.key, node]))
-  const separationMeters = curveSeparationMeters(viewer.camera.positionCartographic.height)
+  const separationMeters = curveSeparationMeters(viewer.camera.positionCartographic.height,
+    viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
   lastCurveSeparation = separationMeters
   const curveLanes = linkCurveLanes(props.nodes, props.links)
 
@@ -358,7 +359,8 @@ onMounted(() => {
     viewer.camera.percentageChanged = 0.02
     removeCameraChangedListener = viewer.camera.changed.addEventListener(() => {
       if (!viewer || viewer.isDestroyed()) return
-      const nextSeparation = curveSeparationMeters(viewer.camera.positionCartographic.height)
+      const nextSeparation = curveSeparationMeters(viewer.camera.positionCartographic.height,
+    viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
       const threshold = Math.max(300, lastCurveSeparation * 0.08)
       if (Math.abs(nextSeparation - lastCurveSeparation) < threshold || cameraRedrawFrame !== null) return
       cameraRedrawFrame = requestAnimationFrame(() => {
