@@ -9,6 +9,16 @@ export type Host = {
   agent_id: string
   spki_sha256: string
   paired_at?: string
+  connection_mode?: 'direct' | 'reverse' | string
+  host_type?: 'permanent' | 'temporary' | string
+  accepted_at?: string
+  expires_at?: string
+  last_seen_at?: string
+  next_poll_at?: string
+  platform?: string
+  arch?: string
+  agent_version?: string
+  revoked_at?: string
 }
 export type HostHealthStatus = 'online' | 'checking' | 'error' | 'paired' | 'unpaired'
 
