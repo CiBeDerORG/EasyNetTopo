@@ -103,6 +103,17 @@ const discoverySaving = ref(false)
 const discoveryState = ref<AgentDiscoveryState>({ enabled: false })
 const discoveredAgents = ref<DiscoveredAgent[]>([])
 const discoveryToken = ref('')
+let discoveryTimer: number | undefined
+watch(discoveryOpen, open => {
+  if (discoveryTimer !== undefined) {
+    window.clearInterval(discoveryTimer)
+    discoveryTimer = undefined
+  }
+  if (open) discoveryTimer = window.setInterval(() => { void refreshDiscovery() }, 5000)
+})
+onUnmounted(() => {
+  if (discoveryTimer !== undefined) window.clearInterval(discoveryTimer)
+})
 async function refreshDiscovery() {
   if (discoveryLoading.value) return
   discoveryLoading.value = true
