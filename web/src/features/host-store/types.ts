@@ -153,3 +153,20 @@ export type ExecutionTask = {
   started_at?: string
   finished_at?: string
 }
+
+export type AgentDiscoveryState = {
+  enabled: boolean
+  expires_at?: string
+}
+
+export type DiscoveredAgent = {
+  agent_id: string
+  hostname: string
+  spki_sha256: string
+  platform: string
+  arch: string
+  version: string
+  first_seen_at: string
+  last_seen_at: string
+  status: string
+}
