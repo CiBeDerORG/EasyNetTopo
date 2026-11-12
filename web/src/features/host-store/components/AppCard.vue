@@ -7,6 +7,7 @@ import { formatTaskTime, formatTaskTriggerTime, taskActive, taskSourceLabel, tas
 
 const props = defineProps<{
   app: CatalogApp
+  preInstall?: boolean
   status?: AppStatus
   sourceName: string
   permissions: AppPermissions
@@ -127,7 +128,7 @@ const resultLabel = computed(() => {
     <div class="product-bottom">
       <div class="app-actions">
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
-          <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
+          <el-icon><Download /></el-icon>{{ preInstall ? '预安装' : installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
         </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">
           <el-icon><Lightning /></el-icon>强制更新
