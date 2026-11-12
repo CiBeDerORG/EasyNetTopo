@@ -126,7 +126,7 @@ function arcPoints(start: MapNode, end: MapNode, lateralOffsetMeters = 0): Cesiu
     const position = Cesium.Cartesian3.fromRadians(point.longitude, point.latitude, height)
 
     // 沿局部切线的左右方向做横向偏移；两端保持在真实节点坐标，中段形成相反弯曲。
-    if (lateralOffset !== 0 && i > 0 && i < 72) {
+    if (lateralOffsetMeters !== 0 && i > 0 && i < 72) {
       const beforePoint = geodesic.interpolateUsingFraction(Math.max(0, fraction - 1 / 72))
       const afterPoint = geodesic.interpolateUsingFraction(Math.min(1, fraction + 1 / 72))
       const before = Cesium.Cartesian3.fromRadians(beforePoint.longitude, beforePoint.latitude, 0)
@@ -164,11 +164,7 @@ function linkPoints(
   if (via && via.latitude !== null && via.longitude !== null) {
     return [...arcPoints(from, via), ...arcPoints(via, to).slice(1)]
   }
-  const startPoint = Cesium.Cartographic.fromDegrees(from.longitude, from.latitude)
-  const endPoint = Cesium.Cartographic.fromDegrees(to.longitude, to.latitude)
-  const distance = new Cesium.EllipsoidGeodesic(startPoint, endPoint).surfaceDistance
-  const offset = curveOffsetMeters
-  return arcPoints(from, to, offset)
+  return arcPoints(from, to, curveOffsetMeters)
 }
 function addTrafficParticles(link: MapLink, points: Cesium.Cartesian3[], color: Cesium.Color) {
   const bps = (link.rxBps || 0) + (link.txBps || 0)
