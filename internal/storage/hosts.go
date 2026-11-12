@@ -17,13 +17,23 @@ var ErrHostNotFound = errors.New("主机不存在")
 var ErrHostBinding = errors.New("主机已绑定其他 Agent 或身份指纹")
 
 type Host struct {
-	NetworkEntry bool   `json:"network_entry"`
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Endpoint     string `json:"endpoint"`
-	AgentID      string `json:"agent_id"`
-	SPKISHA256   string `json:"spki_sha256"`
-	PairedAt     string `json:"paired_at,omitempty"`
+	NetworkEntry   bool   `json:"network_entry"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Endpoint       string `json:"endpoint"`
+	AgentID        string `json:"agent_id"`
+	SPKISHA256     string `json:"spki_sha256"`
+	PairedAt       string `json:"paired_at,omitempty"`
+	ConnectionMode string `json:"connection_mode,omitempty"`
+	HostType       string `json:"host_type,omitempty"`
+	AcceptedAt     string `json:"accepted_at,omitempty"`
+	ExpiresAt      string `json:"expires_at,omitempty"`
+	LastSeenAt     string `json:"last_seen_at,omitempty"`
+	NextPollAt     string `json:"next_poll_at,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	Arch           string `json:"arch,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
+	RevokedAt      string `json:"revoked_at,omitempty"`
 }
 type HostStore struct {
 	store *Store
@@ -32,13 +42,26 @@ type HostStore struct {
 
 func NewHostStore(ctx context.Context, db *Store) (*HostStore, error) {
 	for _, stmt := range []string{
-		"CREATE TABLE IF NOT EXISTS hosts(id TEXT PRIMARY KEY,name TEXT NOT NULL,endpoint TEXT NOT NULL,agent_id TEXT NOT NULL DEFAULT '',spki_sha256 TEXT NOT NULL DEFAULT '',token_sealed BLOB,paired_at TEXT NOT NULL DEFAULT '')",
+		`CREATE TABLE IF NOT EXISTS hosts(
+			id TEXT PRIMARY KEY,name TEXT NOT NULL,endpoint TEXT NOT NULL,
+			agent_id TEXT NOT NULL DEFAULT '',spki_sha256 TEXT NOT NULL DEFAULT '',
+			token_sealed BLOB,paired_at TEXT NOT NULL DEFAULT '',
+			connection_mode TEXT NOT NULL DEFAULT 'direct',
+			host_type TEXT NOT NULL DEFAULT 'permanent',
+			accepted_at TEXT NOT NULL DEFAULT '',expires_at TEXT NOT NULL DEFAULT '',
+			last_seen_at TEXT NOT NULL DEFAULT '',next_poll_at TEXT NOT NULL DEFAULT '',
+			platform TEXT NOT NULL DEFAULT '',arch TEXT NOT NULL DEFAULT '',
+			agent_version TEXT NOT NULL DEFAULT '',revoked_at TEXT NOT NULL DEFAULT ''
+		)`,
 		"CREATE TABLE IF NOT EXISTS network_entries(host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_binding ON hosts(agent_id) WHERE agent_id <> ''",
 	} {
 		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
 			return nil, err
 		}
+	}
+	if err := ensureReverseHostColumns(ctx, db.db); err != nil {
+		return nil, err
 	}
 	keyPath := filepath.Join(db.DataDir(), ".agent-sealing-key")
 	info, err := os.Lstat(keyPath)
@@ -77,26 +100,46 @@ func NewHostStore(ctx context.Context, db *Store) (*HostStore, error) {
 	if len(key) != 32 {
 		return nil, errors.New("Agent 密钥内容损坏；禁止自动重置")
 	}
-	return &HostStore{store: db, key: key}, nil
+	result := &HostStore{store: db, key: key}
+	if err := result.initReverseSchema(ctx); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
+
 func (s *HostStore) Create(ctx context.Context, name, endpoint string) (Host, error) {
 	id, err := uuid()
 	if err != nil {
 		return Host{}, err
 	}
 	_, err = s.store.db.ExecContext(ctx, "INSERT INTO hosts(id,name,endpoint) VALUES(?,?,?)", id, name, endpoint)
-	return Host{ID: id, Name: name, Endpoint: endpoint}, err
+	return Host{ID: id, Name: name, Endpoint: endpoint, ConnectionMode: "direct", HostType: "permanent"}, err
 }
+
+const hostSelectColumns = `id,name,endpoint,agent_id,spki_sha256,paired_at,
+	EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id),
+	connection_mode,host_type,accepted_at,expires_at,last_seen_at,next_poll_at,platform,arch,agent_version,revoked_at`
+
+func scanHost(row interface{ Scan(...any) error }) (Host, error) {
+	var h Host
+	err := row.Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry,
+		&h.ConnectionMode, &h.HostType, &h.AcceptedAt, &h.ExpiresAt, &h.LastSeenAt, &h.NextPollAt,
+		&h.Platform, &h.Arch, &h.AgentVersion, &h.RevokedAt)
+	return h, err
+}
+
 func (s *HostStore) List(ctx context.Context) ([]Host, error) {
-	rows, err := s.store.db.QueryContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at,EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id) FROM hosts ORDER BY name,id")
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+hostSelectColumns+
+		" FROM hosts WHERE host_type<>'temporary' OR (revoked_at='' AND expires_at>?) ORDER BY name,id", now)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	result := make([]Host, 0)
 	for rows.Next() {
-		var h Host
-		if err := rows.Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry); err != nil {
+		h, err := scanHost(rows)
+		if err != nil {
 			return nil, err
 		}
 		result = append(result, h)
@@ -104,9 +147,7 @@ func (s *HostStore) List(ctx context.Context) ([]Host, error) {
 	return result, rows.Err()
 }
 func (s *HostStore) Get(ctx context.Context, id string) (Host, error) {
-	var h Host
-	err := s.store.db.QueryRowContext(ctx, "SELECT id,name,endpoint,agent_id,spki_sha256,paired_at,EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id) FROM hosts WHERE id=?", id).
-		Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry)
+	h, err := scanHost(s.store.db.QueryRowContext(ctx, "SELECT "+hostSelectColumns+" FROM hosts WHERE id=?", id))
 	if errors.Is(err, sql.ErrNoRows) {
 		return Host{}, ErrHostNotFound
 	}
@@ -117,7 +158,7 @@ func (s *HostStore) Get(ctx context.Context, id string) (Host, error) {
 // the pinned identity, sealed token or original pairing timestamp.
 func (s *HostStore) UpdateMetadata(ctx context.Context, id, name, endpoint string) (Host, error) {
 	result, err := s.store.db.ExecContext(ctx,
-		"UPDATE hosts SET name=?,endpoint=? WHERE id=?", name, endpoint, id)
+		"UPDATE hosts SET name=?,endpoint=? WHERE id=? AND host_type<>'temporary'", name, endpoint, id)
 	if err != nil {
 		return Host{}, err
 	}
@@ -134,7 +175,7 @@ func (s *HostStore) UpdateMetadata(ctx context.Context, id, name, endpoint strin
 // Delete removes only this controller's local host registration and encrypted
 // credentials. It never contacts or deletes the remote Agent or its resources.
 func (s *HostStore) Delete(ctx context.Context, id string) error {
-	result, err := s.store.db.ExecContext(ctx, "DELETE FROM hosts WHERE id=?", id)
+	result, err := s.store.db.ExecContext(ctx, "DELETE FROM hosts WHERE id=? AND host_type<>'temporary'", id)
 	if err != nil {
 		return err
 	}
@@ -222,7 +263,7 @@ func (s *HostStore) SetNetworkEntry(ctx context.Context, id string, enabled bool
 	if err != nil {
 		return Host{}, err
 	}
-	if enabled && h.AgentID == "" {
+	if enabled && (h.AgentID == "" || h.ConnectionMode == "reverse") {
 		return Host{}, ErrHostBinding
 	}
 	if enabled {
