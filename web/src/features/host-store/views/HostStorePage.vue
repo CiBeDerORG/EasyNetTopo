@@ -19,6 +19,10 @@ import {
   deleteSource,
   executeAppAction,
   getAppConfig,
+  getAgentDiscovery,
+  openAgentDiscovery,
+  closeAgentDiscovery,
+  acceptDiscoveredAgent,
   getAuthStatus,
   getControllerInfo,
   login,
@@ -49,7 +53,9 @@ import type {
   CatalogSource,
   ExecutionTask,
   Host,
-  HostHealthStatus
+  HostHealthStatus,
+  AgentDiscoveryState,
+  DiscoveredAgent
 } from '../types'
 
 const route = useRoute()
@@ -89,6 +95,82 @@ const controllerQuery = useQuery({
   retry: 0
 })
 const controllerId = computed(() => controllerQuery.data.value?.controller_id || '')
+const discoveryOpen = ref(false)
+const discoveryLoading = ref(false)
+const discoverySaving = ref(false)
+const discoveryState = ref<AgentDiscoveryState>({ enabled: false })
+const discoveredAgents = ref<DiscoveredAgent[]>([])
+const discoveryToken = ref('')
+async function refreshDiscovery() {
+  if (discoveryLoading.value) return
+  discoveryLoading.value = true
+  try {
+    const result = await getAgentDiscovery()
+    discoveryState.value = result.discovery || { enabled: false }
+    discoveredAgents.value = result.discoveries || []
+  } catch (error) {
+    ElMessage.error('读取主机发现状态失败：' + errorMessage(error))
+  } finally {
+    discoveryLoading.value = false
+  }
+}
+async function showDiscovery() {
+  discoveryOpen.value = true
+  await refreshDiscovery()
+}
+async function startDiscovery() {
+  if (discoverySaving.value) return
+  discoverySaving.value = true
+  try {
+    const result = await openAgentDiscovery()
+    discoveryState.value = result.discovery
+    discoveryToken.value = result.bootstrap_token
+    await refreshDiscovery()
+    ElMessage.success('主机发现已开启，有效期 30 分钟。请将接入凭据配置到内网 EasyHostAgent。')
+  } catch (error) {
+    ElMessage.error('开启主机发现失败：' + errorMessage(error))
+  } finally {
+    discoverySaving.value = false
+  }
+}
+async function stopDiscovery() {
+  if (discoverySaving.value) return
+  discoverySaving.value = true
+  try {
+    await closeAgentDiscovery()
+    discoveryState.value = { enabled: false }
+    ElMessage.success('已停止接收新的内网主机发现请求。')
+  } catch (error) {
+    ElMessage.error('关闭主机发现失败：' + errorMessage(error))
+  } finally {
+    discoverySaving.value = false
+  }
+}
+async function acceptDiscovery(item: DiscoveredAgent) {
+  if (discoverySaving.value) return
+  discoverySaving.value = true
+  try {
+    const host = await acceptDiscoveredAgent(item.agent_id)
+    await queryClient.invalidateQueries({ queryKey: ['hosts'] })
+    await data.hostsQuery.refetch()
+    ui.selectHost(host.id)
+    await refreshDiscovery()
+    ElMessage.success('已加入临时主机，有效期固定为 30 分钟。')
+  } catch (error) {
+    ElMessage.error('加入临时主机失败：' + errorMessage(error))
+  } finally {
+    discoverySaving.value = false
+  }
+}
+async function copyDiscoveryToken() {
+  if (!discoveryToken.value) return
+  try {
+    await navigator.clipboard.writeText(discoveryToken.value)
+    ElMessage.success('接入凭据已复制。')
+  } catch {
+    ElMessage.warning('复制失败，请手动选择凭据复制。')
+  }
+}
 function changeThemeMode(value: string) {
   if (value === 'system' || value === 'light' || value === 'dark') ui.setThemeMode(value)
 }
@@ -867,6 +949,7 @@ async function logout() {
           @add="addHostOpen = true"
           @refresh="refreshAll"
           @settings="sourceSettingsOpen = true"
+          @discover="showDiscovery"
           @edit="openEditor"
           @docker="openDocker"
           @delete="removeHost"
@@ -900,6 +983,56 @@ async function logout() {
       </div>
     </main>
 
+    <el-dialog v-model="discoveryOpen" title="内网主机发现" width="min(720px, calc(100vw - 28px))" append-to-body>
+      <div class="discovery-panel">
+        <el-alert
+          title="开启后，内网 EasyHostAgent 会主动向当前 EasyNetTopo 报到。发现窗口有效期 30 分钟；加入临时主机后另行固定计时 30 分钟，不因心跳续期。"
+          type="info"
+          :closable="false"
+          show-icon
+        />
+        <div class="discovery-actions">
+          <el-tag :type="discoveryState.enabled ? 'success' : 'info'">
+            {{ discoveryState.enabled ? '发现已开启' : '发现已关闭' }}
+          </el-tag>
+          <el-button size="small" type="primary" :loading="discoverySaving" :disabled="discoverySaving" @click="startDiscovery">开启发现并生成凭据</el-button>
+          <el-button size="small" plain :loading="discoverySaving" :disabled="discoverySaving || !discoveryState.enabled" @click="stopDiscovery">关闭发现</el-button>
+          <el-button size="small" :loading="discoveryLoading" @click="refreshDiscovery">刷新</el-button>
+        </div>
+        <div v-if="discoveryToken" class="discovery-token">
+          <div>
+            <strong>Agent 接入凭据</strong>
+            <p>请配置到内网主机的 EasyHostAgent；此凭据只在本次开启操作后展示，服务端仅保存摘要。</p>
+          </div>
+          <el-input :model-value="discoveryToken" readonly />
+          <el-button @click="copyDiscoveryToken">复制凭据</el-button>
+        </div>
+        <el-divider />
+        <div class="discovery-list-head">
+          <strong>待确认主机</strong>
+          <span>{{ discoveredAgents.length }} 台</span>
+        </div>
+        <el-table v-if="discoveredAgents.length" :data="discoveredAgents" size="small" row-key="agent_id">
+          <el-table-column prop="hostname" label="主机名称" min-width="130" />
+          <el-table-column label="系统 / 架构" min-width="130">
+            <template #default="{ row }">{{ row.platform }} · {{ row.arch }}</template>
+          </el-table-column>
+          <el-table-column prop="version" label="Agent 版本" min-width="110" />
+          <el-table-column label="最后报到" min-width="150">
+            <template #default="{ row }">{{ new Date(row.last_seen_at).toLocaleString() }}</template>
+          </el-table-column>
+          <el-table-column label="操作" width="120" fixed="right">
+            <template #default="{ row }">
+              <el-button size="small" type="primary" :loading="discoverySaving" :disabled="discoverySaving" @click="acceptDiscovery(row)">加入临时主机</el-button>
+            </template>
+          </el-table-column>
+        </el-table>
+        <el-empty v-else description="暂无待确认主机。请先开启发现，并在内网 Agent 配置接入地址与凭据。" :image-size="76" />
+      </div>
+      <template #footer>
+        <el-button @click="discoveryOpen = false">关闭</el-button>
+      </template>
+    </el-dialog>
     <AddHostDialog v-model="addHostOpen" :saving="addHostSaving" @submit="submitNewHost" />
     <HostEditorDialog
       v-model="editorOpen"
@@ -1066,6 +1199,14 @@ async function logout() {
 .controller-id { color: var(--ent-dim); font-size: 10px; }
 .topbar-actions :deep(.el-button) { color: #9ab6cf; }
 .data-management-dialog { display: flex; flex-direction: column; gap: 16px; }
+.discovery-panel { display: flex; flex-direction: column; gap: 14px; }
+.discovery-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.discovery-token { display: grid; grid-template-columns: 1fr auto; align-items: end; gap: 9px; padding: 12px; border: 1px solid var(--ent-line); border-radius: 10px; background: var(--ent-panel); }
+.discovery-token > div { grid-column: 1 / -1; }
+.discovery-token strong { font-size: 13px; }
+.discovery-token p { margin: 5px 0 0; color: var(--ent-muted); font-size: 11px; line-height: 1.5; }
+.discovery-list-head { display: flex; align-items: center; justify-content: space-between; font-size: 13px; }
+.discovery-list-head span { color: var(--ent-muted); font-size: 11px; }
 .data-clear-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
 .data-clear-copy { min-width: 0; }
 .data-clear-copy h3 { margin: 0 0 7px; font-size: 14px; font-weight: 700; }
