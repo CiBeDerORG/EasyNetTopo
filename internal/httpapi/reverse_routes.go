@@ -3,8 +3,8 @@ package httpapi
 import (
 	"encoding/base64"
 	"encoding/json"
-	"fmt"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/url"
