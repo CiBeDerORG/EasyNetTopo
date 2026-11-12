@@ -270,11 +270,23 @@ func (s *TaskStore) ListLatest(ctx context.Context) ([]Task, error) {
 }
 
 func (s *TaskStore) PendingHosts(ctx context.Context) ([]string, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT t.host_id FROM execution_tasks t
-		LEFT JOIN hosts h ON h.id=t.host_id
+	// 独立任务存储不要求主机管理模块已初始化；正式运行时
+	// 有 hosts 表则跳过反向 Agent 任务，防止直连调度器重复执行。
+	var hasHosts int
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='hosts'").Scan(&hasHosts); err != nil {
+		return nil, err
+	}
+	query := `SELECT DISTINCT t.host_id FROM execution_tasks t
 		WHERE t.type='application' AND t.state IN ('queued','preparing','running')
-		AND COALESCE(h.connection_mode,'direct')<>'reverse'
-		ORDER BY t.host_id`)
+		ORDER BY t.host_id`
+	if hasHosts != 0 {
+		query = `SELECT DISTINCT t.host_id FROM execution_tasks t
+			LEFT JOIN hosts h ON h.id=t.host_id
+			WHERE t.type='application' AND t.state IN ('queued','preparing','running')
+			AND COALESCE(h.connection_mode,'direct')<>'reverse'
+			ORDER BY t.host_id`
+	}
+	rows, err := s.db.QueryContext(ctx, query)
 	if err != nil {
 		return nil, err
 	}
