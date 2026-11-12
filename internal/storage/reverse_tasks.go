@@ -21,10 +21,10 @@ var ErrReverseTaskUnavailable = errors.New("反向安装任务不存在、已过
 var ErrReverseTaskConflict = errors.New("该主机已有相同应用的预安装任务")
 
 type ReverseTaskPayload struct {
-	Task        Task              `json:"task"`
-	Revision    string            `json:"revision"`
-	BundleSHA   string            `json:"bundle_sha256"`
-	Config      map[string]string `json:"config"`
+	Task      Task              `json:"task"`
+	Revision  string            `json:"revision"`
+	BundleSHA string            `json:"bundle_sha256"`
+	Config    map[string]string `json:"config"`
 }
 
 func (s *TaskStore) sealConfig(taskID string, config map[string]string) ([]byte, error) {
