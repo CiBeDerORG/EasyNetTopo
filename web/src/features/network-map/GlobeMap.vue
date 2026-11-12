@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import type { MapLink, MapNode } from './topology'
+import { linkCurveLanes, type MapLink, type MapNode } from './topology'
 
 type Basemap = 'auto' | 'standard' | 'satellite' | 'dark'
 type Theme = 'light' | 'dark'
@@ -109,7 +109,7 @@ function setBaseLayer() {
     error.value = '地图底图初始化失败。地球仍可操作，请切换底图重试。'
   }
 }
-function arcPoints(start: MapNode, end: MapNode): Cesium.Cartesian3[] {
+function arcPoints(start: MapNode, end: MapNode, lateralOffset = 0): Cesium.Cartesian3[] {
   const startPoint = Cesium.Cartographic.fromDegrees(start.longitude!, start.latitude!)
   const endPoint = Cesium.Cartographic.fromDegrees(end.longitude!, end.latitude!)
   const geodesic = new Cesium.EllipsoidGeodesic(startPoint, endPoint)
@@ -120,11 +120,39 @@ function arcPoints(start: MapNode, end: MapNode): Cesium.Cartesian3[] {
     const fraction = i / 72
     const point = geodesic.interpolateUsingFraction(fraction)
     const height = 1600 + Math.sin(Math.PI * fraction) * lift
-    positions.push(Cesium.Cartesian3.fromRadians(point.longitude, point.latitude, height))
+    const position = Cesium.Cartesian3.fromRadians(point.longitude, point.latitude, height)
+
+    // 沿局部切线的左右方向做横向偏移；两端保持在真实节点坐标，中段形成相反弯曲。
+    if (lateralOffset !== 0 && i > 0 && i < 72) {
+      const beforePoint = geodesic.interpolateUsingFraction(Math.max(0, fraction - 1 / 72))
+      const afterPoint = geodesic.interpolateUsingFraction(Math.min(1, fraction + 1 / 72))
+      const before = Cesium.Cartesian3.fromRadians(beforePoint.longitude, beforePoint.latitude, 0)
+      const after = Cesium.Cartesian3.fromRadians(afterPoint.longitude, afterPoint.latitude, 0)
+      const tangent = Cesium.Cartesian3.normalize(
+        Cesium.Cartesian3.subtract(after, before, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()
+      )
+      const normal = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(position, new Cesium.Cartesian3())
+      const side = Cesium.Cartesian3.normalize(
+        Cesium.Cartesian3.cross(tangent, normal, new Cesium.Cartesian3()),
+        new Cesium.Cartesian3()
+      )
+      const shift = lateralOffset * Math.sin(Math.PI * fraction)
+      Cesium.Cartesian3.add(
+        position,
+        Cesium.Cartesian3.multiplyByScalar(side, shift, new Cesium.Cartesian3()),
+        position
+      )
+    }
+    positions.push(position)
   }
   return positions
 }
-function linkPoints(link: MapLink, byKey: Map<string, MapNode>): Cesium.Cartesian3[] | null {
+function linkPoints(
+  link: MapLink,
+  byKey: Map<string, MapNode>,
+  curveLane = 0
+): Cesium.Cartesian3[] | null {
   const from = byKey.get(link.from), to = byKey.get(link.to)
   if (!from || !to || from.latitude === null || from.longitude === null ||
       to.latitude === null || to.longitude === null) return null
@@ -133,7 +161,12 @@ function linkPoints(link: MapLink, byKey: Map<string, MapNode>): Cesium.Cartesia
   if (via && via.latitude !== null && via.longitude !== null) {
     return [...arcPoints(from, via), ...arcPoints(via, to).slice(1)]
   }
-  return arcPoints(from, to)
+  const startPoint = Cesium.Cartographic.fromDegrees(from.longitude, from.latitude)
+  const endPoint = Cesium.Cartographic.fromDegrees(to.longitude, to.latitude)
+  const distance = new Cesium.EllipsoidGeodesic(startPoint, endPoint).surfaceDistance
+  const offset = curveLane === 0 ? 0 :
+    Math.max(1800, Math.min(12000, distance * 0.018)) * curveLane
+  return arcPoints(from, to, offset)
 }
 function addTrafficParticles(link: MapLink, points: Cesium.Cartesian3[], color: Cesium.Color) {
   const bps = (link.rxBps || 0) + (link.txBps || 0)
@@ -159,12 +192,13 @@ function redraw() {
   viewer.entities.removeAll()
   nodeEntities.clear()
   const byKey = new Map(props.nodes.map(node => [node.key, node]))
+  const curveLanes = linkCurveLanes(props.nodes, props.links)
 
   // 先绘制中继/未知线路，再绘制 P2P，确保连续直连线不会被虚线覆盖。
   const rank: Record<MapLink['kind'], number> = { relay: 0, unknown: 1, p2p: 2 }
   const orderedLinks = [...props.links].sort((a, b) => rank[a.kind] - rank[b.kind])
   for (const link of orderedLinks) {
-    const points = linkPoints(link, byKey)
+    const points = linkPoints(link, byKey, curveLanes.get(link.key) || 0)
     if (!points) continue
     const highlight = props.selectedLinkKey === link.key
     const color = linkColor(link.kind)
