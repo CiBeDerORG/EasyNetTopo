@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { formatTaskTime, formatTaskTriggerTime, taskActive } from '../src/features/host-store/task-status.ts'
+import { createSelfUpdateDetector, formatTaskTime, formatTaskTriggerTime, taskActive } from '../src/features/host-store/task-status.ts'
 
 function makeTask(state, overrides = {}) {
   return {
@@ -46,4 +46,40 @@ test('最近任务时间优先使用完成时间，其次开始时间，最后�
 test('触发时间始终取创建时间，不受开始和完成时间影响', () => {
   const task = makeTask('succeeded')
   assert.equal(formatTaskTriggerTime(task), new Date(task.created_at).toLocaleString())
+})
+
+const selfUpdate = (state, overrides = {}) => makeTask(state, { app_id: 'easynettopo', ...overrides })
+
+test('忽略历史成功任务，刷新后不会循环刷新', () => {
+  const detect = createSelfUpdateDetector()
+  const tasks = [selfUpdate('succeeded')]
+  assert.equal(detect(tasks), false)
+  assert.equal(detect([]), false)
+  assert.equal(detect(tasks), false)
+  assert.equal(createSelfUpdateDetector()(tasks), false)
+})
+
+test('任意主机更新成功触发一次，重复响应不再触发', () => {
+  const detect = createSelfUpdateDetector()
+  assert.equal(detect([selfUpdate('running')]), false)
+  assert.equal(detect([selfUpdate('succeeded', { host_id: 'other-host' })]), true)
+  assert.equal(detect([selfUpdate('succeeded')]), false)
+  assert.equal(detect([selfUpdate('succeeded', { id: 'task-2' })]), false)
+})
+
+test('两次轮询之间完成的新任务也会触发', () => {
+  const detect = createSelfUpdateDetector()
+  assert.equal(detect([]), false)
+  assert.equal(detect([selfUpdate('succeeded')]), true)
+})
+
+test('失败、取消、其他应用和非更新操作不触发刷新', () => {
+  const detect = createSelfUpdateDetector()
+  detect([])
+  for (const state of ['queued', 'preparing', 'running', 'failed', 'interrupted', 'cancelled']) {
+    assert.equal(detect([selfUpdate(state)]), false)
+  }
+  for (const overrides of [{ app_id: 'easyhostagent' }, { action: 'install' }, { type: 'host' }]) {
+    assert.equal(detect([selfUpdate('succeeded', overrides)]), false)
+  }
 })

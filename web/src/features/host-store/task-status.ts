@@ -52,3 +52,23 @@ export function formatTaskTriggerTime(task: ExecutionTask): string {
   const time = new Date(task.created_at)
   return Number.isNaN(time.getTime()) ? '未知' : time.toLocaleString()
 }
+
+// 首次响应只记录历史任务，后续跨主机的新成功更新触发一次刷新。
+export function createSelfUpdateDetector() {
+  let initialized = false
+  let triggered = false
+  const completed = new Set<string>()
+  return (tasks: ExecutionTask[]): boolean => {
+    let changed = false
+    for (const task of tasks) {
+      if (task.type !== 'application' || task.app_id !== 'easynettopo' ||
+          task.action !== 'update' || task.state !== 'succeeded') continue
+      if (!completed.has(task.id)) changed = true
+      completed.add(task.id)
+    }
+    const shouldReload = initialized && changed && !triggered
+    initialized = true
+    if (shouldReload) triggered = true
+    return shouldReload
+  }
+}
