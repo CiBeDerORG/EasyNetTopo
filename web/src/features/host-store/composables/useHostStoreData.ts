@@ -1,7 +1,8 @@
-import { computed, type ComputedRef, type Ref } from 'vue'
+import { computed, watch, type ComputedRef, type Ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { getApps, getDockerInventory, getHostSnapshot, getHosts, getSources, getAppStatuses, getExecutionTasks } from '../api'
 import { appKey } from '../rules'
+import { createSelfUpdateDetector } from '../task-status'
 import type { AppStatus, CatalogApp } from '../types'
 
 export function useHostStoreData(
@@ -14,10 +15,14 @@ export function useHostStoreData(
   const tasksQuery = useQuery({
     queryKey: ['execution-tasks'],
     queryFn: getExecutionTasks,
-    enabled: computed(() => authenticated.value && storePage.value),
+    enabled: authenticated,
     retry: 0,
     refetchInterval: 2500
   })
+  const detectSelfUpdate = createSelfUpdateDetector()
+  watch(() => tasksQuery.data.value, tasks => {
+    if (authenticated.value && tasks && detectSelfUpdate(tasks)) window.location.reload()
+  }, { immediate: true })
   const hostsQuery = useQuery({
     queryKey: ['hosts'], queryFn: getHosts, enabled: authenticated, staleTime: 10_000
   })
