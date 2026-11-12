@@ -376,7 +376,7 @@ func FetchSnapshot(ctx context.Context, h storage.Host, controllerID, token, kin
 		return client.request(ctx, http.MethodGet, "/v1/adapters/types", nil, controllerID, token)
 	}
 	switch kind {
-	case "easytier/node", "easytier/peer", "easytier/route":
+	case "easytier/node", "easytier/peer", "easytier/route", "easytier/peer-center":
 		return client.request(ctx, http.MethodGet, "/v1/adapters/"+kind+"?resource_id=compose%3Aeasytier", nil, controllerID, token)
 	}
 	return nil, errors.New("未知 Agent 查询类型")
