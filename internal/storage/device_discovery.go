@@ -80,13 +80,14 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 	}
 
 	// 整个网络节点内的设备都参与去重，包括直属设备、手工录入设备和其他网关下的设备。
-	rows, err := tx.QueryContext(ctx, `SELECT id,ip_address,mac_address FROM devices
+	rows, err := tx.QueryContext(ctx, `SELECT id,ip_address,mac_address,COALESCE(gateway_group_id,'') FROM devices
 		WHERE network_key=? AND peer_id=?`, networkKey, peerID)
 	if err != nil {
 		return result, err
 	}
 	type identitySet map[string]struct{}
 	ips, macs := make(map[string]identitySet), make(map[string]identitySet)
+	deviceGatewayGroups := make(map[string]string)
 	addIdentity := func(index map[string]identitySet, key, id string) {
 		if key == "" {
 			return
@@ -97,11 +98,12 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 		index[key][id] = struct{}{}
 	}
 	for rows.Next() {
-		var id, ipAddress, macAddress string
-		if err := rows.Scan(&id, &ipAddress, &macAddress); err != nil {
+		var id, ipAddress, macAddress, groupID string
+		if err := rows.Scan(&id, &ipAddress, &macAddress, &groupID); err != nil {
 			_ = rows.Close()
 			return result, err
 		}
+		deviceGatewayGroups[id] = groupID
 		addIdentity(ips, ipAddress, id)
 		addIdentity(macs, strings.ToLower(macAddress), id)
 	}
@@ -117,7 +119,9 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 	if complete && completeSource != "" {
 		if _, err := tx.ExecContext(ctx, `UPDATE device_discovery_observations
 			SET status='offline',updated_at=?
-			WHERE gateway_device_id=? AND source=? AND status<>'offline'`, now, gatewayID, completeSource); err != nil {
+			WHERE gateway_device_id=? AND source=? AND status<>'offline'
+				AND device_id IN (SELECT id FROM devices WHERE gateway_group_id=?)`,
+			now, gatewayID, completeSource, ownedGroupID); err != nil {
 			return result, err
 		}
 	}
@@ -230,11 +234,16 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			if err != nil {
 				return result, err
 			}
+			deviceGatewayGroups[deviceID] = ownedGroupID
 			addIdentity(ips, ipAddress, deviceID)
 			addIdentity(macs, macAddress, deviceID)
 			result.Created++
 		}
 
+		// 已存在但不属于当前网关组的直属设备或其他网关设备只参与去重，不改写其发现状态。
+		if deviceGatewayGroups[deviceID] != ownedGroupID {
+			continue
+		}
 		_, err = tx.ExecContext(ctx, `INSERT INTO device_discovery_observations
 			(device_id,gateway_device_id,source,status,last_seen_at,updated_at)
 			VALUES(?,?,?,'online',?,?)

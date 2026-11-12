@@ -57,6 +57,7 @@ func TestGatewayDiscoveryStatusUsesCurrentObservationAndSourceScopedOffline(t *t
 	_, err = store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
 		{Name: "设备 A", IPAddress: first.IPAddress, Observation: "recent"},
 		{Name: "设备 B", IPAddress: second.IPAddress, Observation: "lease"},
+		{Name: "其他网关设备", IPAddress: other.IPAddress, Observation: "recent"},
 	}, true)
 	if err != nil {
 		t.Fatal(err)
@@ -75,6 +76,7 @@ func TestGatewayDiscoveryStatusUsesCurrentObservationAndSourceScopedOffline(t *t
 	assertStatus(first.ID, "online")
 	assertStatus(second.ID, "online")
 	assertStatus(manual.ID, "unknown")
+	assertStatus(other.ID, "unknown")
 
 	// 完整服务发现中，只有本次观测到的 A 在线，之前由同一来源发现的 B 离线。
 	_, err = store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
