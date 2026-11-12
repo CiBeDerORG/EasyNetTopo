@@ -222,9 +222,10 @@ func (s *TaskStore) ClaimReverseTask(ctx context.Context, agentID string) (*Reve
 		JOIN reverse_task_payloads p ON p.task_id=t.id
 		JOIN hosts h ON h.id=t.host_id
 		WHERE h.agent_id=? AND h.connection_mode='reverse' AND h.host_type='temporary' AND h.revoked_at=''
-		AND h.expires_at>? AND t.state='queued' AND p.acknowledged_at=''
-		AND (p.claimed_at='' OR p.lease_expires_at<=?)
-		ORDER BY t.rowid LIMIT 1`, agentID, stamp, stamp)
+		AND ((t.state='queued' AND h.expires_at>? AND p.acknowledged_at=''
+			AND (p.claimed_at='' OR p.lease_expires_at<=?))
+			OR (t.state='running' AND p.acknowledged_at<>'' ))
+		ORDER BY CASE WHEN t.state='running' THEN 0 ELSE 1 END,t.rowid LIMIT 1`, agentID, stamp, stamp)
 	var task Task
 	var sealed []byte
 	var result ReverseTaskPayload
@@ -237,17 +238,19 @@ func (s *TaskStore) ClaimReverseTask(ctx context.Context, agentID string) (*Reve
 	if err != nil {
 		return nil, err
 	}
-	update, err := s.db.ExecContext(ctx, `UPDATE reverse_task_payloads SET claimed_at=?,lease_expires_at=?
-		WHERE task_id=? AND acknowledged_at='' AND (claimed_at='' OR lease_expires_at<=?)`, stamp, lease, task.ID, stamp)
-	if err != nil {
-		return nil, err
-	}
-	affected, err := update.RowsAffected()
-	if err != nil {
-		return nil, err
-	}
-	if affected != 1 {
-		return nil, nil
+	if task.State == "queued" {
+		update, err := s.db.ExecContext(ctx, `UPDATE reverse_task_payloads SET claimed_at=?,lease_expires_at=?
+			WHERE task_id=? AND acknowledged_at='' AND (claimed_at='' OR lease_expires_at<=?)`, stamp, lease, task.ID, stamp)
+		if err != nil {
+			return nil, err
+		}
+		affected, err := update.RowsAffected()
+		if err != nil {
+			return nil, err
+		}
+		if affected != 1 {
+			return nil, nil
+		}
 	}
 	config, err := s.openConfig(task.ID, sealed)
 	if err != nil {
