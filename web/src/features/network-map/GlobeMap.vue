@@ -2,7 +2,7 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue'
 import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
-import { linkCurveLanes, type MapLink, type MapNode } from './topology'
+import { curveSeparationMeters, linkCurveLanes, type MapLink, type MapNode } from './topology'
 
 type Basemap = 'auto' | 'standard' | 'satellite' | 'dark'
 type Theme = 'light' | 'dark'
@@ -24,6 +24,9 @@ let viewer: Cesium.Viewer | null = null
 let themeObserver: MutationObserver | null = null
 let cancelled = false
 let tileFailureCount = 0
+let lastCurveSeparation = 0
+let cameraRedrawFrame: number | null = null
+let removeCameraChangedListener: (() => void) | null = null
 const nodeEntities = new Map<string, Cesium.Entity>()
 const located = () => props.nodes.filter(node => node.latitude !== null && node.longitude !== null)
 
@@ -109,7 +112,7 @@ function setBaseLayer() {
     error.value = '地图底图初始化失败。地球仍可操作，请切换底图重试。'
   }
 }
-function arcPoints(start: MapNode, end: MapNode, lateralOffset = 0): Cesium.Cartesian3[] {
+function arcPoints(start: MapNode, end: MapNode, lateralOffsetMeters = 0): Cesium.Cartesian3[] {
   const startPoint = Cesium.Cartographic.fromDegrees(start.longitude!, start.latitude!)
   const endPoint = Cesium.Cartographic.fromDegrees(end.longitude!, end.latitude!)
   const geodesic = new Cesium.EllipsoidGeodesic(startPoint, endPoint)
@@ -137,7 +140,7 @@ function arcPoints(start: MapNode, end: MapNode, lateralOffset = 0): Cesium.Cart
         Cesium.Cartesian3.cross(tangent, normal, new Cesium.Cartesian3()),
         new Cesium.Cartesian3()
       )
-      const shift = lateralOffset * Math.sin(Math.PI * fraction)
+      const shift = lateralOffsetMeters * Math.sin(Math.PI * fraction)
       Cesium.Cartesian3.add(
         position,
         Cesium.Cartesian3.multiplyByScalar(side, shift, new Cesium.Cartesian3()),
@@ -151,7 +154,7 @@ function arcPoints(start: MapNode, end: MapNode, lateralOffset = 0): Cesium.Cart
 function linkPoints(
   link: MapLink,
   byKey: Map<string, MapNode>,
-  curveLane = 0
+  curveOffsetMeters = 0
 ): Cesium.Cartesian3[] | null {
   const from = byKey.get(link.from), to = byKey.get(link.to)
   if (!from || !to || from.latitude === null || from.longitude === null ||
@@ -164,8 +167,7 @@ function linkPoints(
   const startPoint = Cesium.Cartographic.fromDegrees(from.longitude, from.latitude)
   const endPoint = Cesium.Cartographic.fromDegrees(to.longitude, to.latitude)
   const distance = new Cesium.EllipsoidGeodesic(startPoint, endPoint).surfaceDistance
-  const offset = curveLane === 0 ? 0 :
-    Math.max(1800, Math.min(12000, distance * 0.018)) * curveLane
+  const offset = curveOffsetMeters
   return arcPoints(from, to, offset)
 }
 function addTrafficParticles(link: MapLink, points: Cesium.Cartesian3[], color: Cesium.Color) {
@@ -192,13 +194,16 @@ function redraw() {
   viewer.entities.removeAll()
   nodeEntities.clear()
   const byKey = new Map(props.nodes.map(node => [node.key, node]))
+  const separationMeters = curveSeparationMeters(viewer.camera.positionCartographic.height)
+  lastCurveSeparation = separationMeters
   const curveLanes = linkCurveLanes(props.nodes, props.links)
 
   // 先绘制中继/未知线路，再绘制 P2P，确保连续直连线不会被虚线覆盖。
   const rank: Record<MapLink['kind'], number> = { relay: 0, unknown: 1, p2p: 2 }
   const orderedLinks = [...props.links].sort((a, b) => rank[a.kind] - rank[b.kind])
   for (const link of orderedLinks) {
-    const points = linkPoints(link, byKey, curveLanes.get(link.key) || 0)
+    const offsetMeters = (curveLanes.get(link.key) || 0) * separationMeters
+    const points = linkPoints(link, byKey, offsetMeters)
     if (!points) continue
     const highlight = props.selectedLinkKey === link.key
     const color = linkColor(link.kind)
@@ -331,6 +336,18 @@ onMounted(() => {
     applySceneTheme()
     setBaseLayer()
     redraw()
+    // 相机高度变化时同步调整线路互斥距离；按阈值合帧，避免每个滚轮事件都重建整张地图。
+    viewer.camera.percentageChanged = 0.02
+    removeCameraChangedListener = viewer.camera.changed.addEventListener(() => {
+      if (!viewer || viewer.isDestroyed()) return
+      const nextSeparation = curveSeparationMeters(viewer.camera.positionCartographic.height)
+      const threshold = Math.max(300, lastCurveSeparation * 0.08)
+      if (Math.abs(nextSeparation - lastCurveSeparation) < threshold || cameraRedrawFrame !== null) return
+      cameraRedrawFrame = requestAnimationFrame(() => {
+        cameraRedrawFrame = null
+        redraw()
+      })
+    })
     viewer.screenSpaceEventHandler.setInputAction((movement: { position: Cesium.Cartesian2 }) => {
       if (!viewer) return
       const picked = viewer.scene.pick(movement.position) as { id?: Cesium.Entity } | undefined
@@ -361,6 +378,10 @@ onUnmounted(() => {
   cancelled = true
   themeObserver?.disconnect()
   themeObserver = null
+  removeCameraChangedListener?.()
+  removeCameraChangedListener = null
+  if (cameraRedrawFrame !== null) cancelAnimationFrame(cameraRedrawFrame)
+  cameraRedrawFrame = null
   if (viewer && !viewer.isDestroyed()) viewer.destroy()
   viewer = null
 })
