@@ -77,6 +77,8 @@ type Device struct {
 	OpenWrtRPCDPort     int      `json:"openwrt_rpcd_port,omitempty"`
 	OpenWrtHTTPS        bool     `json:"openwrt_https,omitempty"`
 	OpenWrtUsername     string   `json:"openwrt_username,omitempty"`
+	DiscoveryStatus     string   `json:"discovery_status"`
+	DiscoveryLastSeenAt string   `json:"discovery_last_seen_at,omitempty"`
 	CreatedAt           string   `json:"created_at"`
 	UpdatedAt           string   `json:"updated_at"`
 }
@@ -165,6 +167,17 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			username TEXT NOT NULL, credential_sealed BLOB NOT NULL,
 			updated_at TEXT NOT NULL
 		)`,
+		`CREATE TABLE IF NOT EXISTS device_discovery_observations (
+			device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+			gateway_device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+			source TEXT NOT NULL CHECK(source IN ('devices','adb')),
+			status TEXT NOT NULL CHECK(status IN ('online','offline')),
+			last_seen_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			PRIMARY KEY(device_id,gateway_device_id,source)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_device_discovery_gateway_source
+			ON device_discovery_observations(gateway_device_id,source,status)`,
 	} {
 		if _, err := db.db.ExecContext(ctx, query); err != nil {
 			return nil, fmt.Errorf("初始化设备管理数据失败: %w", err)
@@ -573,7 +586,13 @@ func (s *DeviceStore) DeleteDeviceGroup(ctx context.Context, id string) error {
 }
 
 const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(parent.name,gg.name,''),COALESCE(owned.id,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
-	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at
+	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at,
+	CASE
+		WHEN EXISTS(SELECT 1 FROM device_discovery_observations online_obs WHERE online_obs.device_id=d.id AND online_obs.status='online') THEN 'online'
+		WHEN EXISTS(SELECT 1 FROM device_discovery_observations offline_obs WHERE offline_obs.device_id=d.id) THEN 'offline'
+		ELSE 'unknown'
+	END,
+	COALESCE((SELECT MAX(obs.last_seen_at) FROM device_discovery_observations obs WHERE obs.device_id=d.id),'')
 	FROM devices d
 	LEFT JOIN device_groups g ON g.id=d.group_id
 	LEFT JOIN device_gateway_groups gg ON gg.id=d.gateway_group_id
@@ -588,7 +607,8 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var semanticKinds string
 	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.GatewayGroupID, &v.GatewayGroupName, &v.OwnedGatewayGroupID, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
 		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID,
-		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt)
+		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt,
+		&v.DiscoveryStatus, &v.DiscoveryLastSeenAt)
 	if err != nil {
 		return Device{}, err
 	}

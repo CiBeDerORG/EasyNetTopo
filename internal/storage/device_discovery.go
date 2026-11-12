@@ -19,6 +19,7 @@ type DiscoveredDeviceInput struct {
 	Manufacturer string
 	Model        string
 	Source       string
+	Observation  string
 }
 
 type DiscoveredDeviceImportResult struct {
@@ -27,9 +28,24 @@ type DiscoveredDeviceImportResult struct {
 	Skipped  int `json:"skipped"`
 }
 
-// ImportGatewayDiscoveredDevices 在一个事务中对同一节点做保守去重。
-// 只创建新设备，不更改已有设备的名称、网关归属、语义标签或手工维护的字段。
+// ImportGatewayDiscoveredDevices 保留原有导入入口；不做离线批量判定。
 func (s *DeviceStore) ImportGatewayDiscoveredDevices(ctx context.Context, gatewayID string, candidates []DiscoveredDeviceInput) (DiscoveredDeviceImportResult, error) {
+	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, "", candidates, false)
+}
+
+// SyncGatewayDiscoveredDevices 将单一来源的一次扫描作为状态同步。
+// 只有完整成功的快照才会把该来源之前观测到、但本次缺席的设备标记为离线。
+func (s *DeviceStore) SyncGatewayDiscoveredDevices(ctx context.Context, gatewayID, source string, candidates []DiscoveredDeviceInput, complete bool) (DiscoveredDeviceImportResult, error) {
+	if source != "devices" && source != "adb" {
+		return DiscoveredDeviceImportResult{}, ErrInvalidDevice
+	}
+	for i := range candidates {
+		candidates[i].Source = source
+	}
+	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, source, candidates, complete)
+}
+
+func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayID, completeSource string, candidates []DiscoveredDeviceInput, complete bool) (DiscoveredDeviceImportResult, error) {
 	var result DiscoveredDeviceImportResult
 	if len(candidates) > 256 {
 		return result, ErrInvalidDevice
@@ -64,27 +80,33 @@ func (s *DeviceStore) ImportGatewayDiscoveredDevices(ctx context.Context, gatewa
 	}
 
 	// 整个网络节点内的设备都参与去重，包括直属设备、手工录入设备和其他网关下的设备。
-	rows, err := tx.QueryContext(ctx, `SELECT ip_address,mac_address FROM devices
+	rows, err := tx.QueryContext(ctx, `SELECT id,ip_address,mac_address FROM devices
 		WHERE network_key=? AND peer_id=?`, networkKey, peerID)
 	if err != nil {
 		return result, err
 	}
-	ips, macs := make(map[string]bool), make(map[string]bool)
+	type identitySet map[string]struct{}
+	ips, macs := make(map[string]identitySet), make(map[string]identitySet)
+	addIdentity := func(index map[string]identitySet, key, id string) {
+		if key == "" {
+			return
+		}
+		if index[key] == nil {
+			index[key] = make(identitySet)
+		}
+		index[key][id] = struct{}{}
+	}
 	for rows.Next() {
-		var ip, mac string
-		if err := rows.Scan(&ip, &mac); err != nil {
-			rows.Close()
+		var id, ipAddress, macAddress string
+		if err := rows.Scan(&id, &ipAddress, &macAddress); err != nil {
+			_ = rows.Close()
 			return result, err
 		}
-		if ip != "" {
-			ips[ip] = true
-		}
-		if mac != "" {
-			macs[strings.ToLower(mac)] = true
-		}
+		addIdentity(ips, ipAddress, id)
+		addIdentity(macs, strings.ToLower(macAddress), id)
 	}
 	if err := rows.Err(); err != nil {
-		rows.Close()
+		_ = rows.Close()
 		return result, err
 	}
 	if err := rows.Close(); err != nil {
@@ -92,7 +114,51 @@ func (s *DeviceStore) ImportGatewayDiscoveredDevices(ctx context.Context, gatewa
 	}
 
 	now := time.Now().UTC().Format(time.RFC3339)
+	if complete && completeSource != "" {
+		if _, err := tx.ExecContext(ctx, `UPDATE device_discovery_observations
+			SET status='offline',updated_at=?
+			WHERE gateway_device_id=? AND source=? AND status<>'offline'`, now, gatewayID, completeSource); err != nil {
+			return result, err
+		}
+	}
+
+	findMatch := func(index map[string]identitySet, key string) (string, bool) {
+		matches := index[key]
+		if len(matches) == 0 {
+			return "", false
+		}
+		if len(matches) != 1 {
+			return "", true
+		}
+		for id := range matches {
+			return id, false
+		}
+		return "", false
+	}
+
 	for _, item := range candidates {
+		source := strings.TrimSpace(item.Source)
+		if source == "" {
+			source = "devices"
+		}
+		if source != "devices" && source != "adb" {
+			result.Skipped++
+			continue
+		}
+		observation := strings.TrimSpace(item.Observation)
+		if observation == "" {
+			observation = "recent"
+		}
+		if observation != "recent" && observation != "lease" && observation != "cached" {
+			result.Skipped++
+			continue
+		}
+		// cached 是扩展包保留的历史快照，不是本次观测；不能新增设备或刷新在线状态。
+		if observation == "cached" {
+			result.Skipped++
+			continue
+		}
+
 		ipAddress := strings.TrimSpace(item.IPAddress)
 		macAddress := strings.TrimSpace(item.MACAddress)
 		if ipAddress == "" && macAddress == "" {
@@ -109,58 +175,75 @@ func (s *DeviceStore) ImportGatewayDiscoveredDevices(ctx context.Context, gatewa
 		}
 		if macAddress != "" {
 			mac, err := net.ParseMAC(macAddress)
-			if err != nil || len(mac) != 6 {
+			if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
 				result.Skipped++
 				continue
 			}
 			macAddress = strings.ToLower(mac.String())
 		}
-		if (ipAddress != "" && ips[ipAddress]) || (macAddress != "" && macs[macAddress]) {
-			result.Existing++
-			continue
-		}
 
-		name := discoveredField(item.Name, 100)
-		if name == "" {
-			if ipAddress != "" {
-				name = ipAddress
-			} else {
-				name = macAddress
-			}
-		}
-		source := "OpenWrt 服务发现"
-		if item.Source == "adb" {
-			source = "OpenWrt ADB 发现"
-		}
-		input := DeviceInput{
-			Name: name, IPAddress: ipAddress, MACAddress: macAddress,
-			Manufacturer: discoveredField(item.Manufacturer, 100), Model: discoveredField(item.Model, 120),
-			Note: "来源：" + source, NetworkKey: networkKey, PeerID: peerID, GatewayGroupID: ownedGroupID,
-		}
-		if err := normalizeDevice(&input); err != nil {
+		ipMatch, ipAmbiguous := findMatch(ips, ipAddress)
+		macMatch, macAmbiguous := findMatch(macs, macAddress)
+		if ipAmbiguous || macAmbiguous || (ipMatch != "" && macMatch != "" && ipMatch != macMatch) {
+			// 身份信息指向多个历史设备时不擅自合并，也不更新在线状态。
 			result.Skipped++
 			continue
 		}
-		id, err := uuid()
+		deviceID := ipMatch
+		if deviceID == "" {
+			deviceID = macMatch
+		}
+		if deviceID != "" {
+			result.Existing++
+		} else {
+			name := discoveredField(item.Name, 100)
+			if name == "" {
+				if ipAddress != "" {
+					name = ipAddress
+				} else {
+					name = macAddress
+				}
+			}
+			note := "来源：OpenWrt 服务发现"
+			if source == "adb" {
+				note = "来源：OpenWrt ADB 发现"
+			}
+			input := DeviceInput{
+				Name: name, IPAddress: ipAddress, MACAddress: macAddress,
+				Manufacturer: discoveredField(item.Manufacturer, 100), Model: discoveredField(item.Model, 120),
+				Note: note, NetworkKey: networkKey, PeerID: peerID, GatewayGroupID: ownedGroupID,
+			}
+			if err := normalizeDevice(&input); err != nil {
+				result.Skipped++
+				continue
+			}
+			deviceID, err = uuid()
+			if err != nil {
+				return result, err
+			}
+			_, err = tx.ExecContext(ctx, `INSERT INTO devices
+				(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,
+				manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+				VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,0,?,?,?,?)`,
+				deviceID, input.Name, ownedGroupID, input.Manufacturer, input.Model, input.IPAddress,
+				input.MACAddress, input.Note, networkKey, peerID, now, now)
+			if err != nil {
+				return result, err
+			}
+			addIdentity(ips, ipAddress, deviceID)
+			addIdentity(macs, macAddress, deviceID)
+			result.Created++
+		}
+
+		_, err = tx.ExecContext(ctx, `INSERT INTO device_discovery_observations
+			(device_id,gateway_device_id,source,status,last_seen_at,updated_at)
+			VALUES(?,?,?,'online',?,?)
+			ON CONFLICT(device_id,gateway_device_id,source) DO UPDATE SET
+				status='online',last_seen_at=excluded.last_seen_at,updated_at=excluded.updated_at`,
+			deviceID, gatewayID, source, now, now)
 		if err != nil {
 			return result, err
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO devices
-			(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,
-			manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-			VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,0,?,?,?,?)`,
-			id, input.Name, ownedGroupID, input.Manufacturer, input.Model, input.IPAddress,
-			input.MACAddress, input.Note, networkKey, peerID, now, now)
-		if err != nil {
-			return result, err
-		}
-		if ipAddress != "" {
-			ips[ipAddress] = true
-		}
-		if macAddress != "" {
-			macs[macAddress] = true
-		}
-		result.Created++
 	}
 	if err := tx.Commit(); err != nil {
 		return DiscoveredDeviceImportResult{}, err

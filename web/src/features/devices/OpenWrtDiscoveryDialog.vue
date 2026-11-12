@@ -74,6 +74,11 @@ function snapshotTime(timestamp?: number | null) {
 function addresses(value?: string[]) {
   return Array.isArray(value) && value.length ? value.join('、') : '—'
 }
+function observationLabel(value?: string) {
+  if (value === 'cached') return '离线（历史缓存）'
+  if (value === 'lease') return '在线（DHCP 租约）'
+  return '在线（本次观测）'
+}
 </script>
 
 <template>
@@ -112,7 +117,13 @@ function addresses(value?: string[]) {
         <el-table-column prop="mac" label="MAC" min-width="145" show-overflow-tooltip />
         <el-table-column prop="vendor" label="厂商" min-width="120" show-overflow-tooltip />
         <el-table-column prop="model" label="型号" min-width="110" show-overflow-tooltip />
-        <el-table-column prop="observation" label="观测状态" width="100" />
+        <el-table-column label="发现状态" width="145">
+          <template #default="{ row }">
+            <el-tag :type="row.observation === 'cached' ? 'info' : 'success'" size="small">
+              {{ observationLabel(row.observation) }}
+            </el-tag>
+          </template>
+        </el-table-column>
       </template>
       <template v-else>
         <el-table-column prop="instance" label="ADB 服务" min-width="145" show-overflow-tooltip />
@@ -122,6 +133,11 @@ function addresses(value?: string[]) {
         <el-table-column prop="protocol" label="协议" width="90" />
         <el-table-column prop="network" label="网络" min-width="110" show-overflow-tooltip />
         <el-table-column prop="iface" label="接口" min-width="105" show-overflow-tooltip />
+        <el-table-column label="发现状态" width="120">
+          <template #default>
+            <el-tag type="success" size="small">在线（本次观测）</el-tag>
+          </template>
+        </el-table-column>
       </template>
     </el-table>
     <el-empty v-else-if="!loading" :description="snapshot?.has_snapshot ? '快照中没有发现记录' : '尚无快照，请点击开始扫描'" :image-size="85" />

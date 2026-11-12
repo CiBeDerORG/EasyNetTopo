@@ -662,6 +662,8 @@ watch(
                   <el-tag v-if="device.is_node_device" size="small" type="info" effect="dark">节点设备</el-tag>
                   <el-tag v-if="device.is_gateway" size="small" type="success" effect="dark">网关设备</el-tag>
                   <el-tag v-if="device.gateway_group_id" size="small" type="info" effect="plain">下挂设备</el-tag>
+                  <el-tag v-if="device.discovery_status === 'online'" size="small" type="success" effect="dark">在线</el-tag>
+                  <el-tag v-else-if="device.discovery_status === 'offline'" size="small" type="info" effect="plain">离线</el-tag>
                 </div>
                 <div class="device-subtitle">
                   <span>{{ [device.manufacturer, device.model].filter(Boolean).join(' · ') || '未填写厂商与型号' }}</span>
@@ -680,6 +682,9 @@ watch(
               <span v-if="device.mac_address">MAC：{{ device.mac_address }}</span>
               <span v-if="device.gateway_group_name" class="node-association"><el-icon><Link /></el-icon>上级网关：{{ device.gateway_group_name }}</span>
               <span v-if="device.is_node_device" class="node-association"><el-icon><Link /></el-icon>当前网络节点基础设备</span>
+              <span v-if="device.discovery_last_seen_at" class="muted">
+                最近观测：{{ new Date(device.discovery_last_seen_at).toLocaleString('zh-CN') }}
+              </span>
             </div>
             <p v-if="device.note" class="device-note">{{ device.note }}</p>
             <div v-if="isOpenWrtDevice(device)" class="openwrt-status">

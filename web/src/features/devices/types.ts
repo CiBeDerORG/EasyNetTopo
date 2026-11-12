@@ -40,6 +40,8 @@ export type Device = {
   openwrt_rpcd_port?: number
   openwrt_https?: boolean
   openwrt_username?: string
+  discovery_status: 'unknown' | 'online' | 'offline'
+  discovery_last_seen_at?: string
   created_at: string
   updated_at: string
 }

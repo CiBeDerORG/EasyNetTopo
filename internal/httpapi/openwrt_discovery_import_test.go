@@ -131,3 +131,85 @@ func TestOpenWrtDiscoveryImportRejectsMalformedPayload(t *testing.T) {
 		}
 	}
 }
+
+
+func TestOpenWrtDiscoveryImportSynchronizesOnlineAndOfflineStatus(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := storage.NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
+		Name: "OWRT", SemanticKinds: []string{"openwrt"}, IsGateway: true,
+		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-owrt",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	first := json.RawMessage(`{"status":"ok","has_snapshot":true,"truncated":false,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.20"],"mac":"02:11:22:33:44:55","observation":"recent"},
+		{"name":"电视","ipv4":["192.168.10.21"],"mac":"02:11:22:33:44:56","observation":"lease"}
+	]}`)
+	if _, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", first); callErr != nil {
+		t.Fatal(callErr)
+	}
+	devices, err := store.ListDevicesForNode(ctx, "network:home", "peer-owrt")
+	if err != nil || len(devices) != 3 {
+		t.Fatalf("首次扫描应登记两台设备: %+v %v", devices, err)
+	}
+	statusByIP := func(ip string) string {
+		t.Helper()
+		items, listErr := store.ListDevicesForNode(ctx, "network:home", "peer-owrt")
+		if listErr != nil {
+			t.Fatal(listErr)
+		}
+		for _, item := range items {
+			if item.IPAddress == ip {
+				return item.DiscoveryStatus
+			}
+		}
+		t.Fatalf("找不到设备 IP %s", ip)
+		return ""
+	}
+	if statusByIP("192.168.10.20") != "online" || statusByIP("192.168.10.21") != "online" {
+		t.Fatal("本次 recent/lease 观测到的设备必须在线")
+	}
+
+	// 完整扫描中电视缺席，之前的观测状态改为离线。
+	second := json.RawMessage(`{"status":"ok","has_snapshot":true,"truncated":false,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.20"],"mac":"02:11:22:33:44:55","observation":"recent"}
+	]}`)
+	if _, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", second); callErr != nil {
+		t.Fatal(callErr)
+	}
+	if statusByIP("192.168.10.20") != "online" || statusByIP("192.168.10.21") != "offline" {
+		t.Fatal("完整扫描应将本次出现的设备置为在线、缺席设备置为离线")
+	}
+
+	// 部分扫描无法确认缺席设备离线；但明确观测到的设备仍可更新为在线。
+	partial := json.RawMessage(`{"status":"partial","has_snapshot":true,"truncated":false,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.20"],"mac":"02:11:22:33:44:55","observation":"recent"}
+	]}`)
+	if _, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", partial); callErr != nil {
+		t.Fatal(callErr)
+	}
+	if statusByIP("192.168.10.21") != "offline" {
+		t.Fatal("部分扫描不能把缺席设备重新判定为在线或覆盖其离线状态")
+	}
+
+	// 即使 status=ok，结果被截断也不能将未返回设备判离线。
+	truncated := json.RawMessage(`{"status":"ok","has_snapshot":true,"truncated":true,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.20"],"mac":"02:11:22:33:44:55","observation":"recent"}
+	]}`)
+	if _, callErr := importOpenWrtDiscoverySnapshot(ctx, store, gateway.ID, "devices", truncated); callErr != nil {
+		t.Fatal(callErr)
+	}
+	if statusByIP("192.168.10.21") != "offline" {
+		t.Fatal("截断扫描不应批量修改缺席设备状态")
+	}
+}

@@ -21,7 +21,8 @@ type openWrtDiscoveryRecord struct {
 	Model    string   `json:"model"`
 	Instance string   `json:"instance"`
 	Host     string   `json:"host"`
-	Address  string   `json:"address"`
+	Address     string   `json:"address"`
+	Observation string   `json:"observation"`
 }
 
 func firstDiscoveryIP(candidates ...string) string {
@@ -39,6 +40,7 @@ func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.Device
 	var snapshot struct {
 		Status      string                   `json:"status"`
 		HasSnapshot bool                     `json:"has_snapshot"`
+		Truncated   bool                     `json:"truncated"`
 		Devices     []openWrtDiscoveryRecord `json:"devices"`
 	}
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
@@ -53,8 +55,9 @@ func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.Device
 	}
 	items := make([]storage.DiscoveredDeviceInput, 0, len(snapshot.Devices))
 	for _, record := range snapshot.Devices {
-		candidate := storage.DiscoveredDeviceInput{Source: kind}
+		candidate := storage.DiscoveredDeviceInput{Source: kind, Observation: record.Observation}
 		if kind == "adb" {
+			candidate.Observation = "recent"
 			candidate.Name = record.Instance
 			if candidate.Name == "" {
 				candidate.Name = record.Host
@@ -79,7 +82,9 @@ func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.Device
 		}
 		items = append(items, candidate)
 	}
-	summary, err := devices.ImportGatewayDiscoveredDevices(ctx, gatewayID, items)
+	// partial 或 truncated 快照只能确认本次明确观测到的设备在线，不能据此把缺席设备判为离线。
+	complete := snapshot.Status == "ok" && !snapshot.Truncated
+	summary, err := devices.SyncGatewayDiscoveredDevices(ctx, gatewayID, kind, items, complete)
 	if err != nil {
 		return nil, discoveryError(http.StatusServiceUnavailable, "openwrt_discovery_import_failed", "扫描已完成，但自动添加设备失败；请检查设备管理数据后重新扫描")
 	}
