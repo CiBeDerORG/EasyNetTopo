@@ -3,17 +3,20 @@ package httpapi
 import (
 	"encoding/base64"
 	"encoding/json"
+	"fmt"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/tasks"
 )
 
-func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service) {
+func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, taskSvc *tasks.Service, catalogSvc *catalog.Service) {
 	jsonReply := func(w http.ResponseWriter, status int, value any) {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.Header().Set("Cache-Control", "no-store")
@@ -207,10 +210,188 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
 			return
 		}
+		var taskValue any
+		if taskSvc != nil {
+			payload, claimErr := taskSvc.ClaimReverseTask(r.Context(), req.AgentID)
+			if claimErr != nil {
+				jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "task_claim_failed", "message": "领取预安装任务失败"})
+				return
+			}
+			if payload != nil {
+				taskValue = map[string]any{
+					"id": payload.Task.ID, "source_id": payload.Task.SourceID, "app_id": payload.Task.AppID,
+					"action": payload.Task.Action, "revision": payload.Revision,
+					"bundle_sha256": payload.BundleSHA, "config": payload.Config,
+					"bundle_url": "/api/v1/agent/tasks/" + payload.Task.ID + "/bundle",
+				}
+			}
+		}
 		jsonReply(w, http.StatusOK, map[string]any{
 			"status": "accepted", "controller_id": db.ControllerID(),
 			"expires_at": h.ExpiresAt, "next_poll_at": h.NextPollAt,
-			"next_poll_seconds": 10, "task": nil,
+			"next_poll_seconds": 10, "task": taskValue,
 		})
 	})
+	// 临时主机只允许通过预安装入口创建 install 任务；不会直接连接内网 Agent。
+	mux.HandleFunc("POST /api/v1/hosts/{id}/preinstall", func(w http.ResponseWriter, r *http.Request) {
+		if !admin(w, r) || !mutation(w, r) {
+			return
+		}
+		if taskSvc == nil || catalogSvc == nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "preinstall_unavailable", "message": "预安装服务尚未初始化"})
+			return
+		}
+		var req struct {
+			Source   string            `json:"source_id"`
+			App      string            `json:"app_id"`
+			Revision string            `json:"revision"`
+			Config   map[string]string `json:"config"`
+		}
+		if !decode(w, r, &req, 256<<10) || req.Source == "" || req.App == "" || req.Revision == "" {
+			return
+		}
+		if req.App == "easynettopo" {
+			jsonReply(w, http.StatusForbidden, map[string]string{"code": "app_not_allowed", "message": "临时主机不允许预安装 EasyNetTopo"})
+			return
+		}
+		host, err := service.Get(r.Context(), r.PathValue("id"))
+		if err != nil {
+			jsonReply(w, http.StatusNotFound, map[string]string{"code": "host_not_found", "message": "临时主机不存在"})
+			return
+		}
+		if host.HostType != "temporary" || host.ConnectionMode != "reverse" || !service.TemporaryActive(host) {
+			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "该主机不是有效的临时主机"})
+			return
+		}
+		pkg, err := catalogSvc.BuildCandidateBundle(r.Context(), req.Source, req.App)
+		if err != nil || pkg.Revision != req.Revision {
+			jsonReply(w, http.StatusConflict, map[string]string{"code": "catalog_revision_changed", "message": "应用来源或版本已变化，请刷新应用市场后重试"})
+			return
+		}
+		fieldsByKey := make(map[string]map[string]any, len(pkg.Config))
+		for _, field := range pkg.Config {
+			key, _ := field["key"].(string)
+			if key != "" {
+				fieldsByKey[key] = field
+			}
+		}
+		if len(req.Config) > len(fieldsByKey) {
+			jsonReply(w, http.StatusUnprocessableEntity, map[string]string{"code": "invalid_config", "message": "安装配置字段数量无效"})
+			return
+		}
+		for key := range req.Config {
+			field, exists := fieldsByKey[key]
+			if !exists || !catalogConfigFieldInputAllowed(key, field, fieldsByKey, req.Config) {
+				jsonReply(w, http.StatusUnprocessableEntity, map[string]string{"code": "invalid_config", "message": "请求包含未声明、隐藏、只读或选项值无效的配置字段"})
+				return
+			}
+		}
+		if missing := catalogRequiredConfigFieldMissing(fieldsByKey, req.Config); missing != "" {
+			jsonReply(w, http.StatusUnprocessableEntity, map[string]string{"code": "required_config_missing", "message": "缺少必填配置字段: " + missing})
+			return
+		}
+		created, err := taskSvc.EnqueueTemporaryInstall(r.Context(), host.ID, req.Source, req.App, pkg.Revision, pkg.SHA256, req.Config, pkg.ZIP)
+		if errors.Is(err, storage.ErrReverseTaskUnavailable) {
+			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
+			return
+		}
+		if errors.Is(err, storage.ErrReverseTaskConflict) {
+			jsonReply(w, http.StatusConflict, map[string]string{"code": "preinstall_conflict", "message": "该主机已有相同应用的预安装任务"})
+			return
+		}
+		if err != nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "preinstall_failed", "message": "创建预安装任务失败"})
+			return
+		}
+		jsonReply(w, http.StatusAccepted, map[string]any{"accepted": true, "tasks": created})
+	})
+
+	// ACK 只允许在临时主机尚未到期时完成；执行开始后的状态回传可在自然到期后继续。
+	mux.HandleFunc("POST /api/v1/agent/tasks/{id}/ack", func(w http.ResponseWriter, r *http.Request) {
+		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || len(token) != 64 {
+			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 授权无效"})
+			return
+		}
+		var req struct { AgentID string `json:"agent_id"` }
+		if !decode(w, r, &req, 2048) {
+			return
+		}
+		if _, err := service.AuthenticateReverseAgent(r.Context(), req.AgentID, token); err != nil {
+			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机授权无效或已过期"})
+			return
+		}
+		if taskSvc == nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "task_unavailable", "message": "任务服务不可用"})
+			return
+		}
+		task, err := taskSvc.AcknowledgeReverseTask(r.Context(), req.AgentID, r.PathValue("id"))
+		if err != nil {
+			jsonReply(w, http.StatusConflict, map[string]string{"code": "task_ack_rejected", "message": "任务领取确认失败或任务已失效"})
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]any{"accepted": true, "task": task})
+	})
+
+	mux.HandleFunc("POST /api/v1/agent/tasks/{id}/status", func(w http.ResponseWriter, r *http.Request) {
+		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		if !ok || len(token) != 64 {
+			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 授权无效"})
+			return
+		}
+		var req struct {
+			AgentID string `json:"agent_id"`
+			State   string `json:"state"`
+			Message string `json:"message"`
+		}
+		if !decode(w, r, &req, 4096) {
+			return
+		}
+		if req.State != "running" && req.State != "succeeded" && req.State != "failed" && req.State != "interrupted" {
+			jsonReply(w, http.StatusBadRequest, map[string]string{"code": "invalid_task_state", "message": "任务状态无效"})
+			return
+		}
+		if _, err := service.AuthenticateReverseTaskAgent(r.Context(), req.AgentID, token); err != nil {
+			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 身份或任务授权无效"})
+			return
+		}
+		if taskSvc == nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "task_unavailable", "message": "任务服务不可用"})
+			return
+		}
+		if err := taskSvc.UpdateReverseTaskState(r.Context(), req.AgentID, r.PathValue("id"), req.State, req.Message); err != nil {
+			jsonReply(w, http.StatusConflict, map[string]string{"code": "task_status_rejected", "message": "任务状态回传失败"})
+			return
+		}
+		jsonReply(w, http.StatusOK, map[string]bool{"accepted": true})
+	})
+
+	mux.HandleFunc("GET /api/v1/agent/tasks/{id}/bundle", func(w http.ResponseWriter, r *http.Request) {
+		token, ok := strings.CutPrefix(r.Header.Get("Authorization"), "Bearer ")
+		agentID := r.Header.Get("X-EHA-Agent-ID")
+		if !ok || len(token) != 64 || agentID == "" {
+			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 授权无效"})
+			return
+		}
+		if _, err := service.AuthenticateReverseTaskAgent(r.Context(), agentID, token); err != nil {
+			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 身份或任务授权无效"})
+			return
+		}
+		if taskSvc == nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "bundle_unavailable", "message": "Bundle 服务不可用"})
+			return
+		}
+		data, digest, err := taskSvc.ReverseBundle(r.Context(), agentID, r.PathValue("id"))
+		if err != nil {
+			jsonReply(w, http.StatusNotFound, map[string]string{"code": "bundle_not_found", "message": "任务安装包不存在或无权访问"})
+			return
+		}
+		w.Header().Set("Content-Type", "application/zip")
+		w.Header().Set("Content-Length", fmt.Sprint(len(data)))
+		w.Header().Set("Cache-Control", "no-store")
+		w.Header().Set("X-Bundle-SHA256", digest)
+		w.Header().Set("Content-Disposition", "attachment; filename=\""+r.PathValue("id")+".zip\"")
+		_, _ = w.Write(data)
+	})
+
 }
