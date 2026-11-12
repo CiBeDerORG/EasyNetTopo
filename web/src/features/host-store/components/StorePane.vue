@@ -53,6 +53,12 @@ const runningCount = computed(() => Object.values(statusByKey.value)
 const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
+  if (props.host?.host_type === 'temporary') {
+    const seen = props.host.last_seen_at ? new Date(props.host.last_seen_at).getTime() : 0
+    return seen && Date.now() - seen < 60_000
+      ? { label: '反向在线', type: 'success' as const }
+      : { label: '等待 Agent 报到', type: 'warning' as const }
+  }
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
   if (taskActive(agentTask.value) || props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
   if (props.agentMaintenance?.state === 'timeout') return {
@@ -64,13 +70,38 @@ const agentState = computed(() => {
   return { label: '已配对', type: 'info' as const }
 })
 const showNativeAgent = computed(() =>
-  props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
+  props.host?.host_type !== 'temporary' && (props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
   props.filter === 'available' && !props.snapshot ||
-  props.filter === 'update' && !!props.snapshot
+  props.filter === 'update' && !!props.snapshot)
 )
+function appPermissions(app: CatalogApp) {
+  const row = statusByKey.value[appKey(app)]
+  const platform = props.snapshot?.platform || props.host?.platform || ''
+  const base = getAppPermissions(app, row, platform)
+  if (props.host?.host_type !== 'temporary') return base
+  return {
+    ...base,
+    showInstall: !!app.revision,
+    canInstall: !!app.revision,
+    showUpdate: false,
+    canUpdate: false,
+    showUninstall: false,
+    canUninstall: false,
+    showAdopt: false,
+    canAdopt: false,
+    showForceUpdate: false,
+    canForceUpdate: false,
+    grantRequired: false,
+    blockReason: ''
+  }
+}
 const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
-  const permissions = getAppPermissions(app, row, props.snapshot?.platform)
+  const permissions = appPermissions(app)
+  if (props.host?.host_type === 'temporary') {
+    if (props.filter === 'installed' || props.filter === 'update') return false
+    return !!app.revision
+  }
   if (props.filter === 'installed') return !!row && (row.managed || row.external)
   if (props.filter === 'available') return !row || (!row.managed && !row.external)
   if (props.filter === 'update') return permissions.canUpdate
@@ -112,8 +143,9 @@ function appPorts(app: CatalogApp): DockerPort[] {
           <div class="selected-info">
             <h2>{{ host.name }}</h2>
             <p>
-              {{ host.endpoint }}
+              {{ host.connection_mode === 'reverse' ? '反向接入' : host.endpoint }}
               <span v-if="snapshot"> · {{ snapshot.platform }} · {{ snapshot.arch }}</span>
+              <span v-else-if="host.host_type === 'temporary'"> · {{ host.platform }} · {{ host.arch }}</span>
               <el-tag size="small" effect="dark" :type="agentState.type">{{ agentState.label }}</el-tag>
             </p>
           </div>
@@ -155,7 +187,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
         <div class="metric">
           <div class="metric-caption"><el-icon><CircleCheck /></el-icon>Agent 状态</div>
           <div class="metric-num agent" :class="{ green: agentState.type === 'success' }">{{ agentState.label }}</div>
-          <div class="metric-foot">{{ snapshot ? snapshot.platform + ' · ' + snapshot.arch : '通过配对身份安全连接' }}</div>
+          <div class="metric-foot">{{ snapshot ? snapshot.platform + ' · ' + snapshot.arch : host.host_type === 'temporary' ? '固定 30 分钟临时接入' : '通过配对身份安全连接' }}</div>
         </div>
       </div>
 
@@ -172,7 +204,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
       <div class="store-heading">
         <div>
           <h3>应用市场</h3>
-          <p>Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新</p>
+          <p>{{ host.host_type === 'temporary' ? '临时主机仅支持预安装；配置保存后由 Agent 主动领取并执行' : 'Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新' }}</p>
         </div>
         <el-radio-group :model-value="filter" size="small" @update:model-value="$emit('filter-change', $event)">
           <el-radio-button label="all">全部</el-radio-button>
@@ -209,7 +241,9 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :task="cardTask(app)"
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
-          :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
+          :permissions="appPermissions(app)"
+          :temporary="host.host_type === 'temporary'"
+          :install-label="host.host_type === 'temporary' ? '预安装' : undefined"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
