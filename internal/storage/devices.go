@@ -1167,6 +1167,7 @@ func (s *DeviceStore) ClearDeviceData(ctx context.Context) error {
 	defer tx.Rollback()
 
 	for _, statement := range []string{
+		"DELETE FROM device_discovery_observations",
 		"DELETE FROM device_openwrt_configs",
 		"DELETE FROM devices",
 		"DELETE FROM device_gateway_groups",
