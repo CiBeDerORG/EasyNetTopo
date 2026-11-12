@@ -113,3 +113,32 @@ export function resolveInterruptedExecutionTask(id: string) {
 export function setNetworkEntry(id: string, enabled: boolean) {
   return apiRequest<Host>('/api/v1/hosts/' + encodeURIComponent(id) + '/network-entry', { method: 'PUT', body: { enabled } })
 }
+
+export type AgentDiscoveryState = { enabled: boolean; expires_at?: string }
+export type DiscoveredAgent = {
+  agent_id: string
+  hostname: string
+  spki_sha256: string
+  platform: string
+  arch: string
+  version: string
+  first_seen_at: string
+  last_seen_at: string
+  status: string
+}
+
+export function getAgentDiscovery() {
+  return apiRequest<{ discovery: AgentDiscoveryState; discoveries: DiscoveredAgent[] }>('/api/v1/reverse/discovery')
+}
+export function openAgentDiscovery() {
+  return apiRequest<{ discovery: AgentDiscoveryState; bootstrap_token: string }>('/api/v1/reverse/discovery/open', { method: 'POST' })
+}
+export function closeAgentDiscovery() {
+  return apiRequest<{ enabled: boolean }>('/api/v1/reverse/discovery/close', { method: 'POST' })
+}
+export function acceptDiscoveredAgent(agentId: string) {
+  return apiRequest<Host>('/api/v1/reverse/discoveries/' + encodeURIComponent(agentId) + '/accept', { method: 'POST' })
+}
+export function revokeTemporaryHost(id: string) {
+  return apiRequest<void>('/api/v1/reverse/hosts/' + encodeURIComponent(id), { method: 'DELETE' })
+}
