@@ -61,6 +61,7 @@ func newHandler(webDir string, db *storage.Store, catalogSvc *catalog.Service, h
 	}
 	if hostSvc != nil {
 		hostRoutes(mux, db, hostSvc, catalogSvc, taskSvc)
+		reverseRoutes(mux, db, hostSvc)
 	}
 	if taskSvc != nil && hostSvc != nil && catalogSvc != nil {
 		taskRoutes(mux, db, taskSvc, hostSvc, catalogSvc)
