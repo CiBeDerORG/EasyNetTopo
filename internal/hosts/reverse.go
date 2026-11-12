@@ -85,3 +85,29 @@ func (s *Service) RevokeTemporary(ctx context.Context, id string) error {
 	defer s.pairingMu.Unlock()
 	return s.hosts.RevokeTemporary(ctx, id)
 }
+
+func (s *Service) Get(ctx context.Context, id string) (storage.Host, error) {
+	return s.hosts.Get(ctx, id)
+}
+
+func (s *Service) TemporaryActive(h storage.Host) bool {
+	return s.hosts.TemporaryActive(h)
+}
+
+func (s *Service) AuthenticateReverseTaskAgent(ctx context.Context, agentID, token string) (storage.Host, error) {
+	h, err := s.hosts.GetByAgentID(ctx, agentID)
+	if err != nil {
+		return storage.Host{}, err
+	}
+	if h.HostType != "temporary" || h.ConnectionMode != "reverse" || h.RevokedAt != "" {
+		return storage.Host{}, storage.ErrTemporaryHostExpired
+	}
+	expected, err := s.hosts.Credentials(ctx, h)
+	if err != nil {
+		return storage.Host{}, err
+	}
+	if len(token) != len(expected) || subtle.ConstantTimeCompare([]byte(token), []byte(expected)) != 1 {
+		return storage.Host{}, errors.New("Agent 反向接入授权无效")
+	}
+	return h, nil
+}
