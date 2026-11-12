@@ -117,9 +117,17 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 
 	now := time.Now().UTC().Format(time.RFC3339)
 	if complete && completeSource != "" {
+		// 完整扫描开始时，先将当前网关组内所有设备置为该来源的离线；
+		// 随后本次明确观测到的设备再更新为在线。网关组外设备不会被触碰。
+		if _, err := tx.ExecContext(ctx, `INSERT OR IGNORE INTO device_discovery_observations
+			(device_id,gateway_device_id,source,status,last_seen_at,updated_at)
+			SELECT id,?,?,'offline','',? FROM devices WHERE gateway_group_id=?`,
+			gatewayID, completeSource, now, ownedGroupID); err != nil {
+			return result, err
+		}
 		if _, err := tx.ExecContext(ctx, `UPDATE device_discovery_observations
 			SET status='offline',updated_at=?
-			WHERE gateway_device_id=? AND source=? AND status<>'offline'
+			WHERE gateway_device_id=? AND source=?
 				AND device_id IN (SELECT id FROM devices WHERE gateway_group_id=?)`,
 			now, gatewayID, completeSource, ownedGroupID); err != nil {
 			return result, err

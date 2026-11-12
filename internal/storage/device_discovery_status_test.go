@@ -75,7 +75,7 @@ func TestGatewayDiscoveryStatusUsesCurrentObservationAndSourceScopedOffline(t *t
 	}
 	assertStatus(first.ID, "online")
 	assertStatus(second.ID, "online")
-	assertStatus(manual.ID, "unknown")
+	assertStatus(manual.ID, "offline")
 	assertStatus(other.ID, "unknown")
 
 	// 完整服务发现中，只有本次观测到的 A 在线，之前由同一来源发现的 B 离线。
