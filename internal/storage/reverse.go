@@ -112,8 +112,16 @@ func (s *Store) ExpireReverse(ctx context.Context) error {
 	if _, err = tx.ExecContext(ctx, "UPDATE reverse_agents SET status='expired' WHERE status='accepted' AND expires_at<=?", now); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state='cancelled',message='临时主机已到期或撤销',finished_at=? WHERE trigger_source='reverse_discovery' AND state='queued' AND host_id IN (SELECT host_id FROM reverse_agents WHERE status IN ('expired','revoked'))`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+	// 某些只使用主机 API 的部署/测试尚未初始化任务存储。
+	// 不应让临时功能阻断现有主机列表。
+	var hasTasks int
+	if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='execution_tasks'").Scan(&hasTasks); err != nil {
 		return err
+	}
+	if hasTasks > 0 {
+		if _, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state='cancelled',message='临时主机已到期或撤销',finished_at=? WHERE trigger_source='reverse_discovery' AND state='queued' AND host_id IN (SELECT host_id FROM reverse_agents WHERE status IN ('expired','revoked'))`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM hosts WHERE id IN (SELECT host_id FROM reverse_agents WHERE status IN ('expired','revoked') AND host_id<>'')"); err != nil {
 		return err
