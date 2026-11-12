@@ -3,6 +3,15 @@ export type ControllerInfo = { controller_id: string }
 
 export type Host = {
   network_entry?: boolean
+  host_type?: 'temporary' | 'permanent'
+  connection_mode?: 'reverse' | 'direct'
+  accepted_at?: string
+  expires_at?: string
+  last_seen_at?: string
+  next_poll_at?: string
+  platform?: string
+  arch?: string
+  agent_version?: string
   id: string
   name: string
   endpoint: string
@@ -142,4 +151,21 @@ export type ExecutionTask = {
   created_at: string
   started_at?: string
   finished_at?: string
+}
+
+export type ReverseCandidate = {
+  agent_id: string
+  spki_sha256: string
+  hostname: string
+  platform: string
+  arch: string
+  version: string
+  status: 'discovered' | 'accepted' | 'expired' | 'revoked'
+  last_seen_at: number
+  next_poll_at: number
+}
+export type ReverseDiscovery = {
+  enabled: boolean
+  until: number
+  agents: ReverseCandidate[]
 }
