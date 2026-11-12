@@ -14,6 +14,12 @@ import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
 import {
   createHost,
+  getReverseDiscovery,
+  setReverseDiscovery,
+  acceptReverseAgent,
+  rejectReverseAgent,
+  revokeTemporaryHost,
+  preinstallApp,
   createSource,
   deleteHost as deleteHostApi,
   deleteSource,
@@ -49,7 +55,8 @@ import type {
   CatalogSource,
   ExecutionTask,
   Host,
-  HostHealthStatus
+  HostHealthStatus,
+  ReverseCandidate
 } from '../types'
 
 const route = useRoute()
@@ -117,6 +124,55 @@ let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
 const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating, isStorePage)
 
 const hosts = data.hosts
+const discoveryQuery = useQuery({
+  queryKey: ['reverse-discovery'],
+  queryFn: getReverseDiscovery,
+  enabled: computed(() => authenticated.value && isStorePage.value),
+  retry: 0,
+  refetchInterval: 5000
+})
+const discoveryOpen = ref(false)
+const discoveryBusy = ref(false)
+const observedCandidateIDs = new Set<string>()
+const reverseCandidates = computed(() => discoveryQuery.data.value?.agents || [])
+const discoveryEnabled = computed(() => !!discoveryQuery.data.value?.enabled)
+watch(reverseCandidates, list => {
+  const newcomers = list.filter(agent => !observedCandidateIDs.has(agent.agent_id))
+  if (newcomers.length) {
+    for (const agent of newcomers) observedCandidateIDs.add(agent.agent_id)
+    discoveryOpen.value = true
+  }
+}, { immediate: true })
+
+async function toggleReverseDiscovery() {
+  discoveryBusy.value = true
+  try {
+    await setReverseDiscovery(!discoveryEnabled.value)
+    await discoveryQuery.refetch()
+    ElMessage.success(discoveryEnabled.value ? '主机发现已开启，30 分钟后自动关闭' : '主机发现已关闭')
+  } catch (error) { ElMessage.error('切换主机发现失败：' + errorMessage(error)) }
+  finally { discoveryBusy.value = false }
+}
+async function acceptDiscovered(agent: ReverseCandidate) {
+  discoveryBusy.value = true
+  try {
+    const created = await acceptReverseAgent(agent.agent_id)
+    await Promise.all([data.hostsQuery.refetch(), discoveryQuery.refetch()])
+    ui.selectHost(created.id)
+    if (!reverseCandidates.value.length) discoveryOpen.value = false
+    ElMessage.success('已加入临时主机，固定 30 分钟后自动剔除')
+  } catch (error) { ElMessage.error('接受临时主机失败：' + errorMessage(error)) }
+  finally { discoveryBusy.value = false }
+}
+async function rejectDiscovered(agent: ReverseCandidate) {
+  discoveryBusy.value = true
+  try {
+    await rejectReverseAgent(agent.agent_id)
+    await discoveryQuery.refetch()
+    if (!reverseCandidates.value.length) discoveryOpen.value = false
+  } catch (error) { ElMessage.error('忽略主机失败：' + errorMessage(error)) }
+  finally { discoveryBusy.value = false }
+}
 const executionTasks = data.tasks
 const sources = data.sources
 const selectedHost = data.selectedHost
@@ -130,13 +186,17 @@ const snapshotError = computed(() =>
 const statusError = computed(() =>
   data.statusQuery.isError.value ? errorMessage(data.statusQuery.error.value) : ''
 )
-const marketLoading = computed(() => data.statusQuery.isFetching.value || data.statusQuery.isPending.value)
+const marketLoading = computed(() => selectedHost.value?.host_type === 'temporary' ? false : data.statusQuery.isFetching.value || data.statusQuery.isPending.value)
 const dockerInventory = computed(() => data.dockerQuery.data.value)
 const dockerLoading = computed(() => data.dockerQuery.isFetching.value)
 const dockerError = computed(() =>
   data.dockerQuery.isError.value ? errorMessage(data.dockerQuery.error.value) : ''
 )
 const healthStatus = computed<HostHealthStatus>(() => {
+  if (selectedHost.value?.host_type === 'temporary') {
+    const last = selectedHost.value.last_seen_at
+    return last && Date.now() - new Date(last).getTime() < 30000 ? 'online' : 'paired'
+  }
   if (!selectedHost.value?.agent_id) return 'unpaired'
   if (agentUpdating.value) return 'checking'
   if (agentMaintenanceForHost.value?.state === 'timeout') return 'error'
@@ -503,6 +563,23 @@ async function pairHost(payload: { agent_id: string; spki_sha256: string; pairin
 }
 
 async function removeHost(host: Host) {
+  if (host.host_type === 'temporary') {
+    try {
+      await ElMessageBox.confirm(
+        '主动剔除临时主机「' + host.name + '」？未领取的任务将取消，已领取任务仅允许安全回传结果。',
+        '剔除临时主机',
+        { type: 'warning', confirmButtonText: '立即剔除', cancelButtonText: '取消' }
+      )
+      await revokeTemporaryHost(host.id)
+      if (ui.selectedHostId === host.id) ui.selectHost('')
+      await data.hostsQuery.refetch()
+      await data.tasksQuery.refetch()
+      ElMessage.success('临时主机已剔除')
+    } catch (error) {
+      if (error !== 'cancel' && error !== 'close') ElMessage.error('剔除失败：' + errorMessage(error))
+    }
+    return
+  }
   const warning = host.agent_id
     ? '该操作只删除 EasyNetTopo 本地登记和已保存凭据，不会撤销 Agent 端授权、停止 Agent 或删除 Docker 应用。'
     : '该操作只删除 EasyNetTopo 的主机登记，不影响 Agent 或 Docker 应用。'
@@ -598,6 +675,7 @@ function permissionsFor(app: CatalogApp) {
 }
 
 async function handleAppAction(app: CatalogApp, action: AppAction) {
+  if (selectedHost.value?.host_type === 'temporary') return // 临时主机只能走预安装配置
   const permissions = permissionsFor(app)
   if (action === 'update' && !permissions.canUpdate) return
   if (action === 'uninstall' && !permissions.canUninstall) return
@@ -642,6 +720,21 @@ async function runAppAction(
     return
   }
   const key = appKey(app)
+  if (host.host_type === 'temporary') {
+    if (action !== 'install' || !install) return
+    actionBusyKey.value = key
+    try {
+      const result = await preinstallApp(host.id, {
+        source_id: app.source_id, app_id: app.app_id,
+        revision: install.revision, config: install.config
+      })
+      configDialogOpen.value = false
+      await data.tasksQuery.refetch()
+      ElMessage.success(app.name + ' 预安装任务已保存，等待 Agent 主动领取 · ' + result.task_id)
+    } catch (error) { ElMessage.error('保存预安装失败：' + errorMessage(error)) }
+    finally { actionBusyKey.value = '' }
+    return
+  }
   setRecovered(host.id, key, false)
   actionBusyKey.value = key
   try {
@@ -863,6 +956,9 @@ async function logout() {
           :selected-host-id="selectedHostId"
           :selected-health-status="healthStatus"
           :refreshing="refreshing"
+          :discovery-enabled="discoveryEnabled"
+          :candidate-count="reverseCandidates.length"
+          @discovery="discoveryOpen = true"
           @select="ui.selectHost"
           @add="addHostOpen = true"
           @refresh="refreshAll"
@@ -900,6 +996,27 @@ async function logout() {
       </div>
     </main>
 
+    <el-dialog v-model="discoveryOpen" title="主机发现" width="min(620px, calc(100vw - 24px))">
+      <el-alert title="仅允许经身份验证的 EasyHostAgent 主动报到；加入主机列表后固定有效 30 分钟，不因心跳续期。" type="info" :closable="false" show-icon />
+      <div class="reverse-discovery-toolbar">
+        <span>发现状态：{{ discoveryEnabled ? '已开启（限时）' : '已关闭' }}</span>
+        <el-button :type="discoveryEnabled ? 'danger' : 'primary'" :loading="discoveryBusy"
+          @click="toggleReverseDiscovery">{{ discoveryEnabled ? '关闭主机发现' : '开启主机发现' }}</el-button>
+      </div>
+      <el-empty v-if="!reverseCandidates.length" description="暂无待确认的 Agent" :image-size="72" />
+      <div v-for="candidate in reverseCandidates" :key="candidate.agent_id" class="reverse-candidate">
+        <div>
+          <strong>{{ candidate.hostname }}</strong>
+          <div>{{ candidate.platform }} · {{ candidate.arch }} · {{ candidate.version }}</div>
+          <div>Agent ID：{{ candidate.agent_id }}</div>
+          <div>公钥指纹：{{ candidate.spki_sha256 }}</div>
+        </div>
+        <div class="reverse-candidate-actions">
+          <el-button type="primary" size="small" :disabled="discoveryBusy" @click="acceptDiscovered(candidate)">加入临时主机</el-button>
+          <el-button size="small" :disabled="discoveryBusy" @click="rejectDiscovered(candidate)">忽略</el-button>
+        </div>
+      </div>
+    </el-dialog>
     <AddHostDialog v-model="addHostOpen" :saving="addHostSaving" @submit="submitNewHost" />
     <HostEditorDialog
       v-model="editorOpen"
@@ -929,6 +1046,7 @@ async function logout() {
     <AppConfigDialog
       v-model="configDialogOpen"
       :app="configApp"
+      :pre-install="selectedHost?.host_type === 'temporary'"
       :revision="configRevision"
       :fields="configFields"
       :saving="configBusy || !!actionBusyKey"
@@ -986,6 +1104,10 @@ async function logout() {
 </template>
 
 <style scoped>
+.reverse-discovery-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 18px 0; }
+.reverse-candidate { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px 0; border-bottom: 1px solid var(--ent-line); color: var(--ent-muted); font-size: 12px; overflow-wrap: anywhere; }
+.reverse-candidate strong { display: block; margin-bottom: 8px; color: var(--ent-text); font-size: 14px; }
+.reverse-candidate-actions { display: flex; gap: 6px; }
 .auth-screen {
   display: grid;
   width: 100%;
