@@ -179,15 +179,21 @@ const filteredDevices = computed(() => {
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const nodeDevices = computed(() => filteredDevices.value.filter(device => device.is_node_device))
-const directDevices = computed(() => filteredDevices.value.filter(device => !device.gateway_group_id))
 const gatewayGroupSections = computed(() => gatewayGroups.value
   .filter(group => !!group.gateway_device_id)
   .map(group => {
     const items = filteredDevices.value.filter(device => device.gateway_group_id === group.id)
     const gatewayDevice = devices.value.find(device => device.id === group.gateway_device_id)
-    return { ...group, items, gatewayDevice }
+    const gatewayMatchesSearch = !!gatewayDevice && filteredDevices.value.some(device => device.id === gatewayDevice.id)
+    return { ...group, items, gatewayDevice, gatewayMatchesSearch }
   })
-  .filter(group => !!group.gatewayDevice && (!search.value.trim() || group.items.length > 0)))
+  .filter(group => !!group.gatewayDevice &&
+    (!search.value.trim() || group.items.length > 0 || group.gatewayMatchesSearch)))
+// 拥有下挂设备分组的直属网关信息直接显示在对应分组标题，不再重复占用一张直属设备卡片。
+const directDevices = computed(() => {
+  const gatewayDeviceIds = new Set(gatewayGroupSections.value.map(group => group.gateway_device_id))
+  return filteredDevices.value.filter(device => !device.gateway_group_id && !gatewayDeviceIds.has(device.id))
+})
 const deviceSections = computed<DeviceSection[]>(() => {
   const result: DeviceSection[] = []
   if (directDevices.value.length) {
@@ -636,12 +642,64 @@ watch(
 
       <div v-for="section in deviceSections" :key="section.id" class="device-group">
         <div class="group-heading">
-          <button class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
+          <div v-if="section.kind === 'gateway' && section.gatewayDevice" class="gateway-heading-main">
+            <el-checkbox class="gateway-heading-select"
+              :model-value="selectedDeviceIds.includes(section.gatewayDevice.id)"
+              :disabled="section.gatewayDevice.is_node_device"
+              :aria-label="'选择设备 ' + section.gatewayDevice.name"
+              @update:model-value="toggleDeviceSelection(section.gatewayDevice.id, $event)" />
+            <button class="group-toggle gateway-group-toggle" type="button"
+              :aria-expanded="!collapsed.includes(section.id)" @click="toggleGroup(section.id)">
+              <span class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
+              <span class="device-avatar gateway-heading-avatar">
+                <el-icon><component :is="deviceIcon(section.gatewayDevice)" /></el-icon>
+              </span>
+              <span class="gateway-heading-info">
+                <span class="gateway-heading-title">
+                  <strong>{{ section.gatewayDevice.name }} 下挂设备</strong>
+                  <span v-if="[section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).length">
+                    {{ [section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).join(' · ') }}
+                  </span>
+                  <span v-if="section.gatewayDevice.ip_address">{{ section.gatewayDevice.ip_address }}</span>
+                  <span v-if="section.gatewayDevice.mac_address">MAC · {{ section.gatewayDevice.mac_address }}</span>
+                  <span v-if="section.gatewayDevice.discovery_status === 'online'" class="gateway-discovery-state online">在线</span>
+                  <span v-else-if="section.gatewayDevice.discovery_status === 'offline'" class="gateway-discovery-state offline">离线</span>
+                </span>
+                <span v-if="isOpenWrtDevice(section.gatewayDevice)" class="gateway-heading-rpcd">
+                  <el-icon><Connection /></el-icon>
+                  {{ section.gatewayDevice.openwrt_configured ? 'RPCD 账号已配置' : 'RPCD 账号尚未配置' }}
+                  <span v-if="section.gatewayDevice.openwrt_configured">
+                    {{ section.gatewayDevice.openwrt_https ? 'HTTPS' : 'HTTP' }} · {{ section.gatewayDevice.openwrt_rpcd_port || 80 }}
+                  </span>
+                  <span v-if="section.gatewayDevice.discovery_last_seen_at">
+                    最近观测 {{ new Date(section.gatewayDevice.discovery_last_seen_at).toLocaleString('zh-CN') }}
+                  </span>
+                </span>
+              </span>
+              <span class="group-count">{{ section.items.length }}</span>
+            </button>
+          </div>
+          <button v-else class="group-toggle" type="button" :aria-expanded="!collapsed.includes(section.id)"
             @click="toggleGroup(section.id)">
             <span class="group-chevron" :class="{ collapsed: collapsed.includes(section.id) }">⌄</span>
             <strong>{{ section.name }}</strong>
             <span class="group-count">{{ section.items.length }}</span>
           </button>
+          <div v-if="section.kind === 'gateway' && section.gatewayDevice" class="gateway-heading-actions">
+            <el-button text circle aria-label="新增下挂设备" title="新增下挂设备"
+              @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
+            <el-button text circle aria-label="编辑网关设备" title="编辑网关设备"
+              @click="openEditDevice(section.gatewayDevice)"><el-icon><Edit /></el-icon></el-button>
+            <el-button v-if="isOpenWrtDevice(section.gatewayDevice)" text circle
+              aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
+              @click="openOpenWrtSettings(section.gatewayDevice)"><el-icon><Setting /></el-icon></el-button>
+            <el-button v-if="isOpenWrtDevice(section.gatewayDevice) && section.gatewayDevice.openwrt_configured"
+              text circle aria-label="OpenWrt 服务发现" title="OpenWrt 服务发现"
+              @click="openDiscovery(section.gatewayDevice, 'devices')"><el-icon><Search /></el-icon></el-button>
+            <el-button v-if="isOpenWrtDevice(section.gatewayDevice) && section.gatewayDevice.openwrt_configured"
+              text circle aria-label="ADB 发现" title="ADB 发现"
+              @click="openDiscovery(section.gatewayDevice, 'adb')"><el-icon><Iphone /></el-icon></el-button>
+          </div>
         </div>
         <div v-if="!collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
@@ -700,7 +758,10 @@ watch(
               <el-button size="small" plain @click="openDiscovery(device, 'adb')">ADB 发现</el-button>
             </div>
           </article>
-          <el-empty v-if="!section.items.length" :description="section.kind === 'gateway' ? '该网关设备还没有下挂设备' : '暂无设备'" :image-size="54" />
+          <el-empty v-if="!section.items.length"
+            :description="section.kind === 'gateway'
+              ? (search ? '没有匹配的下挂设备' : '该网关设备还没有下挂设备')
+              : '暂无设备'" :image-size="54" />
         </div>
       </div>
       <el-empty v-if="devices.length && !deviceSections.some(section => section.items.length) && search" description="没有匹配的设备" />
@@ -827,8 +888,23 @@ watch(
 .devices-summary { display:flex; gap:12px; color:var(--ent-muted); font-size:12px; white-space:nowrap; }
 .device-group { overflow:hidden; border:1px solid var(--ent-line); border-radius:14px; background:var(--ent-panel); }
 .group-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; padding:8px 15px; border-bottom:1px solid var(--ent-line-soft); background:var(--ent-panel-2); }
-.group-toggle { display:flex; min-width:0; align-items:center; gap:10px; border:0; background:transparent; color:var(--ent-text); text-align:left; }
+.group-toggle { display:flex; min-width:0; align-items:center; gap:10px; padding:0; border:0; background:transparent; color:var(--ent-text); text-align:left; cursor:pointer; }
 .group-toggle strong { font-size:14px; }
+.gateway-heading-main { display:flex; min-width:0; flex:1; align-items:center; gap:9px; }
+.gateway-heading-select { flex:none; }
+.gateway-group-toggle { min-width:0; flex:1; }
+.gateway-heading-avatar { width:34px; height:34px; border-radius:10px; font-size:16px; }
+.gateway-heading-info { display:flex; min-width:0; flex:1; flex-direction:column; gap:4px; }
+.gateway-heading-title { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:4px 11px; color:var(--ent-muted); font-size:11px; }
+.gateway-heading-title strong { color:var(--ent-text); font-size:14px; }
+.gateway-discovery-state { display:inline-flex; align-items:center; gap:4px; }
+.gateway-discovery-state::before { width:6px; height:6px; border-radius:50%; background:currentColor; content:""; }
+.gateway-discovery-state.online { color:var(--el-color-success); }
+.gateway-discovery-state.offline { color:var(--ent-dim); }
+.gateway-heading-rpcd { display:flex; align-items:center; flex-wrap:wrap; gap:5px; color:var(--ent-data-highlight); font-size:10px; }
+.gateway-heading-rpcd > span { color:var(--ent-muted); }
+.gateway-heading-actions { display:flex; flex:none; align-items:center; gap:1px; }
+.gateway-heading-actions :deep(.el-button) { margin-left:0; color:var(--ent-muted); }
 .group-chevron { display:inline-block; color:var(--ent-cyan); font-size:18px; transition:transform .15s; }
 .group-chevron.collapsed { transform:rotate(-90deg); }
 .group-count { padding:2px 8px; border-radius:12px; background:var(--ent-elev); color:var(--ent-muted); font-size:11px; }
@@ -867,7 +943,9 @@ watch(
   .devices-toolbar { align-items:stretch; flex-direction:column; }
   .devices-toolbar :deep(.el-input) { max-width:none; }
   .device-grid { grid-template-columns:1fr; padding:10px; }
-  .group-heading { align-items:flex-start; }
+  .group-heading { align-items:flex-start; flex-wrap:wrap; }
+  .gateway-heading-main { width:100%; }
+  .gateway-heading-actions { margin-left:auto; }
   .form-grid { grid-template-columns:1fr; }
   .span-two { grid-column:auto; }
   .device-actions { gap:0; }
