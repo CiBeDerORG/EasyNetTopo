@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { Plus, Refresh, Search, Setting, Radar } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Setting, Connection } from '@element-plus/icons-vue'
 import HostCard from './HostCard.vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { currentHostTask } from '../task-status'
@@ -63,7 +63,7 @@ const filteredHosts = computed(() => {
         </el-tooltip>
         <el-tooltip :content="'主机发现' + (candidateCount ? ' · ' + candidateCount + ' 台待确认' : '')" placement="top">
           <el-button class="glyph-btn" text circle aria-label="主机发现" @click="$emit('discovery')">
-            <el-icon><Radar /></el-icon>
+            <el-icon><Connection /></el-icon>
           </el-button>
         </el-tooltip>
         <el-tooltip content="添加主机" placement="top">
