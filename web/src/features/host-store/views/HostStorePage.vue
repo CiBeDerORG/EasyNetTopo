@@ -28,6 +28,8 @@ import {
   login,
   logout as logoutApi,
   pairHost as pairHostApi,
+  preinstallTemporary,
+  revokeTemporaryHost,
   queueNativeAgentUpdate,
   refreshSource,
   resolveInterruptedExecutionTask,
@@ -219,6 +221,10 @@ const dockerError = computed(() =>
   data.dockerQuery.isError.value ? errorMessage(data.dockerQuery.error.value) : ''
 )
 const healthStatus = computed<HostHealthStatus>(() => {
+  if (selectedHost.value?.host_type === 'temporary') {
+    const seen = selectedHost.value.last_seen_at ? new Date(selectedHost.value.last_seen_at).getTime() : 0
+    return seen && Date.now() - seen < 60_000 ? 'online' : 'error'
+  }
   if (!selectedHost.value?.agent_id) return 'unpaired'
   if (agentUpdating.value) return 'checking'
   if (agentMaintenanceForHost.value?.state === 'timeout') return 'error'
@@ -483,7 +489,7 @@ async function resolveTask(task: ExecutionTask) {
 async function refreshAll() {
   autoLinkAttempts.clear()
   const tasks: Promise<unknown>[] = [data.hostsQuery.refetch(), data.tasksQuery.refetch()]
-  if (selectedHost.value?.agent_id) {
+  if (selectedHost.value?.agent_id && selectedHost.value.connection_mode !== 'reverse') {
     tasks.push(data.snapshotQuery.refetch(), data.statusQuery.refetch())
   }
   await Promise.allSettled(tasks)
@@ -585,19 +591,23 @@ async function pairHost(payload: { agent_id: string; spki_sha256: string; pairin
 }
 
 async function removeHost(host: Host) {
-  const warning = host.agent_id
-    ? '该操作只删除 EasyNetTopo 本地登记和已保存凭据，不会撤销 Agent 端授权、停止 Agent 或删除 Docker 应用。'
-    : '该操作只删除 EasyNetTopo 的主机登记，不影响 Agent 或 Docker 应用。'
+  const temporary = host.host_type === 'temporary'
+  const warning = temporary
+    ? '该操作会立即撤销临时接入授权、取消尚未领取的任务，并从主机列表剔除。已经开始的任务会标记为中断，远端执行结果可能未知。'
+    : host.agent_id
+      ? '该操作只删除 EasyNetTopo 本地登记和已保存凭据，不会撤销 Agent 端授权、停止 Agent 或删除 Docker 应用。'
+      : '该操作只删除 EasyNetTopo 的主机登记，不影响 Agent 或 Docker 应用。'
   try {
     await ElMessageBox.confirm(
-      '确定从 EasyNetTopo 主机列表删除「' + host.name + '」？\n\n' + warning,
-      '删除主机',
-      { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' }
+      '确定从 EasyNetTopo 主机列表' + (temporary ? '剔除临时主机「' : '删除「') + host.name + '」？\n\n' + warning,
+      temporary ? '剔除临时主机' : '删除主机',
+      { type: 'warning', confirmButtonText: temporary ? '确认剔除' : '确认删除', cancelButtonText: '取消' }
     )
-    await deleteHostApi(host.id)
+    if (temporary) await revokeTemporaryHost(host.id)
+    else await deleteHostApi(host.id)
     if (ui.selectedHostId === host.id) ui.selectHost('')
     await queryClient.invalidateQueries({ queryKey: ['hosts'] })
-    ElMessage.success('主机已从 EasyNetTopo 删除。远端 Agent 和 Docker 应用未受影响。')
+    ElMessage.success(temporary ? '临时主机已剔除。' : '主机已从 EasyNetTopo 删除。远端 Agent 和 Docker 应用未受影响。')
   } catch (error) {
     if (error !== 'cancel' && error !== 'close') {
       ElMessage.error('删除主机失败：' + errorMessage(error))
@@ -724,6 +734,10 @@ async function runAppAction(
     return
   }
   const key = appKey(app)
+  if (host.host_type === 'temporary' && (action !== 'install' || !install)) {
+    ElMessage.warning('临时主机仅支持预安装，请通过应用市场配置安装参数。')
+    return
+  }
   setRecovered(host.id, key, false)
   actionBusyKey.value = key
   try {
@@ -732,6 +746,15 @@ async function runAppAction(
       : action === 'update' || action === 'adopt' || action === 'force_update'
         ? { source_id: app.source_id, app_id: app.app_id, revision: app.revision }
         : { source_id: app.source_id, app_id: app.app_id }
+    if (host.host_type === 'temporary') {
+      const queued = await preinstallTemporary(host.id, payload as {
+        source_id: string; app_id: string; revision: string; config: Record<string, string>
+      })
+      configDialogOpen.value = false
+      await data.tasksQuery.refetch()
+      ElMessage.success(app.name + ' 预安装参数已保存，等待 EasyHostAgent 主动领取任务。')
+      return
+    }
     const accepted = await executeAppAction(host.id, action, payload)
     configDialogOpen.value = false
     if (action === 'update' && accepted.accepted) {
