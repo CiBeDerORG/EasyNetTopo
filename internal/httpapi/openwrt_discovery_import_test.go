@@ -22,8 +22,12 @@ func TestOpenWrtDiscoveryScanAutomaticallyImportsAndNeverImportsOldSnapshot(t *t
 		t.Fatal(err)
 	}
 	gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
-		Name: "OWRT", SemanticKinds: []string{"openwrt"}, IsGateway: true,
-		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-owrt",
+		Name:          "OWRT",
+		SemanticKinds: []string{"openwrt"},
+		IsGateway:     true,
+		IPAddress:     "192.168.10.1",
+		NetworkKey:    "network:home",
+		PeerID:        "peer-owrt",
 	})
 	if err != nil {
 		t.Fatal(err)

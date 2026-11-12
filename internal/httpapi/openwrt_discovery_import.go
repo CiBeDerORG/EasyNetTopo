@@ -12,15 +12,15 @@ import (
 )
 
 type openWrtDiscoveryRecord struct {
-	Name     string   `json:"name"`
-	Hostname string   `json:"hostname"`
-	MAC      string   `json:"mac"`
-	IPv4     []string `json:"ipv4"`
-	IPv6     []string `json:"ipv6"`
-	Vendor   string   `json:"vendor"`
-	Model    string   `json:"model"`
-	Instance string   `json:"instance"`
-	Host     string   `json:"host"`
+	Name        string   `json:"name"`
+	Hostname    string   `json:"hostname"`
+	MAC         string   `json:"mac"`
+	IPv4        []string `json:"ipv4"`
+	IPv6        []string `json:"ipv6"`
+	Vendor      string   `json:"vendor"`
+	Model       string   `json:"model"`
+	Instance    string   `json:"instance"`
+	Host        string   `json:"host"`
 	Address     string   `json:"address"`
 	Observation string   `json:"observation"`
 }
