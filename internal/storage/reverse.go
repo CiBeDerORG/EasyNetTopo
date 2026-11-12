@@ -265,7 +265,9 @@ func (s *Store) RevokeReverse(ctx context.Context, hostID string) error {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE reverse_jobs SET bundle=x'',config_sealed=x''
-		WHERE task_id IN (SELECT id FROM execution_tasks WHERE host_id=? AND trigger_source='reverse_discovery' AND state='cancelled')`,hostID);err!=nil {return err}
+		WHERE task_id IN (SELECT id FROM execution_tasks WHERE host_id=? AND trigger_source='reverse_discovery' AND state='cancelled')`, hostID); err != nil {
+		return err
+	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM hosts WHERE id=?", hostID); err != nil {
 		return err
 	}
@@ -511,10 +513,10 @@ func (s *Store) TouchReverse(ctx context.Context, agentID string) error {
 	return err
 }
 
- // IsReverseHost blocks legacy direct-only APIs from touching a temporary Agent.
- // Revoked/expired records remain recognizable to avoid accidental fallbacks.
- func (s *Store) IsReverseHost(ctx context.Context,hostID string)(bool,error){
-    var count int
-    err:=s.db.QueryRowContext(ctx,"SELECT COUNT(*) FROM reverse_agents WHERE host_id=?",hostID).Scan(&count)
-    return count>0,err
- }
+// IsReverseHost blocks legacy direct-only APIs from touching a temporary Agent.
+// Revoked/expired records remain recognizable to avoid accidental fallbacks.
+func (s *Store) IsReverseHost(ctx context.Context, hostID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM reverse_agents WHERE host_id=?", hostID).Scan(&count)
+	return count > 0, err
+}

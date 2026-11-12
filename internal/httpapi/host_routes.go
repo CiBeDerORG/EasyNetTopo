@@ -149,13 +149,16 @@ func hostRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service, c
 			return
 		}
 		parts := strings.Split(strings.TrimPrefix(r.URL.Path, "/api/v1/hosts/"), "/")
-		if len(parts)>0 && len(parts[0])==36 {
-			reverse,err:=db.IsReverseHost(r.Context(),parts[0])
-			if err!=nil {http.Error(w,"无法校验主机接入模式",http.StatusServiceUnavailable);return}
+		if len(parts) > 0 && len(parts[0]) == 36 {
+			reverse, err := db.IsReverseHost(r.Context(), parts[0])
+			if err != nil {
+				http.Error(w, "无法校验主机接入模式", http.StatusServiceUnavailable)
+				return
+			}
 			if reverse {
-				jsonReply(w,http.StatusForbidden,map[string]string{
-					"code":"reverse_host_preinstall_only",
-					"message":"临时主机仅允许预安装或主动剔除，不能使用直连管理接口",
+				jsonReply(w, http.StatusForbidden, map[string]string{
+					"code":    "reverse_host_preinstall_only",
+					"message": "临时主机仅允许预安装或主动剔除，不能使用直连管理接口",
 				})
 				return
 			}
