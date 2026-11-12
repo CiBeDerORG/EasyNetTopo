@@ -13,6 +13,8 @@ const props = defineProps<{
   busy: boolean
   ports?: DockerPort[]
   task?: ExecutionTask
+  temporary?: boolean
+  installLabel?: string
 }>()
 
 defineEmits<{
@@ -85,7 +87,7 @@ const resultLabel = computed(() => {
     <p class="product-desc">{{ app.summary || '暂无应用简介' }}</p>
 
     <div class="product-meta">
-      <el-tag v-if="installing || status?.state !== 'not_installed'" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+      <el-tag v-if="!temporary && (installing || status?.state !== 'not_installed')" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
       <span v-if="app.revision" class="revision">版本 {{ app.revision.slice(0, 12) }}</span>
       <span v-else class="revision">本机保留记录</span>
       <el-tooltip
@@ -127,7 +129,7 @@ const resultLabel = computed(() => {
     <div class="product-bottom">
       <div class="app-actions">
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
-          <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
+          <el-icon><Download /></el-icon>{{ installing ? '安装中' : installLabel || (status?.state === 'missing' ? '重新安装' : '安装') }}
         </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">
           <el-icon><Lightning /></el-icon>强制更新
