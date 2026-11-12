@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { buildMapTopology, linkCurveLanes, trafficRates } from '../src/features/network-map/topology.ts'
+import { buildMapTopology, curveSeparationMeters, linkCurveLanes, trafficRates } from '../src/features/network-map/topology.ts'
 
 const route = {
   node_info: { hostname: 'yun', peer_id: 100, inst_id: 'a', network_name: 'prod', ipv4_addr: '10.10.10.1' },
@@ -42,24 +42,45 @@ test('route 数据构建本机、P2P、中继及未知路由，且没有位置�
   assert.equal(graph.nodes[3].longitude, null)
 })
 
-test('同一节点发往相近方向的直连线路分配相反曲率，其他方向不受影响', () => {
+test('相近方向的直连线路按真实方位分配车道，不会因 key 排序颠倒', () => {
   const nodes = [
-    mapNode('source', 31, 118),
-    mapNode('target-a', 31.2, 121.2),
-    mapNode('target-b', 31.21, 121.25),
-    mapNode('target-c', 28, 121)
+    mapNode('source', 0, 0),
+    mapNode('target-north', 1, 10),
+    mapNode('target-south', -1, 10),
+    mapNode('target-other', 10, 0)
   ]
   const links = [
-    mapLink('direct-a', 'source', 'target-a'),
-    mapLink('direct-b', 'source', 'target-b'),
-    mapLink('other-direction', 'source', 'target-c')
+    { ...mapLink('north', 'source', 'target-north'), source: 'route' },
+    { ...mapLink('south', 'source', 'target-south'), source: 'route' },
+    mapLink('other-direction', 'source', 'target-other')
   ]
   const lanes = linkCurveLanes(nodes, links)
-  const first = lanes.get('direct-a')
-  const second = lanes.get('direct-b')
-  assert.ok(first !== undefined && second !== undefined)
-  assert.equal(first, -second)
+  assert.equal(lanes.get('north'), -0.5)
+  assert.equal(lanes.get('south'), 0.5)
   assert.equal(lanes.has('other-direction'), false)
+})
+
+test('反向链路也保持相对于共同节点的地理车道顺序', () => {
+  const nodes = [
+    mapNode('source', 0, 0),
+    mapNode('target-north', 1, 10),
+    mapNode('target-south', -1, 10)
+  ]
+  const links = [
+    mapLink('north', 'source', 'target-north'),
+    mapLink('south-reversed', 'target-south', 'source')
+  ]
+  const lanes = linkCurveLanes(nodes, links)
+  assert.equal(lanes.get('north'), -0.5)
+  assert.equal(lanes.get('south-reversed'), -0.5)
+  // 乘以方向后，两条线相对于共同 source 的车道仍然是从北到南递增。
+  assert.ok((lanes.get('north') || 0) < -(lanes.get('south-reversed') || 0))
+})
+
+test('线路互斥距离随相机高度缩放，全球视角大、节点近景小', () => {
+  assert.equal(curveSeparationMeters(25_500_000), 240_000)
+  assert.equal(curveSeparationMeters(780_000), 7_800)
+  assert.equal(curveSeparationMeters(50_000), 900)
 })
 
 test('Peer Center 的真实直连优先级高于同一节点对的入口路由推断', () => {
