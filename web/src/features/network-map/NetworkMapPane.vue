@@ -155,7 +155,7 @@ function formatMs(value: number | null) {
       </div>
       <div class="map-layout">
         <div class="globe-area">
-          <GlobeMap ref="globeRef" :nodes="topology.nodes" :links="visibleLinks"
+          <GlobeMap :data-ready="routeQuery.isSuccess.value && attrsQuery.isSuccess.value" ref="globeRef" :nodes="topology.nodes" :links="visibleLinks"
             :basemap="basemap" :show-traffic="showTraffic"
             :selected-node-key="selectedNodeKey" :selected-link-key="selectedLinkKey"
             @node-click="selectNode" @link-click="selectLink" />
