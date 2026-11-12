@@ -4,10 +4,13 @@ import * as Cesium from 'cesium'
 import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { curveSeparationMeters, linkCurveLanes, type MapLink, type MapNode } from './topology'
 
+import { nodeViewRectangle, paddedCameraHeight } from './camera-fit'
+
 type Basemap = 'auto' | 'standard' | 'satellite' | 'dark'
 type Theme = 'light' | 'dark'
 
 const props = defineProps<{
+  dataReady: boolean
   nodes: MapNode[]
   links: MapLink[]
   basemap: Basemap
@@ -23,6 +26,7 @@ const activeTheme = ref<Theme>('dark')
 let viewer: Cesium.Viewer | null = null
 let themeObserver: MutationObserver | null = null
 let cancelled = false
+let initialViewFitted = false
 let tileFailureCount = 0
 let lastCurveSeparation = 0
 let cameraRedrawFrame: number | null = null
@@ -292,6 +296,23 @@ function redraw() {
     nodeEntities.set(node.key, entity)
   }
 }
+function fitInitialView() {
+  if (!viewer || viewer.isDestroyed() || initialViewFitted || !props.dataReady) return
+  const rectangle = nodeViewRectangle(props.nodes)
+  const canvas = viewer.scene.canvas
+  if (!rectangle || !canvas.clientWidth || !canvas.clientHeight) return
+  viewer.resize()
+  const destination = viewer.camera.getRectangleCameraCoordinates(rectangle)
+  if (!destination) return
+  const position = Cesium.Cartographic.fromCartesian(destination)
+  position.height = paddedCameraHeight(position.height, canvas.clientWidth, canvas.clientHeight)
+  initialViewFitted = true
+  viewer.camera.flyTo({
+    destination: Cesium.Cartesian3.fromRadians(position.longitude, position.latitude, position.height),
+    orientation: { heading: 0, pitch: -Math.PI / 2, roll: 0 },
+    duration: 1.3
+  })
+}
 function focusNode(key: string) {
   if (!viewer) return
   const entity = nodeEntities.get(key)
@@ -318,6 +339,7 @@ watch(() => [props.basemap, activeTheme.value], () => {
 })
 watch(() => [props.nodes, props.links, props.showTraffic, props.selectedNodeKey, props.selectedLinkKey],
   redraw, { deep: true })
+watch(() => [props.nodes, props.dataReady], fitInitialView, { deep: true, flush: 'post' })
 onMounted(() => {
   if (!globe.value) return
   activeTheme.value = readTheme()
@@ -361,6 +383,7 @@ onMounted(() => {
       attributes: true, attributeFilter: ['data-theme']
     })
     resetCamera()
+    fitInitialView()
   } catch (cause) {
     error.value = '3D 地球初始化失败，请检查 WebGL 和 Cesium 静态资源：' +
       (cause instanceof Error ? cause.message : '未知异常')
