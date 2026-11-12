@@ -101,13 +101,17 @@ func TestNetworkDataUsesPairedAgentAndRejectsMismatch(t *testing.T) {
 	calls := 0
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls++
-		if r.Method != "GET" || r.URL.Path != "/v1/adapters/easytier/node" || r.URL.Query().Get("resource_id") != "compose:easytier" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Controller-ID") != db.ControllerID() {
+		if r.Method != "GET" || (r.URL.Path != "/v1/adapters/easytier/node" && r.URL.Path != "/v1/adapters/easytier/peer-center") || r.URL.Query().Get("resource_id") != "compose:easytier" || r.Header.Get("Authorization") != "Bearer "+token || r.Header.Get("X-EHA-Controller-ID") != db.ControllerID() {
 			t.Error("查询未遵循配对和固定路径契约")
 		}
 		w.Header().Set("X-EHA-Agent-ID", agentID)
 		id := agentID
 		if mismatch {
 			id = "other"
+		}
+		if r.URL.Path == "/v1/adapters/easytier/peer-center" {
+			fmt.Fprintf(w, `{"agent_id":%q,"data":[{"node_id":"100","hostname":"yun","direct_peers":[{"node_id":"200","hostname":"fnos","latency_ms":17}]}]}`, id)
+			return
 		}
 		fmt.Fprintf(w, `{"agent_id":%q,"data":{"hostname":"yun","config":"secret"}}`, id)
 	}))
@@ -128,6 +132,10 @@ func TestNetworkDataUsesPairedAgentAndRejectsMismatch(t *testing.T) {
 	raw, err := svc.NetworkData(ctx, h.ID, "node")
 	if err != nil || !strings.Contains(string(raw), "yun") || strings.Contains(string(raw), "secret") {
 		t.Fatalf("采集失败或泄密: %v", err)
+	}
+	peerCenter, err := svc.NetworkData(ctx, h.ID, "peer-center")
+	if err != nil || calls != 2 || !strings.Contains(string(peerCenter), "direct_peers") || !strings.Contains(string(peerCenter), "fnos") {
+		t.Fatalf("Peer Center 查询失败或直连拓扑丢失: calls=%d err=%v data=%s", calls, err, string(peerCenter))
 	}
 	if _, err = svc.NetworkData(ctx, h.ID, "config"); err == nil {
 		t.Fatal("允许任意能力")
