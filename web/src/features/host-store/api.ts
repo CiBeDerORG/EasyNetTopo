@@ -142,3 +142,13 @@ export function acceptDiscoveredAgent(agentId: string) {
 export function revokeTemporaryHost(id: string) {
   return apiRequest<void>('/api/v1/reverse/hosts/' + encodeURIComponent(id), { method: 'DELETE' })
 }
+
+export function preinstallTemporary(hostId: string, payload: AppRef & {
+  revision: string
+  config: Record<string, string>
+}) {
+  return apiRequest<{ accepted: boolean; tasks: ExecutionTask[] }>(
+    '/api/v1/hosts/' + encodeURIComponent(hostId) + '/preinstall',
+    { method: 'POST', body: payload }
+  )
+}
