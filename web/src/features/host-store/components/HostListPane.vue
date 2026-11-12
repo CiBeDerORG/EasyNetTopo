@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
-import { Plus, Refresh, Search, Setting } from '@element-plus/icons-vue'
+import { Connection, Plus, Refresh, Search, Setting } from '@element-plus/icons-vue'
 import HostCard from './HostCard.vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { currentHostTask } from '../task-status'
@@ -18,6 +18,7 @@ defineEmits<{
   add: []
   refresh: []
   settings: []
+  discover: []
   edit: [host: Host]
   docker: [host: Host]
   delete: [host: Host]
@@ -47,6 +48,11 @@ const filteredHosts = computed(() => {
         <el-tooltip content="刷新主机与应用状态" placement="top">
           <el-button class="glyph-btn" text circle :loading="refreshing" aria-label="刷新主机与应用状态" @click="$emit('refresh')">
             <el-icon><Refresh /></el-icon>
+          </el-button>
+        </el-tooltip>
+        <el-tooltip content="发现内网 EasyHostAgent" placement="top">
+          <el-button class="glyph-btn" text circle aria-label="发现内网主机" @click="$emit('discover')">
+            <el-icon><Connection /></el-icon>
           </el-button>
         </el-tooltip>
         <el-tooltip content="主机商店设置 · 应用源" placement="top">
