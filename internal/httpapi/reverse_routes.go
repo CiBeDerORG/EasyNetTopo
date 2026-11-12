@@ -195,9 +195,16 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			return
 		}
 		var req struct {
-			AgentID string `json:"agent_id"`
+			AgentID        string `json:"agent_id"`
+			Report         bool   `json:"report"`
+			Hostname       string `json:"hostname"`
+			SPKISHA256     string `json:"spki_sha256"`
+			Platform       string `json:"platform"`
+			Arch           string `json:"arch"`
+			Version        string `json:"version"`
+			CertificateDER string `json:"certificate_der"`
 		}
-		if !decode(w, r, &req, 2048) {
+		if !decode(w, r, &req, 24<<10) {
 			return
 		}
 		h, err := service.AuthenticateReverseTaskAgent(r.Context(), req.AgentID, token)
@@ -211,9 +218,21 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		}
 		active := service.TemporaryActive(h)
 		if active {
-			h, err = service.UpdateReversePoll(r.Context(), req.AgentID)
+			if req.Report {
+				cert, decodeErr := base64.StdEncoding.DecodeString(req.CertificateDER)
+				if decodeErr != nil {
+					jsonReply(w, http.StatusBadRequest, map[string]string{"code": "invalid_certificate", "message": "Agent 身份证书格式无效"})
+					return
+				}
+				h, err = service.UpdateReverseReport(r.Context(), storage.DiscoveredAgent{
+					AgentID: req.AgentID, Hostname: req.Hostname, SPKISHA256: req.SPKISHA256,
+					Platform: req.Platform, Arch: req.Arch, Version: req.Version,
+				}, cert)
+			} else {
+				h, err = service.UpdateReversePoll(r.Context(), req.AgentID)
+			}
 			if err != nil {
-				jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
+				jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或身份核验失败"})
 				return
 			}
 		}
