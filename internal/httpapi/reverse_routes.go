@@ -218,7 +218,7 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			}
 			if payload != nil {
 				taskValue = map[string]any{
-					"id": payload.Task.ID, "source_id": payload.Task.SourceID, "app_id": payload.Task.AppID,
+					"id": payload.Task.ID, "state": payload.Task.State, "source_id": payload.Task.SourceID, "app_id": payload.Task.AppID,
 					"action": payload.Task.Action, "revision": payload.Revision,
 					"bundle_sha256": payload.BundleSHA, "config": payload.Config,
 					"bundle_url": "/api/v1/agent/tasks/" + payload.Task.ID + "/bundle",
