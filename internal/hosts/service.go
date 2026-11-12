@@ -25,6 +25,7 @@ func NewService(ctx context.Context, db *storage.Store) (*Service, error) {
 	if err != nil {
 		return nil, err
 	}
+	if err := db.InitReverse(ctx); err != nil { return nil, err }
 	return &Service{db: db, hosts: store}, nil
 }
 func validateHostMetadata(name, endpoint string) (string, error) {
@@ -70,7 +71,12 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	defer s.pairingMu.Unlock()
 	return s.hosts.Delete(ctx, id)
 }
-func (s *Service) List(ctx context.Context) ([]storage.Host, error) { return s.hosts.List(ctx) }
+func (s *Service) List(ctx context.Context) ([]storage.Host, error) {
+	if err := s.db.ExpireReverse(ctx); err != nil { return nil, err }
+	all, err := s.hosts.List(ctx)
+	if err != nil { return nil, err }
+	return s.db.DecorateReverseHosts(ctx, all)
+}
 func (s *Service) Pair(ctx context.Context, id, agentID, pin, code string) (storage.Host, error) {
 	s.pairingMu.Lock()
 	defer s.pairingMu.Unlock()
