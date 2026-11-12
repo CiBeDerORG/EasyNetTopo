@@ -386,3 +386,47 @@ func (s *TaskStore) CancelExpiredTemporaryTasks(ctx context.Context) error {
 	}
 	return tx.Commit()
 }
+
+func (s *TaskStore) CancelRevokedTemporaryTasks(ctx context.Context, hostID string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	rows, err := tx.QueryContext(ctx, `SELECT DISTINCT parent_id FROM execution_tasks
+		WHERE host_id=? AND type='application' AND state IN ('queued','running')`, hostID)
+	if err != nil {
+		return err
+	}
+	parents := make([]string, 0)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		if id != "" {
+			parents = append(parents, id)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_tasks SET state='cancelled',message='临时主机已被管理员剔除',finished_at=?
+		WHERE host_id=? AND type='application' AND state='queued'`, now, hostID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE execution_tasks SET state='interrupted',message='临时主机已被管理员剔除；远端执行结果未知',finished_at=?
+		WHERE host_id=? AND type='application' AND state='running'`, now, hostID); err != nil {
+		return err
+	}
+	for _, parent := range parents {
+		if err := updateParentSummary(ctx, tx, parent, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
