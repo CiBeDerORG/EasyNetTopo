@@ -26,6 +26,14 @@ defineEmits<{
 }>()
 
 const search = ref('')
+function hostHealth(host: Host) {
+  if (host.id === props.selectedHostId) return props.selectedHealthStatus
+  if (host.host_type === 'temporary') {
+    const seen = host.last_seen_at ? new Date(host.last_seen_at).getTime() : 0
+    return seen && Date.now() - seen < 60_000 ? 'online' : 'error'
+  }
+  return host.agent_id ? 'paired' : 'unpaired'
+}
 const filteredHosts = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
   if (!query) return props.hosts
@@ -79,7 +87,7 @@ const filteredHosts = computed(() => {
         :host="host"
         :task="currentHostTask(tasks, host.id)"
         :selected="host.id === selectedHostId"
-        :health-status="host.id === selectedHostId ? selectedHealthStatus : host.agent_id ? 'paired' : 'unpaired'"
+        :health-status="hostHealth(host)"
         @select="$emit('select', $event.id)"
         @edit="$emit('edit', $event)"
         @docker="$emit('docker', $event)"
