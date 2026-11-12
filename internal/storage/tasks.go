@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"crypto/rand"
 	"database/sql"
 	"errors"
 	"fmt"
@@ -95,6 +96,28 @@ func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
 	}
 	keyPath := filepath.Join(store.DataDir(), ".agent-sealing-key")
 	keyInfo, err := os.Lstat(keyPath)
+	if errors.Is(err, os.ErrNotExist) {
+		fd, createErr := os.OpenFile(keyPath, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		if createErr != nil {
+			return nil, createErr
+		}
+		keyBytes := make([]byte, 32)
+		_, createErr = rand.Read(keyBytes)
+		if createErr == nil {
+			_, createErr = fd.Write(keyBytes)
+		}
+		if syncErr := fd.Sync(); createErr == nil {
+			createErr = syncErr
+		}
+		if closeErr := fd.Close(); createErr == nil {
+			createErr = closeErr
+		}
+		if createErr != nil {
+			_ = os.Remove(keyPath)
+			return nil, createErr
+		}
+		keyInfo, err = os.Lstat(keyPath)
+	}
 	if err != nil || !keyInfo.Mode().IsRegular() || keyInfo.Mode().Perm() != 0600 {
 		return nil, errors.New("反向任务密钥文件不可用")
 	}
