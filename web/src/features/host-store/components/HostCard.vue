@@ -6,6 +6,7 @@ import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
 const props = defineProps<{
   host: Host
+  now?: number
   selected: boolean
   healthStatus: HostHealthStatus
   task?: ExecutionTask
@@ -19,6 +20,13 @@ defineEmits<{
   network: [host: Host]
 }>()
 
+function countdown(target?: string) {
+  if (!target) return '—'
+  const diff = Math.max(0, Math.ceil((new Date(target).getTime() - (props.now || Date.now())) / 1000))
+  return String(Math.floor(diff / 60)).padStart(2, '0') + ':' + String(diff % 60).padStart(2, '0')
+}
+const reverseOnline = computed(() => props.host.host_type === 'temporary' &&
+  !!props.host.last_seen_at && (props.now || Date.now()) - new Date(props.host.last_seen_at).getTime() <= 30000)
 const statusLabel = computed(() => ({
   online: '已连接',
   checking: '检测中',
@@ -58,26 +66,32 @@ const statusType = computed(() => ({
     </div>
 
     <div class="host-bottom">
+      <div v-if="host.host_type === 'temporary'" class="temporary-countdowns">
+        <span>有效期 <strong>{{ countdown(host.expires_at) }}</strong></span>
+        <span>下次领取 <strong>{{ host.next_poll_at && new Date(host.next_poll_at).getTime() < (now || Date.now()) - 15000 ? '等待报到' : countdown(host.next_poll_at) }}</strong></span>
+      </div>
       <div class="host-tags">
-        <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+        <el-tag size="small" effect="dark" :type="host.host_type === 'temporary' ? reverseOnline ? 'success' : 'warning' : statusType">
+          {{ host.host_type === 'temporary' ? reverseOnline ? '临时 · 在线' : '临时 · 等待报到' : statusLabel }}
+        </el-tag>
         <el-tag v-if="host.network_entry" size="small" type="success">组网入口</el-tag>
         <el-tag v-if="host.agent_id" size="small" effect="plain" type="info">Agent</el-tag>
       </div>
       <div class="host-ops" @click.stop @keydown.stop>
-        <el-tooltip :content="host.network_entry ? '取消组网入口' : '设为组网入口'" placement="top">
+        <el-tooltip v-if="host.host_type !== 'temporary'" :content="host.network_entry ? '取消组网入口' : '设为组网入口'" placement="top">
           <el-button text circle size="small" :aria-label="host.network_entry ? '取消组网入口' : '设为组网入口'" :disabled="!host.agent_id" @click="$emit('network', host)"><el-icon><Connection /></el-icon></el-button>
         </el-tooltip>
-        <el-tooltip content="编辑主机" placement="top">
+        <el-tooltip v-if="host.host_type !== 'temporary'" content="编辑主机" placement="top">
           <el-button text circle size="small" aria-label="编辑主机" @click="$emit('edit', host)">
             <el-icon><Edit /></el-icon>
           </el-button>
         </el-tooltip>
-        <el-tooltip content="Docker 资源" placement="top">
+        <el-tooltip v-if="host.host_type !== 'temporary'" content="Docker 资源" placement="top">
           <el-button text circle size="small" aria-label="Docker 资源" :disabled="!host.agent_id" @click="$emit('docker', host)">
             <el-icon><Box /></el-icon>
           </el-button>
         </el-tooltip>
-        <el-tooltip content="删除主机" placement="top">
+        <el-tooltip :content="host.host_type === 'temporary' ? '主动剔除临时主机' : '删除主机'" placement="top">
           <el-button text circle size="small" class="delete-action" aria-label="删除主机" @click="$emit('delete', host)">
             <el-icon><Delete /></el-icon>
           </el-button>
@@ -148,4 +162,6 @@ const statusType = computed(() => ({
 .host-ops :deep(.el-button) { width: 27px; height: 27px; margin: 0; color: #82acc4; }
 .host-ops :deep(.el-button:hover) { background: #25516c77; color: var(--ent-cyan); }
 .host-ops :deep(.delete-action:hover) { background: #75293a55; color: var(--ent-red); }
+.temporary-countdowns { display: flex; gap: 12px; margin-top: 10px; font-size: 10px; color: #8daec6; }
+.temporary-countdowns strong { color: #f0c67b; font-variant-numeric: tabular-nums; }
 </style>
