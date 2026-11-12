@@ -353,3 +353,32 @@ func (s *HostStore) ReverseToken(ctx context.Context, agentID string) (string, e
 }
 
 func (s *HostStore) String() string { return fmt.Sprintf("HostStore(%d)", len(s.key)) }
+
+func (s *HostStore) UpdateAgentReport(ctx context.Context, item DiscoveredAgent, certificateDER []byte) (Host, error) {
+	if err := validAgentCertificate(item.AgentID, item.SPKISHA256, certificateDER); err != nil {
+		return Host{}, err
+	}
+	h, err := s.GetByAgentID(ctx, item.AgentID)
+	if err != nil {
+		return Host{}, err
+	}
+	if h.SPKISHA256 != item.SPKISHA256 {
+		return Host{}, ErrHostBinding
+	}
+	if !s.TemporaryActive(h) {
+		return Host{}, ErrTemporaryHostExpired
+	}
+	if item.Hostname == "" || len(item.Hostname) > 255 || item.Platform == "" || len(item.Platform) > 32 ||
+		item.Arch == "" || len(item.Arch) > 32 || len(item.Version) > 80 {
+		return Host{}, errors.New("Agent 主机信息无效")
+	}
+	now := time.Now().UTC()
+	_, err = s.store.db.ExecContext(ctx, `UPDATE hosts SET name=?,platform=?,arch=?,agent_version=?,last_seen_at=?,next_poll_at=?
+		WHERE agent_id=? AND connection_mode='reverse' AND host_type='temporary' AND revoked_at='' AND expires_at>?`,
+		item.Hostname, item.Platform, item.Arch, item.Version, now.Format(time.RFC3339Nano),
+		now.Add(10*time.Second).Format(time.RFC3339Nano), item.AgentID, now.Format(time.RFC3339Nano))
+	if err != nil {
+		return Host{}, err
+	}
+	return s.GetByAgentID(ctx, item.AgentID)
+}
