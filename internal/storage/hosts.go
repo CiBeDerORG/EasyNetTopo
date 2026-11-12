@@ -17,22 +17,22 @@ var ErrHostNotFound = errors.New("主机不存在")
 var ErrHostBinding = errors.New("主机已绑定其他 Agent 或身份指纹")
 
 type Host struct {
-	HostType string `json:"host_type,omitempty"`
+	HostType       string `json:"host_type,omitempty"`
 	ConnectionMode string `json:"connection_mode,omitempty"`
-	AcceptedAt string `json:"accepted_at,omitempty"`
-	ExpiresAt string `json:"expires_at,omitempty"`
-	LastSeenAt string `json:"last_seen_at,omitempty"`
-	NextPollAt string `json:"next_poll_at,omitempty"`
-	Platform string `json:"platform,omitempty"`
-	Arch string `json:"arch,omitempty"`
-	AgentVersion string `json:"agent_version,omitempty"`
-	NetworkEntry bool   `json:"network_entry"`
-	ID           string `json:"id"`
-	Name         string `json:"name"`
-	Endpoint     string `json:"endpoint"`
-	AgentID      string `json:"agent_id"`
-	SPKISHA256   string `json:"spki_sha256"`
-	PairedAt     string `json:"paired_at,omitempty"`
+	AcceptedAt     string `json:"accepted_at,omitempty"`
+	ExpiresAt      string `json:"expires_at,omitempty"`
+	LastSeenAt     string `json:"last_seen_at,omitempty"`
+	NextPollAt     string `json:"next_poll_at,omitempty"`
+	Platform       string `json:"platform,omitempty"`
+	Arch           string `json:"arch,omitempty"`
+	AgentVersion   string `json:"agent_version,omitempty"`
+	NetworkEntry   bool   `json:"network_entry"`
+	ID             string `json:"id"`
+	Name           string `json:"name"`
+	Endpoint       string `json:"endpoint"`
+	AgentID        string `json:"agent_id"`
+	SPKISHA256     string `json:"spki_sha256"`
+	PairedAt       string `json:"paired_at,omitempty"`
 }
 type HostStore struct {
 	store *Store
