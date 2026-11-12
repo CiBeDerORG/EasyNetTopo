@@ -122,6 +122,10 @@ func (s *Store) ExpireReverse(ctx context.Context) error {
 		if _, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state='cancelled',message='临时主机已到期或撤销',finished_at=? WHERE trigger_source='reverse_discovery' AND state='queued' AND host_id IN (SELECT host_id FROM reverse_agents WHERE status IN ('expired','revoked'))`, time.Now().UTC().Format(time.RFC3339Nano)); err != nil {
 			return err
 		}
+		if _, err = tx.ExecContext(ctx, `UPDATE reverse_jobs SET bundle=x'',config_sealed=x''
+			WHERE task_id IN (SELECT id FROM execution_tasks WHERE trigger_source='reverse_discovery' AND state='cancelled')`); err != nil {
+			return err
+		}
 	}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM hosts WHERE id IN (SELECT host_id FROM reverse_agents WHERE status IN ('expired','revoked') AND host_id<>'')"); err != nil {
 		return err
@@ -260,6 +264,8 @@ func (s *Store) RevokeReverse(ctx context.Context, hostID string) error {
 		time.Now().UTC().Format(time.RFC3339Nano), hostID); err != nil {
 		return err
 	}
+	if _, err = tx.ExecContext(ctx, `UPDATE reverse_jobs SET bundle=x'',config_sealed=x''
+		WHERE task_id IN (SELECT id FROM execution_tasks WHERE host_id=? AND trigger_source='reverse_discovery' AND state='cancelled')`,hostID);err!=nil {return err}
 	if _, err = tx.ExecContext(ctx, "DELETE FROM hosts WHERE id=?", hostID); err != nil {
 		return err
 	}
