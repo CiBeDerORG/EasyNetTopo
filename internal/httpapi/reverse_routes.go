@@ -181,7 +181,13 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		}
 		response := map[string]any{"status": state, "next_poll_seconds": 10}
 		if state == "accepted" {
+			host, hostErr := service.ReverseHost(req.AgentID)
+			if hostErr != nil {
+				jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "host_lookup_failed", "message": "读取已接受主机身份失败"})
+				return
+			}
 			response["controller_id"] = controllerID
+			response["host_id"] = host.ID
 			response["agent_token"] = agentToken
 		}
 		jsonReply(w, http.StatusOK, response)
@@ -257,7 +263,7 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			return
 		}
 		jsonReply(w, http.StatusOK, map[string]any{
-			"status": "accepted", "controller_id": db.ControllerID(),
+			"status": "accepted", "controller_id": db.ControllerID(), "host_id": h.ID,
 			"expires_at": h.ExpiresAt, "next_poll_at": h.NextPollAt,
 			"next_poll_seconds": 10, "task": taskValue,
 		})

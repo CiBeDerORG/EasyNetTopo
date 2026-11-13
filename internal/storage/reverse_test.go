@@ -2,6 +2,7 @@ package storage
 
 import (
 	"context"
+	"errors"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -66,6 +67,10 @@ func TestReverseDiscoveryAndPreinstallLifecycle(t *testing.T) {
 	if err != nil || !state.Enabled || len(token) != 64 {
 		t.Fatalf("open discovery state=%+v err=%v", state, err)
 	}
+	deadline, parseErr := time.Parse(time.RFC3339Nano, state.ExpiresAt)
+	if parseErr != nil || time.Until(deadline) > 5*time.Minute || time.Until(deadline) < 4*time.Minute {
+		t.Fatalf("bootstrap token should expire in five minutes: expires=%q err=%v", state.ExpiresAt, parseErr)
+	}
 	agentID, err := uuid()
 	if err != nil {
 		t.Fatal(err)
@@ -78,6 +83,18 @@ func TestReverseDiscoveryAndPreinstallLifecycle(t *testing.T) {
 	status, err := hosts.RegisterDiscovery(ctx, token, agent, der)
 	if err != nil || status != "pending" {
 		t.Fatalf("register discovery status=%q err=%v", status, err)
+	}
+	secondAgentID, err := uuid()
+	if err != nil {
+		t.Fatal(err)
+	}
+	secondDER, secondFingerprint := testReverseIdentity(t, secondAgentID)
+	_, secondErr := hosts.RegisterDiscovery(ctx, token, DiscoveredAgent{
+		AgentID: secondAgentID, Hostname: "second-node", SPKISHA256: secondFingerprint,
+		Platform: "linux", Arch: "amd64", Version: "test",
+	}, secondDER)
+	if !errors.Is(secondErr, ErrDiscoveryClosed) {
+		t.Fatalf("one bootstrap token must not enroll a second Agent: %v", secondErr)
 	}
 	if err := hosts.CloseDiscovery(ctx); err != nil {
 		t.Fatal(err)
@@ -93,6 +110,24 @@ func TestReverseDiscoveryAndPreinstallLifecycle(t *testing.T) {
 	status, err = hosts.RegisterDiscovery(ctx, token, agent, der)
 	if err != nil || status != "accepted" {
 		t.Fatalf("accepted rediscovery status=%q err=%v", status, err)
+	}
+	// A fresh Bootstrap Token re-pairs the same Agent and reuses its existing Host ID.
+	replacementToken, _, err := hosts.OpenDiscovery(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	status, err = hosts.RegisterDiscovery(ctx, replacementToken, agent, der)
+	if err != nil || status != "pending" {
+		t.Fatalf("re-pair discovery status=%q err=%v", status, err)
+	}
+	repaired, replacementAgentToken, err := hosts.AcceptDiscovery(ctx, agentID)
+	if err != nil || repaired.ID != h.ID || replacementAgentToken == agentToken {
+		t.Fatalf("re-pair should reuse host and rotate token: host=%+v err=%v", repaired, err)
+	}
+	h, agentToken = repaired, replacementAgentToken
+	status, err = hosts.RegisterDiscovery(ctx, replacementToken, agent, der)
+	if err != nil || status != "accepted" {
+		t.Fatalf("re-paired Agent rediscovery status=%q err=%v", status, err)
 	}
 	if _, err := hosts.UpdateAgentPoll(ctx, agentID, 10*time.Second); err != nil {
 		t.Fatalf("agent poll: %v", err)

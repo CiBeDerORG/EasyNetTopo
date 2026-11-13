@@ -139,7 +139,7 @@ async function startDiscovery() {
     discoveryState.value = result.discovery
     discoveryToken.value = result.bootstrap_token
     await refreshDiscovery()
-    ElMessage.success('主机发现已开启，有效期 30 分钟。请将接入凭据配置到内网 EasyHostAgent。')
+    ElMessage.success('已生成 5 分钟一次性 Token。请在目标主机执行 deploy.sh easyhostagent pair 并输入 Token。')
   } catch (error) {
     ElMessage.error('开启主机发现失败：' + errorMessage(error))
   } finally {
@@ -179,7 +179,7 @@ async function copyDiscoveryToken() {
   if (!discoveryToken.value) return
   try {
     await navigator.clipboard.writeText(discoveryToken.value)
-    ElMessage.success('接入凭据已复制。')
+    ElMessage.success('一次性 Token 已复制。')
   } catch {
     ElMessage.warning('复制失败，请手动选择凭据复制。')
   }
@@ -1020,7 +1020,7 @@ async function logout() {
     <el-dialog v-model="discoveryOpen" title="内网主机发现" width="min(720px, calc(100vw - 28px))" append-to-body>
       <div class="discovery-panel">
         <el-alert
-          title="开启后，内网 EasyHostAgent 会主动向当前 EasyNetTopo 报到。发现窗口有效期 30 分钟；加入临时主机后另行固定计时 30 分钟，不因心跳续期。"
+          title="开启后生成 5 分钟有效的一次性 Token，只允许一台新 Agent 领取。加入临时主机后另行固定计时 30 分钟，不因心跳续期。"
           type="info"
           :closable="false"
           show-icon
@@ -1035,8 +1035,8 @@ async function logout() {
         </div>
         <div v-if="discoveryToken" class="discovery-token">
           <div>
-            <strong>Agent 接入凭据</strong>
-            <p>请配置到内网主机的 EasyHostAgent；此凭据只在本次开启操作后展示，服务端仅保存摘要。</p>
+            <strong>一次性配对 Token</strong>
+            <p>在内网主机执行 <code>bash deploy.sh easyhostagent pair</code>，按提示输入此 Token。Token 仅用于首次接入，服务端只保存摘要。</p>
           </div>
           <el-input :model-value="discoveryToken" readonly />
           <el-button @click="copyDiscoveryToken">复制凭据</el-button>
@@ -1061,7 +1061,7 @@ async function logout() {
             </template>
           </el-table-column>
         </el-table>
-        <el-empty v-else description="暂无待确认主机。请先开启发现，并在内网 Agent 配置接入地址与凭据。" :image-size="76" />
+        <el-empty v-else description="暂无待确认主机。请先开启发现，并在内网主机执行 deploy.sh easyhostagent pair 输入 Token。" :image-size="76" />
       </div>
       <template #footer>
         <el-button @click="discoveryOpen = false">关闭</el-button>

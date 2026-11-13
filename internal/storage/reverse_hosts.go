@@ -118,7 +118,7 @@ func (s *HostStore) OpenDiscovery(ctx context.Context) (string, DiscoveryState, 
 	if err != nil {
 		return "", DiscoveryState{}, err
 	}
-	expires := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano)
+	expires := time.Now().UTC().Add(5 * time.Minute).Format(time.RFC3339Nano)
 	_, err = s.store.db.ExecContext(ctx, `INSERT INTO agent_discovery_config(id,enabled,token_hash,expires_at)
 		VALUES(1,1,?,?) ON CONFLICT(id) DO UPDATE SET enabled=1,token_hash=excluded.token_hash,expires_at=excluded.expires_at`,
 		digest(token), expires)
@@ -171,26 +171,38 @@ func (s *HostStore) RegisterDiscovery(ctx context.Context, token string, item Di
 	if err := validAgentCertificate(item.AgentID, item.SPKISHA256, certificateDER); err != nil {
 		return "", err
 	}
+	if item.Hostname == "" || len(item.Hostname) > 255 || item.Platform == "" || len(item.Platform) > 32 ||
+		item.Arch == "" || len(item.Arch) > 32 || len(item.Version) > 80 {
+		return "", errors.New("Agent 主机信息无效")
+	}
+
 	nowTime := time.Now().UTC()
 	now := nowTime.Format(time.RFC3339Nano)
 	requestHash := digest(token)
+	tx, err := s.store.db.BeginTx(ctx, nil)
+	if err != nil {
+		return "", err
+	}
+	defer tx.Rollback()
 
-	// 新 Agent 必须使用当前发现窗口的 Bootstrap Token；已发现的 Agent
-	// 可以继续使用首次报到时的 Token，确保关闭/重新开启窗口不会切断待确认主机。
+	// Bootstrap Token 只能被一个新的 Agent 领取。已登记的同一 Agent
+	// 使用自己保存的摘要继续轮询，避免管理员关闭发现窗口后中断等待确认的主机。
 	var enabled int
 	var currentHash, expires string
 	globalAllowed := false
-	if err := s.store.db.QueryRowContext(ctx, `SELECT enabled,token_hash,expires_at FROM agent_discovery_config WHERE id=1`).
+	if err := tx.QueryRowContext(ctx, `SELECT enabled,token_hash,expires_at FROM agent_discovery_config WHERE id=1`).
 		Scan(&enabled, &currentHash, &expires); err == nil {
 		deadline, parseErr := time.Parse(time.RFC3339Nano, expires)
 		globalAllowed = parseErr == nil && enabled == 1 && nowTime.Before(deadline) &&
 			subtle.ConstantTimeCompare([]byte(currentHash), []byte(requestHash)) == 1
+	} else if !errors.Is(err, sql.ErrNoRows) {
+		return "", err
 	}
 
-	var existingPin, status, existingTokenHash, firstSeen string
-	err := s.store.db.QueryRowContext(ctx, `SELECT spki_sha256,status,bootstrap_token_hash,first_seen_at
+	var existingPin, status, existingTokenHash, firstSeen, hostID string
+	err = tx.QueryRowContext(ctx, `SELECT spki_sha256,status,bootstrap_token_hash,first_seen_at,host_id
 		FROM agent_discoveries WHERE agent_id=?`, item.AgentID).
-		Scan(&existingPin, &status, &existingTokenHash, &firstSeen)
+		Scan(&existingPin, &status, &existingTokenHash, &firstSeen, &hostID)
 	existing := err == nil
 	if existing && existingPin != item.SPKISHA256 {
 		return "", ErrHostBinding
@@ -203,27 +215,45 @@ func (s *HostStore) RegisterDiscovery(ctx context.Context, token string, item Di
 	if !globalAllowed && !existingAllowed {
 		return "", ErrDiscoveryClosed
 	}
-	if item.Hostname == "" || len(item.Hostname) > 255 || item.Platform == "" || len(item.Platform) > 32 ||
-		item.Arch == "" || len(item.Arch) > 32 || len(item.Version) > 80 {
-		return "", errors.New("Agent 主机信息无效")
+
+	newStatus, newHostID := "pending", ""
+	if existingAllowed {
+		newStatus, newHostID = status, hostID
+	} else {
+		// Compare-and-consume inside the same transaction prevents two new Agents
+		// from claiming the same Bootstrap Token concurrently.
+		res, err := tx.ExecContext(ctx, `UPDATE agent_discovery_config
+			SET enabled=0,token_hash='',expires_at=''
+			WHERE id=1 AND enabled=1 AND token_hash=? AND expires_at>?`, requestHash, now)
+		if err != nil {
+			return "", err
+		}
+		claimed, err := res.RowsAffected()
+		if err != nil {
+			return "", err
+		}
+		if claimed != 1 {
+			return "", ErrDiscoveryClosed
+		}
 	}
 	if !existing {
 		firstSeen = now
 	}
-	_, err = s.store.db.ExecContext(ctx, `INSERT INTO agent_discoveries
-		(agent_id,hostname,spki_sha256,certificate_der,platform,arch,version,first_seen_at,last_seen_at,status,bootstrap_token_hash)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?)
+	_, err = tx.ExecContext(ctx, `INSERT INTO agent_discoveries
+		(agent_id,hostname,spki_sha256,certificate_der,platform,arch,version,first_seen_at,last_seen_at,status,host_id,bootstrap_token_hash)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(agent_id) DO UPDATE SET hostname=excluded.hostname,certificate_der=excluded.certificate_der,
 		platform=excluded.platform,arch=excluded.arch,version=excluded.version,last_seen_at=excluded.last_seen_at,
-		bootstrap_token_hash=CASE WHEN agent_discoveries.bootstrap_token_hash='' THEN excluded.bootstrap_token_hash ELSE agent_discoveries.bootstrap_token_hash END`,
-		item.AgentID, item.Hostname, item.SPKISHA256, certificateDER, item.Platform, item.Arch, item.Version, firstSeen, now, "pending", requestHash)
+		status=excluded.status,host_id=excluded.host_id,bootstrap_token_hash=excluded.bootstrap_token_hash`,
+		item.AgentID, item.Hostname, item.SPKISHA256, certificateDER, item.Platform, item.Arch, item.Version,
+		firstSeen, now, newStatus, newHostID, requestHash)
 	if err != nil {
 		return "", err
 	}
-	if status == "accepted" {
-		return "accepted", nil
+	if err := tx.Commit(); err != nil {
+		return "", err
 	}
-	return "pending", nil
+	return newStatus, nil
 }
 
 func (s *HostStore) ListDiscoveries(ctx context.Context) ([]DiscoveredAgent, error) {
