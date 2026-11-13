@@ -63,6 +63,9 @@ func Open(path string) (*Store, error) {
 			return fail(err)
 		}
 	}
+	if err := ensureNodeAttributeHostname(db); err != nil {
+		return fail(fmt.Errorf("迁移网络节点原始主机名字段失败: %w", err))
+	}
 	if err := os.Chmod(path, 0600); err != nil {
 		return fail(err)
 	}
