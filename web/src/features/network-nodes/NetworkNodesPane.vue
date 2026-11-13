@@ -39,14 +39,19 @@ const attributesQuery = useQuery({
 })
 const attributesByKey = computed(() => new Map<string, NodeAttributes>((attributesQuery.data.value?.attributes || [])
   .map(attr => [attr.network_key + '|' + attr.peer_id, attr] as const)))
+const attributesByHostname = computed(() => new Map<string, NodeAttributes>((attributesQuery.data.value?.attributes || [])
+  .filter(attr => attr.hostname)
+  .map(attr => [attr.network_key + '|' + attr.hostname!.toLocaleLowerCase(), attr] as const)))
 function getAttributes(row: NetworkRow): NodeAttributes | undefined {
-  return attributesByKey.value.get(networkNodeAttributeKey(row, hostId.value) + '|' + row.id)
+  const scope = networkNodeAttributeKey(row, hostId.value)
+  return (row.rawHostname ? attributesByHostname.value.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
+    || attributesByKey.value.get(scope + '|' + row.id)
 }
 const editorOpen = ref(false)
 const editorSaving = ref(false)
 const locationLookingUp = ref(false)
 const editingRow = ref<NetworkRow | null>(null)
-const draft = ref<NodeAttributes>({ network_key: '', peer_id: '', alias: '', has_public_ip: false, public_ip: '',
+const draft = ref<NodeAttributes>({ network_key: '', peer_id: '', hostname: '', alias: '', has_public_ip: false, public_ip: '',
   location: { country: '', province: '', city: '', county: '', latitude: null, longitude: null } })
 const latitudeText = ref('')
 const longitudeText = ref('')
@@ -59,6 +64,9 @@ function editAttributes(row: NetworkRow) {
     has_public_ip: false, public_ip: '',
     location: { country: '', province: '', city: '', county: '', latitude: null, longitude: null }
   }
+  // 手工属性永远与当前观测的 Peer ID 绑定，原始 hostname 用于后续稳定识别。
+  draft.value.peer_id = row.id
+  draft.value.hostname = row.rawHostname || ''
   latitudeText.value = draft.value.location.latitude == null ? '' : String(draft.value.location.latitude)
   longitudeText.value = draft.value.location.longitude == null ? '' : String(draft.value.location.longitude)
   editorOpen.value = true
