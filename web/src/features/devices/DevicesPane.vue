@@ -109,9 +109,13 @@ const liveNodeOptions = computed<LiveNodeOption[]>(() => (nodesQuery.data.value?
 const nodeOptions = computed<NodeOption[]>(() => {
   const result: NodeOption[] = [...liveNodeOptions.value]
   const seen = new Set(result.map(node => node.networkKey + '|' + node.peerId))
+  const liveHostnames = new Set(liveNodeOptions.value
+    .filter(node => node.row.hostname && node.row.hostname !== '—')
+    .map(node => node.networkKey + '|' + node.row.hostname.toLocaleLowerCase()))
   for (const device of nodeDevicesQuery.data.value || []) {
     const key = (device.network_key || '') + '|' + (device.peer_id || '')
-    if (!device.network_key || !device.peer_id || seen.has(key)) continue
+    if (!device.network_key || !device.peer_id || seen.has(key) ||
+      (device.node_hostname && liveHostnames.has(device.network_key + '|' + device.node_hostname.toLocaleLowerCase()))) continue
     seen.add(key)
     result.push({
       networkKey: device.network_key, peerId: device.peer_id, label: device.name,
@@ -517,7 +521,9 @@ function networkNodeDeviceInputs(): NetworkNodeDeviceInput[] {
   return liveNodeOptions.value.map(node => ({
     name: uniqueNodeDeviceName(node, used),
     network_key: node.networkKey,
-    peer_id: node.peerId
+    peer_id: node.peerId,
+    hostname: node.row.hostname !== '—' && !node.row.hostname.startsWith('节点 #')
+      ? node.row.hostname : ''
   }))
 }
 async function runNetworkNodeSync(showMessage: boolean) {
@@ -533,10 +539,11 @@ async function runNetworkNodeSync(showMessage: boolean) {
     await Promise.all([
       queryClient.invalidateQueries({ queryKey: ['devices'] }),
       queryClient.invalidateQueries({ queryKey: ['device-node-devices'] }),
-      queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] })
+      queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] }),
+      queryClient.invalidateQueries({ queryKey: ['network-node-attributes'] })
     ])
     if (showMessage) {
-      ElMessage.success('网络节点同步完成：新增 ' + result.created + ' 台，已存在 ' + result.existing + ' 台，跳过已删除 ' + result.skipped + ' 台；新节点自动补充已开启')
+      ElMessage.success('网络节点同步完成：新增 ' + result.created + ' 台，已存在 ' + result.existing + ' 台，重新关联 ' + result.rebound + ' 台，跳过已删除 ' + result.skipped + ' 台；新节点自动补充已开启')
     }
   } catch (error) {
     if (showMessage) ElMessage.error(formatApiError(error))
