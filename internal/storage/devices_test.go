@@ -548,6 +548,56 @@ func TestNetworkNodeHostnameLegacyMigrationAndAmbiguityGuards(t *testing.T) {
 	}
 }
 
+func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-duplicates.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先模拟旧版同步：原始主机名没有独立保存，Peer ID 改变后产生多余的节点壳。
+	old := []NetworkNodeDeviceInput{{Name: "FnOS", NetworkKey: "network:home", PeerID: "old"}}
+	if _, err := store.SyncNetworkNodeDevices(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("初始化旧节点失败: %+v %v", nodes, err)
+	}
+	originalID := nodes[0].ID
+	child, err := store.CreateDevice(ctx, DeviceInput{Name: "旧节点的下挂设备", NetworkKey: "network:home", PeerID: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "FnOS · 网络节点", NetworkKey: "network:home", PeerID: "new"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err = store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("未模拟出历史重复节点: %+v %v", nodes, err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "任意展示别名", NetworkKey: "network:home", PeerID: "new", Hostname: "FnOS"},
+	})
+	if err != nil || result.Rebound != 1 {
+		t.Fatalf("未回收空白重复节点并沿用原历史设备: %+v %v", result, err)
+	}
+	nodes, err = store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].ID != originalID || nodes[0].PeerID != "new" {
+		t.Fatalf("原历史节点 ID 未保留: %+v %v", nodes, err)
+	}
+	c, err := store.Device(ctx, child.ID)
+	if err != nil || c.PeerID != "new" {
+		t.Fatalf("原有子设备丢失: %+v %v", c, err)
+	}
+}
+
 func TestClearDeviceDataIsScopedAndDisablesAutomaticNodeSync(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()
