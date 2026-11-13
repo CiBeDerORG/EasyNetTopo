@@ -29,6 +29,8 @@ import {
   logout as logoutApi,
   pairHost as pairHostApi,
   preinstallTemporary,
+  promoteTemporaryHost,
+  setEasyTierConfigURL,
   revokeTemporaryHost,
   queueNativeAgentUpdate,
   refreshSource,
@@ -601,6 +603,58 @@ async function pairHost(payload: { agent_id: string; spki_sha256: string; pairin
   }
 }
 
+async function configureEasyTierWeb() {
+  const host = selectedHost.value
+  if (!host) return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '填写 EasyTier Web Console 的 HTTP/HTTPS 地址，供应用卡片的“前往 Config 配网”使用。它不是 udp://...:7008/admin 配置下发地址，清空则移除快捷入口。',
+      '设置 EasyTier Config 地址',
+      {
+        inputValue: host.easytier_config_url || '',
+        inputPlaceholder: '例如 https://easytier.example.com:7007',
+        inputValidator: value => !value || /^https?:\/\/\S+$/.test(value) || '请输入 HTTP/HTTPS Web 地址',
+        confirmButtonText: '保存地址',
+        cancelButtonText: '取消'
+      }
+    )
+    await setEasyTierConfigURL(host.id, value.trim())
+    await queryClient.invalidateQueries({ queryKey: ['hosts'] })
+    await data.hostsQuery.refetch()
+    ElMessage.success(value.trim() ? 'EasyTier Config 地址已保存，可从应用卡片直接打开。' : '已清除 EasyTier Config 快捷入口。')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('保存 Config 地址失败：' + errorMessage(error))
+    }
+  }
+}
+
+async function promoteHost(host: Host) {
+  if (host.connection_mode !== 'reverse') return
+  try {
+    const { value } = await ElMessageBox.prompt(
+      '请先在 EasyTier Config 管理页面完成组网，确认主机已获得组网 IP 后录入。录入后立即转为正式主机，随后自动验证直连身份和授权。',
+      '录入 EasyTier 组网 IP',
+      {
+        inputPlaceholder: '例如 10.126.0.8',
+        inputPattern: /^[0-9a-fA-F:.]{3,64}$/,
+        inputErrorMessage: '请填写 IPv4 或 IPv6 组网地址',
+        confirmButtonText: '录入并转正',
+        cancelButtonText: '取消'
+      }
+    )
+    const result = await promoteTemporaryHost(host.id, value.trim())
+    await queryClient.invalidateQueries({ queryKey: ['hosts'] })
+    await data.hostsQuery.refetch()
+    ui.selectHost(result.host.id)
+    ElMessage.success('已转为正式主机。Agent 正在切换组网监听，直连校验通过后自动启用完整管理。')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') {
+      ElMessage.error('主机转正失败：' + errorMessage(error))
+    }
+  }
+}
+
 async function removeHost(host: Host) {
   const temporary = host.host_type === 'temporary'
   const warning = temporary
@@ -742,6 +796,10 @@ async function runAppAction(
   const host = selectedHost.value
   if (!host?.agent_id) {
     ElMessage.warning('请先选择并配对一台主机。')
+    return
+  }
+  if (host.host_type === 'permanent' && host.connection_mode === 'reverse') {
+    ElMessage.warning('该主机已转正，正在等待 EasyTier 组网直连鉴权；完成后才能管理应用。')
     return
   }
   const key = appKey(app)
@@ -988,6 +1046,7 @@ async function logout() {
           @docker="openDocker"
           @delete="removeHost"
           @network="toggleNetworkEntry"
+          @promote="promoteHost"
         />
         <StorePane
           :host="selectedHost"
@@ -1012,6 +1071,7 @@ async function logout() {
           @configure="openInstallConfig"
           @action="handleAppAction"
           @info="showAppInfo"
+          @easytier-config="configureEasyTierWeb"
           @resolve-task="resolveTask"
         />
       </div>

@@ -23,6 +23,7 @@ defineEmits<{
   docker: [host: Host]
   delete: [host: Host]
   network: [host: Host]
+  promote: [host: Host]
 }>()
 
 const search = ref('')
@@ -92,6 +93,7 @@ const filteredHosts = computed(() => {
         @edit="$emit('edit', $event)"
         @docker="$emit('docker', $event)"
         @network="$emit('network', $event)"
+        @promote="$emit('promote', $event)"
         @delete="$emit('delete', $event)"
       />
       <el-empty v-if="filteredHosts.length === 0" :description="hosts.length ? '没有匹配的主机' : '尚未添加主机'" :image-size="76">

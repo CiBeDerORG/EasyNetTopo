@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"net/http"
 	"net/url"
 	"strings"
@@ -154,6 +155,8 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			Arch           string `json:"arch"`
 			Version        string `json:"version"`
 			CertificateDER string `json:"certificate_der"`
+			ListenPort     int    `json:"listen_port"`
+			Transport      string `json:"transport"`
 		}
 		if !decode(w, r, &req, 24<<10) {
 			return
@@ -166,6 +169,7 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		state, controllerID, agentToken, err := service.RegisterDiscovery(r.Context(), token, storage.DiscoveredAgent{
 			AgentID: req.AgentID, Hostname: req.Hostname, SPKISHA256: req.SPKISHA256,
 			Platform: req.Platform, Arch: req.Arch, Version: req.Version,
+			ListenPort: req.ListenPort, Transport: req.Transport,
 		}, cert)
 		if errors.Is(err, storage.ErrDiscoveryClosed) {
 			jsonReply(w, http.StatusForbidden, map[string]string{"code": "discovery_closed", "message": "主机发现未开启或已过期"})
@@ -181,7 +185,7 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 		}
 		response := map[string]any{"status": state, "next_poll_seconds": 10}
 		if state == "accepted" {
-			host, hostErr := service.ReverseHost(req.AgentID)
+			host, hostErr := service.ReverseHost(r.Context(), req.AgentID)
 			if hostErr != nil {
 				jsonReply(w, http.StatusServiceUnavailable, map[string]string{"code": "host_lookup_failed", "message": "读取已接受主机身份失败"})
 				return
@@ -201,19 +205,23 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			return
 		}
 		var req struct {
-			AgentID        string `json:"agent_id"`
-			Report         bool   `json:"report"`
-			Hostname       string `json:"hostname"`
-			SPKISHA256     string `json:"spki_sha256"`
-			Platform       string `json:"platform"`
-			Arch           string `json:"arch"`
-			Version        string `json:"version"`
-			CertificateDER string `json:"certificate_der"`
+			AgentID           string `json:"agent_id"`
+			Report            bool   `json:"report"`
+			Hostname          string `json:"hostname"`
+			SPKISHA256        string `json:"spki_sha256"`
+			Platform          string `json:"platform"`
+			Arch              string `json:"arch"`
+			Version           string `json:"version"`
+			CertificateDER    string `json:"certificate_der"`
+			ListenPort        int    `json:"listen_port"`
+			Transport         string `json:"transport"`
+			PromotionEndpoint string `json:"promotion_endpoint"`
+			PromotionReady    bool   `json:"promotion_ready"`
 		}
 		if !decode(w, r, &req, 24<<10) {
 			return
 		}
-		h, err := service.AuthenticateReverseTaskAgent(r.Context(), req.AgentID, token)
+		h, verified, err := service.AuthenticateReversePollAgent(r.Context(), req.AgentID, token)
 		if errors.Is(err, storage.ErrTemporaryHostExpired) {
 			jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或已撤销"})
 			return
@@ -222,8 +230,15 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			jsonReply(w, http.StatusUnauthorized, map[string]string{"code": "unauthorized", "message": "Agent 身份或授权无效"})
 			return
 		}
+		if verified {
+			jsonReply(w, http.StatusOK, map[string]any{
+				"status": "promoted", "controller_id": db.ControllerID(), "host_id": h.ID,
+				"promotion_endpoint": h.Endpoint, "promoted": true, "next_poll_seconds": 60,
+			})
+			return
+		}
 		active := service.TemporaryActive(h)
-		if active {
+		if active || (h.HostType == "permanent" && h.ConnectionMode == "reverse") {
 			if req.Report {
 				cert, decodeErr := base64.StdEncoding.DecodeString(req.CertificateDER)
 				if decodeErr != nil {
@@ -233,6 +248,7 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 				h, err = service.UpdateReverseReport(r.Context(), storage.DiscoveredAgent{
 					AgentID: req.AgentID, Hostname: req.Hostname, SPKISHA256: req.SPKISHA256,
 					Platform: req.Platform, Arch: req.Arch, Version: req.Version,
+					ListenPort: req.ListenPort, Transport: req.Transport,
 				}, cert)
 			} else {
 				h, err = service.UpdateReversePoll(r.Context(), req.AgentID)
@@ -241,6 +257,26 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 				jsonReply(w, http.StatusGone, map[string]string{"code": "temporary_host_expired", "message": "临时主机已过期或身份核验失败"})
 				return
 			}
+		}
+		if h.HostType == "permanent" && h.ConnectionMode == "reverse" && h.Endpoint != "" {
+			if req.PromotionReady && req.PromotionEndpoint == h.Endpoint {
+				promoted, done, promoteErr := service.CompletePromotion(r.Context(), req.AgentID, token)
+				if promoteErr == nil && done {
+					jsonReply(w, http.StatusOK, map[string]any{
+						"status": "promoted", "controller_id": db.ControllerID(), "host_id": promoted.ID,
+						"promotion_endpoint": promoted.Endpoint, "promoted": true, "next_poll_seconds": 60,
+					})
+					return
+				}
+				if promoteErr != nil {
+					slog.Warn("Agent 组网直连核验未通过", "agent_id", req.AgentID, "host_id", h.ID, "error", promoteErr)
+				}
+			}
+			jsonReply(w, http.StatusOK, map[string]any{
+				"status": "accepted", "controller_id": db.ControllerID(), "host_id": h.ID,
+				"promotion_endpoint": h.Endpoint, "promoted": false, "next_poll_seconds": 10,
+			})
+			return
 		}
 		var taskValue any
 		if taskSvc != nil {
@@ -268,6 +304,74 @@ func reverseRoutes(mux *http.ServeMux, db *storage.Store, service *hosts.Service
 			"next_poll_seconds": 10, "task": taskValue,
 		})
 	})
+	mux.HandleFunc("PUT /api/v1/hosts/{id}/easytier-config-url", func(w http.ResponseWriter, r *http.Request) {
+		if !admin(w, r) || !mutation(w, r) {
+			return
+		}
+		var req struct {
+			URL string `json:"url"`
+		}
+		if !decode(w, r, &req, 4096) {
+			return
+		}
+		host, err := service.SetEasyTierConfigURL(r.Context(), r.PathValue("id"), req.URL)
+		if errors.Is(err, storage.ErrHostNotFound) {
+			jsonReply(w, http.StatusNotFound, map[string]string{"code": "host_not_found", "message": "主机不存在"})
+			return
+		}
+		if err != nil {
+			jsonReply(w, http.StatusBadRequest, map[string]string{"code": "invalid_config_url", "message": err.Error()})
+			return
+		}
+		jsonReply(w, http.StatusOK, host)
+	})
+
+	// 输入组网 IP 立即转为正式主机；反向通道负责完成直连监听交接。
+	mux.HandleFunc("POST /api/v1/hosts/{id}/promote", func(w http.ResponseWriter, r *http.Request) {
+		if !admin(w, r) || !mutation(w, r) {
+			return
+		}
+		var req struct {
+			OverlayIP string `json:"overlay_ip"`
+		}
+		if !decode(w, r, &req, 2048) {
+			return
+		}
+		if taskSvc == nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{
+				"code": "promotion_unavailable", "message": "预安装任务服务尚未初始化"})
+			return
+		}
+		activeTasks, err := taskSvc.HasActiveTemporaryTasks(r.Context(), r.PathValue("id"))
+		if err != nil {
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{
+				"code": "task_check_failed", "message": "无法核验预安装任务状态"})
+			return
+		}
+		if activeTasks {
+			jsonReply(w, http.StatusConflict, map[string]string{
+				"code": "preinstall_running", "message": "请先等待所有预安装任务完成或关闭"})
+			return
+		}
+		host, err := service.RequestPromotion(r.Context(), r.PathValue("id"), req.OverlayIP)
+		switch {
+		case errors.Is(err, hosts.ErrInvalidOverlayIP):
+			jsonReply(w, http.StatusBadRequest, map[string]string{
+				"code": "invalid_overlay_ip", "message": "请输入有效的 EasyTier 组网 IP"})
+		case errors.Is(err, storage.ErrHostBinding):
+			jsonReply(w, http.StatusConflict, map[string]string{
+				"code": "overlay_ip_conflict", "message": "该组网管理地址已被其他主机使用"})
+		case errors.Is(err, storage.ErrTemporaryHostExpired):
+			jsonReply(w, http.StatusGone, map[string]string{
+				"code": "temporary_host_expired", "message": "主机已过期、撤销或不是有效的待转正主机"})
+		case err != nil:
+			jsonReply(w, http.StatusServiceUnavailable, map[string]string{
+				"code": "promotion_failed", "message": "录入组网 IP 失败"})
+		default:
+			jsonReply(w, http.StatusAccepted, map[string]any{"accepted": true, "host": host})
+		}
+	})
+
 	// 临时主机只允许通过预安装入口创建 install 任务；不会直接连接内网 Agent。
 	mux.HandleFunc("POST /api/v1/hosts/{id}/preinstall", func(w http.ResponseWriter, r *http.Request) {
 		if !admin(w, r) || !mutation(w, r) {

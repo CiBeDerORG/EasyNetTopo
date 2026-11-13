@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, onMounted, onUnmounted, ref } from 'vue'
-import { Box, Delete, Edit, Connection } from '@element-plus/icons-vue'
+import { Box, Delete, Edit, Connection, Link } from '@element-plus/icons-vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
@@ -17,6 +17,7 @@ defineEmits<{
   docker: [host: Host]
   delete: [host: Host]
   network: [host: Host]
+  promote: [host: Host]
 }>()
 
 const now = ref(Date.now())
@@ -66,7 +67,7 @@ const statusType = computed(() => ({
       <div class="host-emblem"><el-icon><Box /></el-icon></div>
       <div class="host-info">
         <div class="host-name">{{ host.name }}</div>
-        <div class="host-address">{{ host.connection_mode === 'reverse' ? '反向接入 · ' + (host.platform || '未知系统') + ' · ' + (host.arch || '未知架构') : host.endpoint }}</div>
+        <div class="host-address">{{ host.connection_mode === 'reverse' ? (host.endpoint || '反向接入 · ' + (host.platform || '未知系统') + ' · ' + (host.arch || '未知架构')) : host.endpoint }}</div>
       </div>
       <span class="status-dot" :class="'status-' + healthStatus"></span>
     </div>
@@ -75,15 +76,19 @@ const statusType = computed(() => ({
       <div class="host-tags">
         <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
         <el-tag v-if="host.host_type === 'temporary'" size="small" type="warning">临时主机</el-tag>
+        <el-tag v-else-if="host.connection_mode === 'reverse'" size="small" type="warning">已转正 · 连接中</el-tag>
         <el-tag v-if="host.network_entry" size="small" type="success">组网入口</el-tag>
         <el-tag v-if="host.agent_id" size="small" effect="plain" type="info">Agent</el-tag>
       </div>
       <div class="host-ops" @click.stop @keydown.stop>
+        <el-tooltip v-if="host.connection_mode === 'reverse'" :content="host.host_type === 'temporary' ? '录入 EasyTier 组网 IP，转为正式主机' : '修改待连接的 EasyTier 组网 IP'" placement="top">
+          <el-button text circle size="small" aria-label="录入组网 IP 并转正" @click="$emit('promote', host)"><el-icon><Link /></el-icon></el-button>
+        </el-tooltip>
         <el-tooltip :content="host.network_entry ? '取消组网入口' : '设为组网入口'" placement="top">
           <el-button text circle size="small" :aria-label="host.network_entry ? '取消组网入口' : '设为组网入口'" :disabled="!host.agent_id || host.connection_mode === 'reverse' || host.host_type === 'temporary'" @click="$emit('network', host)"><el-icon><Connection /></el-icon></el-button>
         </el-tooltip>
         <el-tooltip content="编辑主机" placement="top">
-          <el-button text circle size="small" aria-label="编辑主机" :disabled="host.host_type === 'temporary'" @click="$emit('edit', host)">
+          <el-button text circle size="small" aria-label="编辑主机" :disabled="host.connection_mode === 'reverse'" @click="$emit('edit', host)">
             <el-icon><Edit /></el-icon>
           </el-button>
         </el-tooltip>

@@ -36,6 +36,7 @@ defineEmits<{
   info: [app: CatalogApp]
   'resolve-task': [task: ExecutionTask]
   'agent-update': [action: AgentUpdateAction]
+  'easytier-config': []
 }>()
 
 function recovered(row: AppStatus): boolean {
@@ -53,6 +54,9 @@ const runningCount = computed(() => Object.values(statusByKey.value)
 const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + (props.host?.host_type === 'temporary' ? 0 : 1))
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
+  if (props.host?.host_type === 'permanent' && props.host.connection_mode === 'reverse') {
+    return { label: '已转正 · 等待组网直连', type: 'warning' as const }
+  }
   if (props.host?.host_type === 'temporary') {
     const seen = props.host.last_seen_at ? new Date(props.host.last_seen_at).getTime() : 0
     return seen && Date.now() - seen < 60_000
@@ -70,7 +74,7 @@ const agentState = computed(() => {
   return { label: '已配对', type: 'info' as const }
 })
 const showNativeAgent = computed(() =>
-  props.host?.host_type !== 'temporary' && (props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
+  props.host?.connection_mode !== 'reverse' && (props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
   props.filter === 'available' && !props.snapshot ||
   props.filter === 'update' && !!props.snapshot)
 )
@@ -78,6 +82,14 @@ function appPermissions(app: CatalogApp) {
   const row = statusByKey.value[appKey(app)]
   const platform = props.snapshot?.platform || props.host?.platform || ''
   const base = getAppPermissions(app, row, platform)
+  if (props.host?.host_type === 'permanent' && props.host.connection_mode === 'reverse') {
+    return {
+      ...base,
+      canInstall: false, canUpdate: false, canUninstall: false,
+      canAdopt: false, canForceUpdate: false,
+      blockReason: '等待 EasyTier 组网 IP 的直连身份与授权验证'
+    }
+  }
   if (props.host?.host_type !== 'temporary') return base
   return {
     ...base,
@@ -244,10 +256,12 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :permissions="appPermissions(app)"
           :temporary="host.host_type === 'temporary'"
           :install-label="host.host_type === 'temporary' ? '预安装' : undefined"
+          :config-url="app.app_id === 'easytier' ? host.easytier_config_url || '' : ''"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"
+          @config="$emit('easytier-config')"
           @resolve="cardTask(app) && $emit('resolve-task', cardTask(app)!)"
         />
       </div>

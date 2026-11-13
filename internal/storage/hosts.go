@@ -34,6 +34,9 @@ type Host struct {
 	Arch           string `json:"arch,omitempty"`
 	AgentVersion   string `json:"agent_version,omitempty"`
 	RevokedAt      string `json:"revoked_at,omitempty"`
+	ListenPort     int    `json:"listen_port,omitempty"`
+	Transport      string `json:"transport,omitempty"`
+	ETConfigURL    string `json:"easytier_config_url,omitempty"`
 }
 type HostStore struct {
 	store *Store
@@ -51,7 +54,9 @@ func NewHostStore(ctx context.Context, db *Store) (*HostStore, error) {
 			accepted_at TEXT NOT NULL DEFAULT '',expires_at TEXT NOT NULL DEFAULT '',
 			last_seen_at TEXT NOT NULL DEFAULT '',next_poll_at TEXT NOT NULL DEFAULT '',
 			platform TEXT NOT NULL DEFAULT '',arch TEXT NOT NULL DEFAULT '',
-			agent_version TEXT NOT NULL DEFAULT '',revoked_at TEXT NOT NULL DEFAULT ''
+			agent_version TEXT NOT NULL DEFAULT '',revoked_at TEXT NOT NULL DEFAULT '',
+			listen_port INTEGER NOT NULL DEFAULT 0,transport TEXT NOT NULL DEFAULT '',
+			easytier_config_url TEXT NOT NULL DEFAULT ''
 		)`,
 		"CREATE TABLE IF NOT EXISTS network_entries(host_id TEXT PRIMARY KEY REFERENCES hosts(id) ON DELETE CASCADE)",
 		"CREATE UNIQUE INDEX IF NOT EXISTS idx_agent_binding ON hosts(agent_id) WHERE agent_id <> ''",
@@ -118,13 +123,13 @@ func (s *HostStore) Create(ctx context.Context, name, endpoint string) (Host, er
 
 const hostSelectColumns = `id,name,endpoint,agent_id,spki_sha256,paired_at,
 	EXISTS(SELECT 1 FROM network_entries WHERE host_id=hosts.id),
-	connection_mode,host_type,accepted_at,expires_at,last_seen_at,next_poll_at,platform,arch,agent_version,revoked_at`
+	connection_mode,host_type,accepted_at,expires_at,last_seen_at,next_poll_at,platform,arch,agent_version,revoked_at,listen_port,transport,easytier_config_url`
 
 func scanHost(row interface{ Scan(...any) error }) (Host, error) {
 	var h Host
 	err := row.Scan(&h.ID, &h.Name, &h.Endpoint, &h.AgentID, &h.SPKISHA256, &h.PairedAt, &h.NetworkEntry,
 		&h.ConnectionMode, &h.HostType, &h.AcceptedAt, &h.ExpiresAt, &h.LastSeenAt, &h.NextPollAt,
-		&h.Platform, &h.Arch, &h.AgentVersion, &h.RevokedAt)
+		&h.Platform, &h.Arch, &h.AgentVersion, &h.RevokedAt, &h.ListenPort, &h.Transport, &h.ETConfigURL)
 	return h, err
 }
 
@@ -174,6 +179,17 @@ func (s *HostStore) UpdateMetadata(ctx context.Context, id, name, endpoint strin
 
 // Delete removes only this controller's local host registration and encrypted
 // credentials. It never contacts or deletes the remote Agent or its resources.
+func (s *HostStore) SetEasyTierConfigURL(ctx context.Context, hostID, address string) (Host, error) {
+	res, err := s.store.db.ExecContext(ctx, "UPDATE hosts SET easytier_config_url=? WHERE id=?", address, hostID)
+	if err != nil {
+		return Host{}, err
+	}
+	if n, err := res.RowsAffected(); err != nil || n == 0 {
+		return Host{}, ErrHostNotFound
+	}
+	return s.Get(ctx, hostID)
+}
+
 func (s *HostStore) Delete(ctx context.Context, id string) error {
 	result, err := s.store.db.ExecContext(ctx, "DELETE FROM hosts WHERE id=? AND host_type<>'temporary'", id)
 	if err != nil {

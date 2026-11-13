@@ -269,6 +269,14 @@ func (s *TaskStore) ListLatest(ctx context.Context) ([]Task, error) {
 	return result, rows.Err()
 }
 
+func (s *TaskStore) HasActiveTemporaryTasks(ctx context.Context, hostID string) (bool, error) {
+	var count int
+	err := s.db.QueryRowContext(ctx, `SELECT COUNT(*) FROM execution_tasks
+		WHERE host_id=? AND type='application' AND trigger_source='temporary_preinstall'
+		AND state IN ('queued','preparing','running','interrupted')`, hostID).Scan(&count)
+	return count > 0, err
+}
+
 func (s *TaskStore) PendingHosts(ctx context.Context) ([]string, error) {
 	// 独立任务存储不要求主机管理模块已初始化；正式运行时
 	// 有 hosts 表则跳过反向 Agent 任务，防止直连调度器重复执行。

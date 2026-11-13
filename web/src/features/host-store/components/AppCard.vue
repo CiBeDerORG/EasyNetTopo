@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
-import { Delete, Download, InfoFilled, Lightning, Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { Delete, Download, InfoFilled, Lightning, Refresh, Setting, WarningFilled } from '@element-plus/icons-vue'
 import { formatPublishedPort, uniquePublishedPorts } from '../ports'
 import type { AppAction, AppPermissions, AppStatus, CatalogApp, DockerPort, ExecutionTask } from '../types'
 import { formatTaskTime, formatTaskTriggerTime, taskActive, taskSourceLabel, taskStateLabel } from '../task-status'
@@ -15,6 +15,7 @@ const props = defineProps<{
   task?: ExecutionTask
   temporary?: boolean
   installLabel?: string
+  configUrl?: string
 }>()
 
 defineEmits<{
@@ -22,6 +23,7 @@ defineEmits<{
   action: [action: AppAction]
   info: []
   resolve: []
+  config: []
 }>()
 
 const logoText = computed(() => props.app.name.slice(0, 2).toUpperCase())
@@ -77,6 +79,11 @@ const resultLabel = computed(() => {
         <h4>{{ app.name }}</h4>
         <span>{{ categoryLabel }} · {{ sourceName }}</span>
       </div>
+      <el-tooltip v-if="app.app_id === 'easytier'" content="配置 EasyTier Web Config 页面地址" placement="top">
+        <el-button text circle size="small" aria-label="设置 EasyTier Config 地址" @click="$emit('config')">
+          <el-icon><Setting /></el-icon>
+        </el-button>
+      </el-tooltip>
       <el-tooltip content="应用信息" placement="top">
         <el-button text circle size="small" aria-label="应用信息" @click="$emit('info')">
           <el-icon><InfoFilled /></el-icon>
@@ -105,6 +112,13 @@ const resultLabel = computed(() => {
       <el-tag v-for="(port, index) in publishedPorts" :key="index" size="small" effect="plain" type="success">
         {{ formatPublishedPort(port) }}
       </el-tag>
+    </div>
+    <div v-if="app.app_id === 'easytier'" class="easytier-config">
+      <a v-if="configUrl" :href="configUrl" target="_blank" rel="noopener noreferrer">前往 EasyTier Config 配网</a>
+      <span v-else>尚未设置 Web Config 地址，请点击卡片右上角设置。</span>
+      <span v-if="task?.state === 'succeeded' && task.action === 'install'">
+        EasyTier 已安装，完成 Web 组网后录入组网 IP，即可转为正式主机。
+      </span>
     </div>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
     <div v-if="task" class="task-meta" role="status">
@@ -146,6 +160,8 @@ const resultLabel = computed(() => {
 </template>
 
 <style scoped>
+.easytier-config { display: flex; flex-wrap: wrap; gap: 8px; padding: 8px 10px; margin-top: 8px; border-radius: 8px; background: #17364a; color: #acc9e1; font-size: 11px; }
+.easytier-config a { color: #65d4f0; text-decoration: underline; }
 .product-card {
   display: flex;
   min-width: 0;

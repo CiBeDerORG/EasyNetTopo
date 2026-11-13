@@ -152,3 +152,17 @@ export function preinstallTemporary(hostId: string, payload: AppRef & {
     { method: 'POST', body: payload }
   )
 }
+
+export function promoteTemporaryHost(hostId: string, overlayIP: string) {
+  return apiRequest<{ accepted: boolean; host: Host }>(
+    '/api/v1/hosts/' + encodeURIComponent(hostId) + '/promote',
+    { method: 'POST', body: { overlay_ip: overlayIP } }
+  )
+}
+
+export function setEasyTierConfigURL(hostId: string, url: string) {
+  return apiRequest<Host>(
+    '/api/v1/hosts/' + encodeURIComponent(hostId) + '/easytier-config-url',
+    { method: 'PUT', body: { url } }
+  )
+}

@@ -19,6 +19,9 @@ export type Host = {
   arch?: string
   agent_version?: string
   revoked_at?: string
+  listen_port?: number
+  transport?: string
+  easytier_config_url?: string
 }
 export type HostHealthStatus = 'online' | 'checking' | 'error' | 'paired' | 'unpaired'
 

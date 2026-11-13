@@ -2,7 +2,6 @@ package storage
 
 import (
 	"context"
-	"errors"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
@@ -10,6 +9,7 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/hex"
+	"errors"
 	"math/big"
 	"path/filepath"
 	"testing"
@@ -175,5 +175,68 @@ func TestReverseDiscoveryAndPreinstallLifecycle(t *testing.T) {
 	}
 	if _, err := hosts.Get(ctx, direct.ID); err != nil {
 		t.Fatalf("direct permanent host must remain unchanged: %v", err)
+	}
+}
+
+func TestOverlayPromotionPreservesIdentityAndAuthorization(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "promotion.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	hosts, err := NewHostStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	agentID, err := uuid()
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, pin := testReverseIdentity(t, agentID)
+	token, _, err := hosts.OpenDiscovery(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = hosts.RegisterDiscovery(ctx, token, DiscoveredAgent{
+		AgentID: agentID, Hostname: "overlay-node", SPKISHA256: pin,
+		Platform: "linux", Arch: "amd64", Version: "test",
+		ListenPort: 7018, Transport: "https",
+	}, der)
+	if err != nil {
+		t.Fatal(err)
+	}
+	original, grant, err := hosts.AcceptDiscovery(ctx, agentID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if original.ListenPort != 7018 || original.Transport != "https" {
+		t.Fatalf("listen metadata not retained: %+v", original)
+	}
+	if _, err := hosts.SetEasyTierConfigURL(ctx, original.ID, "https://easytier.example.com:7007"); err != nil {
+		t.Fatal(err)
+	}
+	pending, err := hosts.SetPromotionEndpoint(ctx, original.ID, "https://10.126.0.8:7018")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pending.HostType != "permanent" || pending.ConnectionMode != "reverse" ||
+		pending.ExpiresAt != "" || pending.ID != original.ID {
+		t.Fatalf("record not immediately permanent: %+v", pending)
+	}
+	if _, err := hosts.UpdateAgentPoll(ctx, agentID, 10*time.Second); err != nil {
+		t.Fatalf("permanent reverse poll must survive handoff: %v", err)
+	}
+	direct, err := hosts.CompleteOverlayHandoff(ctx, original.ID, pending.Endpoint)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if direct.HostType != "permanent" || direct.ConnectionMode != "direct" || direct.ID != original.ID ||
+		direct.ETConfigURL != "https://easytier.example.com:7007" {
+		t.Fatalf("handoff failed: %+v", direct)
+	}
+	unchangedGrant, err := hosts.Credentials(ctx, direct)
+	if err != nil || unchangedGrant != grant || direct.SPKISHA256 != original.SPKISHA256 {
+		t.Fatalf("promotion replaced host identity or credentials: %v", err)
 	}
 }

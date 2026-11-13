@@ -514,6 +514,10 @@ func (s *Service) monitorNativeAgent(ctx context.Context, task storage.Task) {
 	}
 }
 
+func (s *Service) HasActiveTemporaryTasks(ctx context.Context, hostID string) (bool, error) {
+	return s.store.HasActiveTemporaryTasks(ctx, hostID)
+}
+
 func (s *Service) EnqueueTemporaryInstall(ctx context.Context, hostID, sourceID, appID, revision, digest string, config map[string]string, bundle []byte) ([]storage.Task, error) {
 	h, err := s.hosts.Get(ctx, hostID)
 	if err != nil {

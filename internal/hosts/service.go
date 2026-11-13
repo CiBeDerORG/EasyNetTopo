@@ -65,6 +65,25 @@ func (s *Service) Update(ctx context.Context, id, name, endpoint string) (storag
 
 // Delete only removes a local registration; it does not remove Docker resources
 // or revoke Agent grants remotely. Never turn this into a cascade deletion.
+// SetEasyTierConfigURL stores the human-facing EasyTier Web Config URL as
+// per-host display metadata, never as a Config Server address or Agent secret.
+func (s *Service) SetEasyTierConfigURL(ctx context.Context, hostID, value string) (storage.Host, error) {
+	value = strings.TrimSpace(value)
+	if len(value) > 500 || strings.ContainsAny(value, "\r\n\x00") {
+		return storage.Host{}, errors.New("EasyTier Web 配网页面地址无效")
+	}
+	if value != "" {
+		parsed, err := url.Parse(value)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Hostname() == "" || parsed.User != nil || parsed.Fragment != "" || parsed.RawQuery != "" {
+			return storage.Host{}, errors.New("EasyTier Config 必须是可通过浏览器访问的 HTTP 或 HTTPS 地址")
+		}
+	}
+	s.pairingMu.Lock()
+	defer s.pairingMu.Unlock()
+	return s.hosts.SetEasyTierConfigURL(ctx, hostID, value)
+}
+
 func (s *Service) Delete(ctx context.Context, id string) error {
 	s.pairingMu.Lock()
 	defer s.pairingMu.Unlock()
