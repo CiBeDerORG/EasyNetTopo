@@ -91,3 +91,39 @@ func TestDeleteNodeAttributesOnlyClearsNodeAttributeRecords(t *testing.T) {
 		t.Fatalf("清除节点属性误删设备: %+v %v", devices, err)
 	}
 }
+
+func TestNodeAttributesOriginalHostnameSurvivesPeerRotation(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "node-attributes.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	lat, lng := 30.5, 120.5
+	original := NodeAttributes{
+		NetworkKey: "network:home", PeerID: "old-peer", Hostname: "FnOS", Alias: "家用 NAS",
+		Location: NodeLocation{Latitude: &lat, Longitude: &lng},
+	}
+	if _, err = db.SaveNodeAttributes(ctx, original); err != nil {
+		t.Fatal(err)
+	}
+	original.PeerID = "new-peer"
+	if _, err = db.SaveNodeAttributes(ctx, original); err != nil {
+		t.Fatalf("相同原始 hostname 应当更新运行时 Peer ID: %v", err)
+	}
+	attributes, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attributes) != 1 || attributes[0].PeerID != "new-peer" ||
+		attributes[0].Hostname != "FnOS" || attributes[0].Alias != "家用 NAS" {
+		t.Fatalf("节点属性换绑后不应重复或丢失: %+v %v", attributes, err)
+	}
+	// 同网络内的相同原始主机名不应登记为两个不同身份。
+	if _, err = db.SaveNodeAttributes(ctx, NodeAttributes{
+		NetworkKey: "network:home", PeerID: "other-peer", Hostname: "fnos", Alias: "重复主机",
+	}); err == nil {
+		// 现有记录可以自动跟踪新的 Peer ID，但不能同时留下两个 hostname。
+		attributes, err = db.ListNodeAttributes(ctx)
+		if err != nil || len(attributes) != 1 || attributes[0].PeerID != "other-peer" {
+			t.Fatalf("同主机名换绑不应创建重复属性: %+v %v", attributes, err)
+		}
+	}
+}

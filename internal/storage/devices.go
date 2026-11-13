@@ -73,6 +73,7 @@ type Device struct {
 	Note                string   `json:"note,omitempty"`
 	NetworkKey          string   `json:"network_key,omitempty"`
 	PeerID              string   `json:"peer_id,omitempty"`
+	NodeHostname        string   `json:"node_hostname,omitempty"`
 	OpenWrtConfigured   bool     `json:"openwrt_configured"`
 	OpenWrtRPCDPort     int      `json:"openwrt_rpcd_port,omitempty"`
 	OpenWrtHTTPS        bool     `json:"openwrt_https,omitempty"`
@@ -104,11 +105,13 @@ type NetworkNodeDeviceInput struct {
 	Name       string `json:"name"`
 	NetworkKey string `json:"network_key"`
 	PeerID     string `json:"peer_id"`
+	Hostname   string `json:"hostname"` // EasyTier 原始主机名，不是显示名称或别名
 }
 
 type NetworkNodeSyncResult struct {
 	Created  int  `json:"created"`
 	Existing int  `json:"existing"`
+	Rebound  int  `json:"rebound"`
 	Skipped  int  `json:"skipped"`
 	Enabled  bool `json:"enabled"`
 }
@@ -186,6 +189,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	for _, column := range []struct{ name, definition string }{
 		{"semantic_kinds", `semantic_kinds TEXT NOT NULL DEFAULT '[]'`},
 		{"is_node_device", "is_node_device INTEGER NOT NULL DEFAULT 0"},
+		{"node_hostname", "node_hostname TEXT NOT NULL DEFAULT ''"},
 		{"is_gateway", "is_gateway INTEGER NOT NULL DEFAULT 0"},
 		{"gateway_group_id", "gateway_group_id TEXT REFERENCES device_gateway_groups(id) ON DELETE SET NULL"},
 	} {
@@ -219,6 +223,9 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	for _, stmt := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_node_device_unique
 			ON devices(network_key,peer_id) WHERE is_node_device=1 AND network_key<>'' AND peer_id<>''`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_node_hostname_unique
+			ON devices(network_key,node_hostname COLLATE NOCASE)
+			WHERE is_node_device=1 AND network_key<>'' AND node_hostname<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_node_scope
 			ON devices(network_key,peer_id,is_node_device,gateway_group_id)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_gateway_groups_gateway_device
@@ -585,7 +592,7 @@ func (s *DeviceStore) DeleteDeviceGroup(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(parent.name,gg.name,''),COALESCE(owned.id,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,
+const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(parent.name,gg.name,''),COALESCE(owned.id,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,d.node_hostname,
 	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at,
 	CASE
 		WHEN EXISTS(SELECT 1 FROM device_discovery_observations online_obs WHERE online_obs.device_id=d.id AND online_obs.status='online') THEN 'online'
@@ -606,7 +613,7 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var legacyIsOpenWrt bool
 	var semanticKinds string
 	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.GatewayGroupID, &v.GatewayGroupName, &v.OwnedGatewayGroupID, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
-		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID,
+		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID, &v.NodeHostname,
 		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt,
 		&v.DiscoveryStatus, &v.DiscoveryLastSeenAt)
 	if err != nil {
@@ -1200,6 +1207,80 @@ func (s *DeviceStore) SyncNetworkNodeDevicesIfEnabled(ctx context.Context, nodes
 	return s.syncNetworkNodeDevices(ctx, nodes, false)
 }
 
+// 运行时 Peer ID 轮换时迁移节点作用域；主键 ID、网关所有者与 OpenWrt 凭据保持不变。
+func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID, newPeerID, nodeDeviceID, hostname, now string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE devices SET peer_id=?,updated_at=?
+		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?`,
+		hostname, now, nodeDeviceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE device_gateway_groups SET peer_id=?,updated_at=?
+		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
+		WHERE network_key=? AND peer_id=? AND NOT EXISTS (
+			SELECT 1 FROM network_node_attributes WHERE network_key=? AND peer_id=?
+		)`, newPeerID, networkKey, oldPeerID, networkKey, newPeerID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
+		networkKey, newPeerID, now)
+	return err
+}
+
+// 历史版本未保存原始主机名，只允许唯一且名称完全一致的旧节点继承身份。
+func uniqueLegacyNodeTx(ctx context.Context, tx *sql.Tx, networkKey, hostname, excludeID string) (string, string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,peer_id FROM devices
+		WHERE is_node_device=1 AND network_key=? AND node_hostname='' AND name=? COLLATE NOCASE AND id<>?
+		LIMIT 2`, networkKey, hostname, excludeID)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+	var id, peerID string
+	count := 0
+	for rows.Next() {
+		count++
+		if err := rows.Scan(&id, &peerID); err != nil {
+			return "", "", err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	if count != 1 {
+		return "", "", nil
+	}
+	return id, peerID, nil
+}
+
+// 仅清理系统自动生成且完全没有下挂设备、网关、人工属性和管理配置的重复节点壳。
+func disposableDuplicateNodeTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, nodeID, hostname string) (bool, error) {
+	var name string
+	var disposable bool
+	err := tx.QueryRowContext(ctx, `SELECT name,
+		is_node_device=1 AND node_hostname='' AND is_gateway=0 AND group_id IS NULL AND gateway_group_id IS NULL
+		AND device_type='通用设备' AND semantic_kinds='[]'
+		AND manufacturer='' AND model='' AND ip_address='' AND mac_address='' AND note='' AND is_openwrt=0
+		AND NOT EXISTS(SELECT 1 FROM devices d WHERE d.network_key=? AND d.peer_id=? AND d.id<>?)
+		AND NOT EXISTS(SELECT 1 FROM device_gateway_groups g WHERE g.network_key=? AND g.peer_id=?)
+		AND NOT EXISTS(SELECT 1 FROM network_node_attributes a WHERE a.network_key=? AND a.peer_id=?)
+		AND NOT EXISTS(SELECT 1 FROM device_openwrt_configs c WHERE c.device_id=?)
+		AND NOT EXISTS(SELECT 1 FROM device_discovery_observations o WHERE o.device_id=? OR o.gateway_device_id=?)
+		FROM devices WHERE id=?`, networkKey, peerID, nodeID, networkKey, peerID, networkKey, peerID,
+		nodeID, nodeID, nodeID, nodeID).Scan(&name, &disposable)
+	if err != nil {
+		return false, err
+	}
+	isGeneratedName := strings.HasPrefix(strings.ToLower(name), strings.ToLower(hostname)+" · ") ||
+		strings.HasPrefix(strings.ToLower(name), strings.ToLower(hostname)+" (")
+	return disposable && isGeneratedName, nil
+}
+
 func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []NetworkNodeDeviceInput, enableAutoSync bool) (NetworkNodeSyncResult, error) {
 	if len(nodes) == 0 || len(nodes) > 500 {
 		return NetworkNodeSyncResult{}, ErrInvalidDevice
@@ -1228,6 +1309,22 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 	}
 	result := NetworkNodeSyncResult{Enabled: true}
 	now := time.Now().UTC().Format(time.RFC3339)
+	// 同一网络中原主机名应唯一，若一次观测出现不同 Peer ID，不自动合并两个真实设备。
+	incomingHosts := make(map[string]string, len(nodes))
+	for _, node := range nodes {
+		hostname := strings.TrimSpace(node.Hostname)
+		if len([]rune(hostname)) > 100 || strings.ContainsAny(hostname, "\r\n\x00") || hostname == "—" {
+			return NetworkNodeSyncResult{}, ErrInvalidDevice
+		}
+		if hostname == "" {
+			continue // 兼容旧版客户端，但不会使用展示名称推断主机身份
+		}
+		key := strings.TrimSpace(node.NetworkKey) + "\x00" + strings.ToLower(hostname)
+		if otherPeer, exists := incomingHosts[key]; exists && otherPeer != strings.TrimSpace(node.PeerID) {
+			return NetworkNodeSyncResult{}, ErrInvalidDevice
+		}
+		incomingHosts[key] = strings.TrimSpace(node.PeerID)
+	}
 	for _, node := range nodes {
 		input := DeviceInput{Name: node.Name, DeviceType: "通用设备", NetworkKey: node.NetworkKey, PeerID: node.PeerID}
 		if err := normalizeDevice(&input); err != nil {
@@ -1236,10 +1333,38 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		if input.NetworkKey == "" || input.PeerID == "" {
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
-		var existingID string
-		err := tx.QueryRowContext(ctx, "SELECT id FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID)
+		hostname := strings.TrimSpace(node.Hostname)
+		var existingID, oldHostname string
+		err := tx.QueryRowContext(ctx, "SELECT id,node_hostname FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID, &oldHostname)
 		if err == nil {
-			if _, err = tx.ExecContext(ctx, "UPDATE devices SET is_node_device=1,updated_at=? WHERE id=?", now, existingID); err != nil {
+			if hostname != "" && oldHostname == "" {
+				// 老版本可能已经为变动后的 Peer ID 创建了新节点壳；若它完全未使用，保留原有历史节点。
+				legacyID, legacyPeerID, lookupErr := uniqueLegacyNodeTx(ctx, tx, input.NetworkKey, hostname, existingID)
+				if lookupErr != nil {
+					return NetworkNodeSyncResult{}, lookupErr
+				}
+				if legacyID != "" {
+					disposable, checkErr := disposableDuplicateNodeTx(ctx, tx, input.NetworkKey, input.PeerID, existingID, hostname)
+					if checkErr != nil {
+						return NetworkNodeSyncResult{}, checkErr
+					}
+					if disposable {
+						if _, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", existingID); err != nil {
+							return NetworkNodeSyncResult{}, err
+						}
+						if err := rebindNetworkNodeTx(ctx, tx, input.NetworkKey, legacyPeerID, input.PeerID, legacyID, hostname, now); err != nil {
+							return NetworkNodeSyncResult{}, err
+						}
+						result.Rebound++
+						continue
+					}
+				}
+			}
+			// 以 Peer ID 确认同一节点时记录原始主机名，保留设备自定义名称与其他属性。
+			if hostname == "" {
+				hostname = oldHostname
+			}
+			if _, err = tx.ExecContext(ctx, "UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?", hostname, now, existingID); err != nil {
 				return NetworkNodeSyncResult{}, err
 			}
 			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {
@@ -1250,6 +1375,46 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		}
 		if !errors.Is(err, sql.ErrNoRows) {
 			return NetworkNodeSyncResult{}, err
+		}
+		// 优先使用上次记录的原始 hostname；历史版本没有此字段时，仅允许名称完全匹配的唯一旧节点接管。
+		var previousID, previousPeerID string
+		if hostname != "" {
+			err = tx.QueryRowContext(ctx, `SELECT id,peer_id FROM devices
+				WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE`,
+				input.NetworkKey, hostname).Scan(&previousID, &previousPeerID)
+			if errors.Is(err, sql.ErrNoRows) {
+				rows, lookupErr := tx.QueryContext(ctx, `SELECT id,peer_id FROM devices
+					WHERE is_node_device=1 AND network_key=? AND node_hostname='' AND name=? COLLATE NOCASE LIMIT 2`,
+					input.NetworkKey, hostname)
+				if lookupErr != nil {
+					return NetworkNodeSyncResult{}, lookupErr
+				}
+				count := 0
+				for rows.Next() {
+					count++
+					if scanErr := rows.Scan(&previousID, &previousPeerID); scanErr != nil {
+						rows.Close()
+						return NetworkNodeSyncResult{}, scanErr
+					}
+				}
+				lookupErr = rows.Err()
+				rows.Close()
+				if lookupErr != nil {
+					return NetworkNodeSyncResult{}, lookupErr
+				}
+				if count != 1 {
+					previousID, previousPeerID = "", ""
+				}
+			} else if err != nil {
+				return NetworkNodeSyncResult{}, err
+			}
+		}
+		if previousID != "" {
+			if err := rebindNetworkNodeTx(ctx, tx, input.NetworkKey, previousPeerID, input.PeerID, previousID, hostname, now); err != nil {
+				return NetworkNodeSyncResult{}, err
+			}
+			result.Rebound++
+			continue
 		}
 		var seen int
 		if err = tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM network_node_sync_seen WHERE network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&seen); err != nil {
@@ -1263,8 +1428,8 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		if err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-			VALUES(?,?,NULL,NULL,'通用设备','[]',1,0,'','','','','',0,?,?,?,?)`, id, input.Name, input.NetworkKey, input.PeerID, now, now); err != nil {
+		if _, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,node_hostname,created_at,updated_at)
+			VALUES(?,?,NULL,NULL,'通用设备','[]',1,0,'','','','','',0,?,?,?,?,?)`, id, input.Name, input.NetworkKey, input.PeerID, hostname, now, now); err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
 		if _, err = tx.ExecContext(ctx, "INSERT INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {

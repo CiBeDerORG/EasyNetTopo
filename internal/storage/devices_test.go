@@ -409,6 +409,195 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	}
 }
 
+func TestNetworkNodePeerRotationKeepsDeviceIdentityAndChildren(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	initial := []NetworkNodeDeviceInput{{Name: "原始节点显示名", NetworkKey: "network:home", PeerID: "peer-old", Hostname: "FnOS"}}
+	if result, err := store.SyncNetworkNodeDevices(ctx, initial); err != nil || result.Created != 1 {
+		t.Fatalf("初始化失败: %+v %v", result, err)
+	}
+	original, err := store.ListNodeDevices(ctx)
+	if err != nil || len(original) != 1 || original[0].NodeHostname != "FnOS" {
+		t.Fatalf("未保存原始主机名: %+v %v", original, err)
+	}
+	originalID := original[0].ID
+	lat, lng := 31.23, 121.47
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{
+		NetworkKey: "network:home", PeerID: "peer-old", Alias: "自定义节点别名",
+		Location: NodeLocation{Latitude: &lat, Longitude: &lng},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "保留的网关", IsGateway: true, NetworkKey: "network:home", PeerID: "peer-old",
+		SemanticKinds: []string{"router", "openwrt"}, IPAddress: "192.168.10.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDeviceOpenWrtConfig(ctx, gateway.ID, 80, false, "account", "secret"); err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "下挂设备", GatewayGroupID: gateway.OwnedGatewayGroupID,
+		NetworkKey: "network:home", PeerID: "peer-old",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "新的显示名称不应覆盖原有", NetworkKey: "network:home", PeerID: "peer-new", Hostname: "fnos"},
+	})
+	if err != nil || result.Rebound != 1 || result.Created != 0 {
+		t.Fatalf("相同原始主机名没有关联原节点: %+v %v", result, err)
+	}
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].ID != originalID ||
+		nodes[0].PeerID != "peer-new" || nodes[0].Name != "原始节点显示名" {
+		t.Fatalf("节点被重复创建或丢失自定义资料: %+v %v", nodes, err)
+	}
+	oldScope, err := store.ListDevicesForNode(ctx, "network:home", "peer-old")
+	if err != nil || len(oldScope) != 0 {
+		t.Fatalf("旧节点关联未迁出: %+v %v", oldScope, err)
+	}
+	newScope, err := store.ListDevicesForNode(ctx, "network:home", "peer-new")
+	if err != nil || len(newScope) != 3 {
+		t.Fatalf("节点下挂设备未同步换绑: %+v %v", newScope, err)
+	}
+	updatedChild, err := store.Device(ctx, child.ID)
+	if err != nil || updatedChild.GatewayGroupID != gateway.OwnedGatewayGroupID {
+		t.Fatalf("网关设备层级丢失: %+v %v", updatedChild, err)
+	}
+	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-new")
+	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != gateway.ID || groups[0].DeviceCount != 1 {
+		t.Fatalf("网关组未跟随节点重新绑定: %+v %v", groups, err)
+	}
+	if secret, err := store.DeviceOpenWrtSecret(ctx, gateway.ID); err != nil || secret.Password != "secret" {
+		t.Fatalf("保存的 OpenWrt 配置丢失: %+v %v", secret, err)
+	}
+	attrs, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attrs) != 1 || attrs[0].PeerID != "peer-new" ||
+		attrs[0].Alias != "自定义节点别名" || attrs[0].Location.Latitude == nil {
+		t.Fatalf("原有节点别名与地理信息没有继承: %+v %v", attrs, err)
+	}
+	again, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "其他显示名", NetworkKey: "network:home", PeerID: "peer-new", Hostname: "FnOS"},
+	})
+	if err != nil || again.Existing != 1 || again.Rebound != 0 {
+		t.Fatalf("重复同步应保持幂等: %+v %v", again, err)
+	}
+}
+
+func TestNetworkNodeHostnameLegacyMigrationAndAmbiguityGuards(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 旧版只有展示名称、没有 node_hostname，首次遇到同名原始 hostname 时应安全接管。
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "yun", NetworkKey: "network:alpha", PeerID: "old"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	before, err := store.ListNodeDevices(ctx)
+	if err != nil || len(before) != 1 || before[0].NodeHostname != "" {
+		t.Fatalf("旧客户端兼容性异常: %+v %v", before, err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "展示名可变化", NetworkKey: "network:alpha", PeerID: "new", Hostname: "yun"},
+	})
+	if err != nil || result.Rebound != 1 {
+		t.Fatalf("历史同名节点未被换绑: %+v %v", result, err)
+	}
+	after, err := store.ListNodeDevices(ctx)
+	if err != nil || len(after) != 1 || after[0].ID != before[0].ID ||
+		after[0].NodeHostname != "yun" || after[0].PeerID != "new" {
+		t.Fatalf("旧记录迁移错误: %+v %v", after, err)
+	}
+	// 相同 hostname 允许存在于不同 network_key，不应该跨网络关联。
+	result, err = store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "另一个网络", NetworkKey: "network:beta", PeerID: "beta-peer", Hostname: "yun"},
+	})
+	if err != nil || result.Created != 1 {
+		t.Fatalf("跨网络同名节点误合并: %+v %v", result, err)
+	}
+	// 同一批数据报告两个不同 Peer ID 却使用相同原始主机名时不能猜测关联。
+	if _, err = store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "节点 1", NetworkKey: "network:alpha", PeerID: "a", Hostname: "yun"},
+		{Name: "节点 2", NetworkKey: "network:alpha", PeerID: "b", Hostname: "YUN"},
+	}); !errors.Is(err, ErrInvalidDevice) {
+		t.Fatalf("相同网络同名节点冲突应拒绝: %v", err)
+	}
+	after, err = store.ListNodeDevices(ctx)
+	if err != nil || len(after) != 2 {
+		t.Fatalf("有歧义的同步不得改写数据: %+v %v", after, err)
+	}
+}
+
+func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "legacy-duplicates.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 先模拟旧版同步：原始主机名没有独立保存，Peer ID 改变后产生多余的节点壳。
+	old := []NetworkNodeDeviceInput{{Name: "FnOS", NetworkKey: "network:home", PeerID: "old"}}
+	if _, err := store.SyncNetworkNodeDevices(ctx, old); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("初始化旧节点失败: %+v %v", nodes, err)
+	}
+	originalID := nodes[0].ID
+	child, err := store.CreateDevice(ctx, DeviceInput{Name: "旧节点的下挂设备", NetworkKey: "network:home", PeerID: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "FnOS · 网络节点", NetworkKey: "network:home", PeerID: "new"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err = store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("未模拟出历史重复节点: %+v %v", nodes, err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "任意展示别名", NetworkKey: "network:home", PeerID: "new", Hostname: "FnOS"},
+	})
+	if err != nil || result.Rebound != 1 {
+		t.Fatalf("未回收空白重复节点并沿用原历史设备: %+v %v", result, err)
+	}
+	nodes, err = store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 || nodes[0].ID != originalID || nodes[0].PeerID != "new" {
+		t.Fatalf("原历史节点 ID 未保留: %+v %v", nodes, err)
+	}
+	c, err := store.Device(ctx, child.ID)
+	if err != nil || c.PeerID != "new" {
+		t.Fatalf("原有子设备丢失: %+v %v", c, err)
+	}
+}
+
 func TestClearDeviceDataIsScopedAndDisablesAutomaticNodeSync(t *testing.T) {
 	ctx := context.Background()
 	dir := t.TempDir()

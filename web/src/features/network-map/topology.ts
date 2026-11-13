@@ -239,8 +239,12 @@ export function buildMapTopology(
 ): MapTopology {
   const rows = mergedNetworkRows(routeData)
   const attrs = new Map(attributes.map(item => [item.network_key + '|' + item.peer_id, item]))
+  const attrsByHostname = new Map(attributes.filter(item => item.hostname)
+    .map(item => [item.network_key + '|' + item.hostname!.toLocaleLowerCase(), item]))
   const nodes: MapNode[] = rows.map(row => {
-    const attr = attrs.get(networkNodeAttributeKey(row, entryHostID) + '|' + row.id)
+    const scope = networkNodeAttributeKey(row, entryHostID)
+    const attr = (row.rawHostname ? attrsByHostname.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
+      || attrs.get(scope + '|' + row.id)
     const positioned = isValidLocation(attr)
     return {
       key: row.key, id: row.id, instanceID: row.instanceID, instance: row.instance,

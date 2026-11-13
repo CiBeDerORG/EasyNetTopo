@@ -6,7 +6,7 @@ export type ConnectionRow = {
 }
 export type NetworkRow = {
   key: string; kind: string; instance: string; instanceID: string; id: string
-  hostname: string; ip: string; cidr: string; subnets: string; version: string
+  hostname: string; rawHostname?: string; ip: string; cidr: string; subnets: string; version: string
   nextHop: string; cost: string; routeLabel: string; connection: string
   protocol: string; latency: string; directLatency: string; rx: string; tx: string
   publicIP: string; listeners: string; natType: string; loss: string
@@ -193,6 +193,7 @@ function routeRows(instance: NetworkInstance): NetworkRow[] {
       instanceID: instance.id,
       id,
       hostname: hostname !== '—' ? hostname : id !== '—' ? '节点 #' + id : '未知节点',
+      rawHostname: hostname !== '—' ? hostname : '',
       ip: ipv4(route.ipv4_addr),
       cidr: ipv4Cidr(route.ipv4_addr),
       subnets: subnets(route.proxy_cidrs),
@@ -226,6 +227,7 @@ function localRow(instance: NetworkInstance): NetworkRow {
     instanceID: instance.id,
     id: display(node.peer_id),
     hostname: display(node.hostname),
+    rawHostname: display(node.hostname) !== '—' ? display(node.hostname) : '',
     ip: ipv4(node.ipv4_addr),
     cidr: ipv4Cidr(node.ipv4_addr),
     subnets: subnets(node.proxy_cidrs),

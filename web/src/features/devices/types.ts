@@ -36,6 +36,7 @@ export type Device = {
   note?: string
   network_key?: string
   peer_id?: string
+  node_hostname?: string
   openwrt_configured: boolean
   openwrt_rpcd_port?: number
   openwrt_https?: boolean
@@ -65,10 +66,11 @@ export type NetworkNodeDeviceInput = {
   name: string
   network_key: string
   peer_id: string
+  hostname: string
 }
 
 export type NetworkNodeSyncStatus = { enabled: boolean }
-export type NetworkNodeSyncResult = { created: number; existing: number; skipped: number; enabled: boolean }
+export type NetworkNodeSyncResult = { created: number; existing: number; rebound: number; skipped: number; enabled: boolean }
 
 export type DeviceOpenWrtConfig = {
   device_id: string
