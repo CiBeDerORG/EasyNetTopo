@@ -1207,6 +1207,80 @@ func (s *DeviceStore) SyncNetworkNodeDevicesIfEnabled(ctx context.Context, nodes
 	return s.syncNetworkNodeDevices(ctx, nodes, false)
 }
 
+// 运行时 Peer ID 轮换时迁移节点作用域；主键 ID、网关所有者与 OpenWrt 凭据保持不变。
+func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID, newPeerID, nodeDeviceID, hostname, now string) error {
+	if _, err := tx.ExecContext(ctx, `UPDATE devices SET peer_id=?,updated_at=?
+		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?`,
+		hostname, now, nodeDeviceID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE device_gateway_groups SET peer_id=?,updated_at=?
+		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
+		return err
+	}
+	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
+		WHERE network_key=? AND peer_id=? AND NOT EXISTS (
+			SELECT 1 FROM network_node_attributes WHERE network_key=? AND peer_id=?
+		)`, newPeerID, networkKey, oldPeerID, networkKey, newPeerID); err != nil {
+		return err
+	}
+	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
+		networkKey, newPeerID, now)
+	return err
+}
+
+// 历史版本未保存原始主机名，只允许唯一且名称完全一致的旧节点继承身份。
+func uniqueLegacyNodeTx(ctx context.Context, tx *sql.Tx, networkKey, hostname, excludeID string) (string, string, error) {
+	rows, err := tx.QueryContext(ctx, `SELECT id,peer_id FROM devices
+		WHERE is_node_device=1 AND network_key=? AND node_hostname='' AND name=? COLLATE NOCASE AND id<>?
+		LIMIT 2`, networkKey, hostname, excludeID)
+	if err != nil {
+		return "", "", err
+	}
+	defer rows.Close()
+	var id, peerID string
+	count := 0
+	for rows.Next() {
+		count++
+		if err := rows.Scan(&id, &peerID); err != nil {
+			return "", "", err
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", "", err
+	}
+	if count != 1 {
+		return "", "", nil
+	}
+	return id, peerID, nil
+}
+
+// 仅清理系统自动生成且完全没有下挂设备、网关、人工属性和管理配置的重复节点壳。
+func disposableDuplicateNodeTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, nodeID, hostname string) (bool, error) {
+	var name string
+	var disposable bool
+	err := tx.QueryRowContext(ctx, `SELECT name,
+		is_node_device=1 AND node_hostname='' AND is_gateway=0 AND group_id IS NULL AND gateway_group_id IS NULL
+		AND device_type='通用设备' AND semantic_kinds='[]'
+		AND manufacturer='' AND model='' AND ip_address='' AND mac_address='' AND note='' AND is_openwrt=0
+		AND NOT EXISTS(SELECT 1 FROM devices d WHERE d.network_key=? AND d.peer_id=? AND d.id<>?)
+		AND NOT EXISTS(SELECT 1 FROM device_gateway_groups g WHERE g.network_key=? AND g.peer_id=?)
+		AND NOT EXISTS(SELECT 1 FROM network_node_attributes a WHERE a.network_key=? AND a.peer_id=?)
+		AND NOT EXISTS(SELECT 1 FROM device_openwrt_configs c WHERE c.device_id=?)
+		AND NOT EXISTS(SELECT 1 FROM device_discovery_observations o WHERE o.device_id=? OR o.gateway_device_id=?)
+		FROM devices WHERE id=?`, networkKey, peerID, nodeID, networkKey, peerID, networkKey, peerID,
+		nodeID, nodeID, nodeID, nodeID).Scan(&name, &disposable)
+	if err != nil {
+		return false, err
+	}
+	isGeneratedName := strings.HasPrefix(strings.ToLower(name), strings.ToLower(hostname)+" · ") ||
+		strings.HasPrefix(strings.ToLower(name), strings.ToLower(hostname)+" (")
+	return disposable && isGeneratedName, nil
+}
+
 func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []NetworkNodeDeviceInput, enableAutoSync bool) (NetworkNodeSyncResult, error) {
 	if len(nodes) == 0 || len(nodes) > 500 {
 		return NetworkNodeSyncResult{}, ErrInvalidDevice
@@ -1263,6 +1337,29 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		var existingID, oldHostname string
 		err := tx.QueryRowContext(ctx, "SELECT id,node_hostname FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID, &oldHostname)
 		if err == nil {
+			if hostname != "" && oldHostname == "" {
+				// 老版本可能已经为变动后的 Peer ID 创建了新节点壳；若它完全未使用，保留原有历史节点。
+				legacyID, legacyPeerID, lookupErr := uniqueLegacyNodeTx(ctx, tx, input.NetworkKey, hostname, existingID)
+				if lookupErr != nil {
+					return NetworkNodeSyncResult{}, lookupErr
+				}
+				if legacyID != "" {
+					disposable, checkErr := disposableDuplicateNodeTx(ctx, tx, input.NetworkKey, input.PeerID, existingID, hostname)
+					if checkErr != nil {
+						return NetworkNodeSyncResult{}, checkErr
+					}
+					if disposable {
+						if _, err := tx.ExecContext(ctx, "DELETE FROM devices WHERE id=?", existingID); err != nil {
+							return NetworkNodeSyncResult{}, err
+						}
+						if err := rebindNetworkNodeTx(ctx, tx, input.NetworkKey, legacyPeerID, input.PeerID, legacyID, hostname, now); err != nil {
+							return NetworkNodeSyncResult{}, err
+						}
+						result.Rebound++
+						continue
+					}
+				}
+			}
 			// 以 Peer ID 确认同一节点时记录原始主机名，保留设备自定义名称与其他属性。
 			if hostname == "" {
 				hostname = oldHostname
@@ -1313,28 +1410,7 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			}
 		}
 		if previousID != "" {
-			// 节点 ID 稳定不变；把网关组、下挂设备及手工属性关联原子迁移到新的运行时 Peer ID。
-			if _, err = tx.ExecContext(ctx, `UPDATE devices SET peer_id=?,updated_at=?
-				WHERE network_key=? AND peer_id=?`, input.PeerID, now, input.NetworkKey, previousPeerID); err != nil {
-				return NetworkNodeSyncResult{}, err
-			}
-			if _, err = tx.ExecContext(ctx, `UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?`,
-				hostname, now, previousID); err != nil {
-				return NetworkNodeSyncResult{}, err
-			}
-			if _, err = tx.ExecContext(ctx, `UPDATE device_gateway_groups SET peer_id=?,updated_at=?
-				WHERE network_key=? AND peer_id=?`, input.PeerID, now, input.NetworkKey, previousPeerID); err != nil {
-				return NetworkNodeSyncResult{}, err
-			}
-			// 目标 Peer ID 已有手工属性时不覆盖；否则沿用旧节点的别名和位置。
-			if _, err = tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
-				WHERE network_key=? AND peer_id=? AND NOT EXISTS (
-					SELECT 1 FROM network_node_attributes WHERE network_key=? AND peer_id=?
-				)`, input.PeerID, input.NetworkKey, previousPeerID, input.NetworkKey, input.PeerID); err != nil {
-				return NetworkNodeSyncResult{}, err
-			}
-			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
-				input.NetworkKey, input.PeerID, now); err != nil {
+			if err := rebindNetworkNodeTx(ctx, tx, input.NetworkKey, previousPeerID, input.PeerID, previousID, hostname, now); err != nil {
 				return NetworkNodeSyncResult{}, err
 			}
 			result.Rebound++
