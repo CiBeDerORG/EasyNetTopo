@@ -26,14 +26,49 @@ type NodeLocation struct {
 type NodeAttributes struct {
 	NetworkKey  string       `json:"network_key"`
 	PeerID      string       `json:"peer_id"`
+	Hostname    string       `json:"hostname,omitempty"` // 原始主机名，显示别名不参与身份匹配
 	Alias       string       `json:"alias"`
 	HasPublicIP bool         `json:"has_public_ip"`
 	PublicIP    string       `json:"public_ip"`
 	Location    NodeLocation `json:"location"`
 }
 
+// 旧数据库保留原属性主键，同时为稳定的原始 hostname 建立唯一索引。
+func ensureNodeAttributeHostname(db *sql.DB) error {
+	rows, err := db.Query("PRAGMA table_info(network_node_attributes)")
+	if err != nil {
+		return err
+	}
+	exists := false
+	for rows.Next() {
+		var cid, notNull, primary int
+		var name, typ string
+		var defaultValue sql.NullString
+		if err := rows.Scan(&cid, &name, &typ, &notNull, &defaultValue, &primary); err != nil {
+			rows.Close()
+			return err
+		}
+		if name == "hostname" {
+			exists = true
+		}
+	}
+	err = rows.Err()
+	rows.Close()
+	if err != nil {
+		return err
+	}
+	if !exists {
+		if _, err := db.Exec("ALTER TABLE network_node_attributes ADD COLUMN hostname TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	_, err = db.Exec(`CREATE UNIQUE INDEX IF NOT EXISTS idx_node_attributes_hostname
+		ON network_node_attributes(network_key,hostname COLLATE NOCASE) WHERE hostname<>''`)
+	return err
+}
+
 func (s *Store) ListNodeAttributes(ctx context.Context) ([]NodeAttributes, error) {
-	rows, err := s.db.QueryContext(ctx, `SELECT network_key,peer_id,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude FROM network_node_attributes ORDER BY network_key,peer_id`)
+	rows, err := s.db.QueryContext(ctx, `SELECT network_key,peer_id,hostname,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude FROM network_node_attributes ORDER BY network_key,peer_id`)
 	if err != nil {
 		return nil, err
 	}
@@ -42,7 +77,7 @@ func (s *Store) ListNodeAttributes(ctx context.Context) ([]NodeAttributes, error
 	for rows.Next() {
 		var attr NodeAttributes
 		var lat, lng sql.NullFloat64
-		if err := rows.Scan(&attr.NetworkKey, &attr.PeerID, &attr.Alias, &attr.HasPublicIP, &attr.PublicIP,
+		if err := rows.Scan(&attr.NetworkKey, &attr.PeerID, &attr.Hostname, &attr.Alias, &attr.HasPublicIP, &attr.PublicIP,
 			&attr.Location.Country, &attr.Location.Province, &attr.Location.City, &attr.Location.County,
 			&lat, &lng); err != nil {
 			return nil, err
@@ -63,6 +98,7 @@ func (s *Store) ListNodeAttributes(ctx context.Context) ([]NodeAttributes, error
 func normalizeNodeAttributes(attr *NodeAttributes) error {
 	attr.NetworkKey = strings.TrimSpace(attr.NetworkKey)
 	attr.PeerID = strings.TrimSpace(attr.PeerID)
+	attr.Hostname = strings.TrimSpace(attr.Hostname)
 	attr.Alias = strings.TrimSpace(attr.Alias)
 	attr.PublicIP = strings.TrimSpace(attr.PublicIP)
 	for _, value := range []string{attr.NetworkKey, attr.PeerID} {
@@ -70,7 +106,8 @@ func normalizeNodeAttributes(attr *NodeAttributes) error {
 			return ErrInvalidNodeAttributes
 		}
 	}
-	if len(attr.NetworkKey) > 256 || len(attr.PeerID) > 128 || len([]rune(attr.Alias)) > 100 {
+	if len(attr.NetworkKey) > 256 || len(attr.PeerID) > 128 || len([]rune(attr.Hostname)) > 100 ||
+		attr.Hostname == "—" || strings.ContainsAny(attr.Hostname, "\r\n\x00") || len([]rune(attr.Alias)) > 100 {
 		return ErrInvalidNodeAttributes
 	}
 	for _, field := range []*string{&attr.Location.Country, &attr.Location.Province, &attr.Location.City, &attr.Location.County} {
@@ -110,15 +147,46 @@ func (s *Store) SaveNodeAttributes(ctx context.Context, attr NodeAttributes) (No
 	if err := normalizeNodeAttributes(&attr); err != nil {
 		return NodeAttributes{}, err
 	}
-	_, err := s.db.ExecContext(ctx, `INSERT INTO network_node_attributes
-		(network_key,peer_id,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude,updated_at)
-		VALUES (?,?,?,?,?,?,?,?,?,?,?,?)
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return NodeAttributes{}, err
+	}
+	defer tx.Rollback()
+	if attr.Hostname != "" {
+		// 以原主机名找到旧 Peer ID 的人工属性，并在无目标冲突时原地换绑。
+		var previousPeerID string
+		err = tx.QueryRowContext(ctx, `SELECT peer_id FROM network_node_attributes
+			WHERE network_key=? AND hostname=? COLLATE NOCASE`, attr.NetworkKey, attr.Hostname).Scan(&previousPeerID)
+		if err != nil && !errors.Is(err, sql.ErrNoRows) {
+			return NodeAttributes{}, err
+		}
+		if err == nil && previousPeerID != attr.PeerID {
+			var target int
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM network_node_attributes
+				WHERE network_key=? AND peer_id=?`, attr.NetworkKey, attr.PeerID).Scan(&target); err != nil {
+				return NodeAttributes{}, err
+			}
+			if target != 0 {
+				return NodeAttributes{}, ErrInvalidNodeAttributes
+			}
+			if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
+				WHERE network_key=? AND peer_id=?`, attr.PeerID, attr.NetworkKey, previousPeerID); err != nil {
+				return NodeAttributes{}, err
+			}
+		}
+	}
+	_, err = tx.ExecContext(ctx, `INSERT INTO network_node_attributes
+		(network_key,peer_id,hostname,alias,has_public_ip,public_ip,country,province,city,county,latitude,longitude,updated_at)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
 		ON CONFLICT(network_key,peer_id) DO UPDATE SET
-		alias=excluded.alias,has_public_ip=excluded.has_public_ip,public_ip=excluded.public_ip,
+		hostname=excluded.hostname,alias=excluded.alias,has_public_ip=excluded.has_public_ip,public_ip=excluded.public_ip,
 		country=excluded.country,province=excluded.province,city=excluded.city,county=excluded.county,
 		latitude=excluded.latitude,longitude=excluded.longitude,updated_at=excluded.updated_at`,
-		attr.NetworkKey, attr.PeerID, attr.Alias, attr.HasPublicIP, attr.PublicIP,
+		attr.NetworkKey, attr.PeerID, attr.Hostname, attr.Alias, attr.HasPublicIP, attr.PublicIP,
 		attr.Location.Country, attr.Location.Province, attr.Location.City, attr.Location.County,
 		attr.Location.Latitude, attr.Location.Longitude, time.Now().UTC().Format(time.RFC3339))
-	return attr, err
+	if err != nil {
+		return NodeAttributes{}, err
+	}
+	return attr, tx.Commit()
 }
