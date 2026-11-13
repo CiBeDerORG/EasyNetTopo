@@ -110,8 +110,8 @@ const nodeOptions = computed<NodeOption[]>(() => {
   const result: NodeOption[] = [...liveNodeOptions.value]
   const seen = new Set(result.map(node => node.networkKey + '|' + node.peerId))
   const liveHostnames = new Set(liveNodeOptions.value
-    .filter(node => node.row.hostname && node.row.hostname !== '—')
-    .map(node => node.networkKey + '|' + node.row.hostname.toLocaleLowerCase()))
+    .filter(node => node.row.rawHostname)
+    .map(node => node.networkKey + '|' + node.row.rawHostname!.toLocaleLowerCase()))
   for (const device of nodeDevicesQuery.data.value || []) {
     const key = (device.network_key || '') + '|' + (device.peer_id || '')
     if (!device.network_key || !device.peer_id || seen.has(key) ||
@@ -522,8 +522,7 @@ function networkNodeDeviceInputs(): NetworkNodeDeviceInput[] {
     name: uniqueNodeDeviceName(node, used),
     network_key: node.networkKey,
     peer_id: node.peerId,
-    hostname: node.row.hostname !== '—' && !node.row.hostname.startsWith('节点 #')
-      ? node.row.hostname : ''
+    hostname: node.row.rawHostname || ''
   }))
 }
 async function runNetworkNodeSync(showMessage: boolean) {
