@@ -12,6 +12,7 @@ export type NodeLocation = {
 export type NodeAttributes = {
   network_key: string
   peer_id: string
+  hostname?: string
   alias: string
   has_public_ip: boolean
   public_ip: string
