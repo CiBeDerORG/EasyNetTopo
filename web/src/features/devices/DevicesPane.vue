@@ -839,7 +839,7 @@ watch(
           <el-form-item label="所属网络节点" class="span-two">
             <el-select v-model="deviceDraftNodeKey" clearable filterable class="full"
               :disabled="isNodeDeviceEditing || (!editingDeviceId && !!deviceDraft.gateway_group_id)" placeholder="选择设备所属的网络节点">
-              <el-option v-for="node in nodeOptions" :key="node.networkKey + '|' + node.peerId"
+              <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
                 :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
                 <div class="node-option">
                   <span>{{ node.label }}</span>
