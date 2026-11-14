@@ -8,7 +8,7 @@ import { mergedNetworkRows, type NetworkRow } from './data'
 import NetworkNodeDetails from './NetworkNodeDetails.vue'
 import NetworkNodeLocationPicker from './NetworkNodeLocationPicker.vue'
 import { listNodeAttributes, saveNodeAttributes, type NodeAttributes } from './attributes'
-import { networkNodeAttributeKey, stableNetworkRows } from './identity'
+import { networkNodeAttributeKey, stableNetworkRowKey, stableNetworkRows } from './identity'
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -44,7 +44,8 @@ const attributesByHostname = computed(() => new Map<string, NodeAttributes>((att
   .map(attr => [attr.network_key + '|' + attr.hostname!.toLocaleLowerCase(), attr] as const)))
 function getAttributes(row: NetworkRow): NodeAttributes | undefined {
   const scope = networkNodeAttributeKey(row, hostId.value)
-  return (row.rawHostname ? attributesByHostname.value.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
+  return (row.rawHostname && row.key === stableNetworkRowKey(row, hostId.value)
+    ? attributesByHostname.value.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
     || attributesByKey.value.get(scope + '|' + row.id)
 }
 const editorOpen = ref(false)
