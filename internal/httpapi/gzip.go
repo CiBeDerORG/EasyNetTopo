@@ -30,6 +30,7 @@ type gzipResponseWriter struct {
 	request     *http.Request
 	acceptsGzip bool
 	wroteHeader bool
+	compressing bool
 	gzipWriter  *gzip.Writer
 }
 
@@ -51,6 +52,7 @@ func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 	}
 
 	if w.shouldCompress(statusCode, contentType) {
+		w.compressing = true
 		header.Set("Content-Encoding", "gzip")
 		header.Del("Content-Length")
 		// 压缩后的字节范围与原文件不同，避免声明支持原始文件的 Range。
@@ -58,7 +60,7 @@ func (w *gzipResponseWriter) WriteHeader(statusCode int) {
 	}
 
 	w.ResponseWriter.WriteHeader(statusCode)
-	if header.Get("Content-Encoding") == "gzip" && w.acceptsGzip {
+	if w.compressing {
 		w.gzipWriter = gzip.NewWriter(w.ResponseWriter)
 	}
 }
