@@ -341,8 +341,14 @@ watch(() => [props.basemap, activeTheme.value], () => {
 watch(() => [props.nodes, props.links, props.showTraffic, props.selectedNodeKey, props.selectedLinkKey],
   redraw, { deep: true })
 watch(() => [props.nodes, props.dataReady], fitInitialView, { deep: true, flush: 'post' })
-onMounted(() => {
-  if (!globe.value) return
+type IdleWindow = Window & {
+  requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
+  cancelIdleCallback?: (handle: number) => void
+}
+let cancelInitialization: (() => void) | null = null
+
+function initializeViewer() {
+  if (!globe.value || cancelled) return
   activeTheme.value = readTheme()
   try {
     viewer = new Cesium.Viewer(globe.value, {
@@ -360,7 +366,7 @@ onMounted(() => {
     removeCameraChangedListener = viewer.camera.changed.addEventListener(() => {
       if (!viewer || viewer.isDestroyed()) return
       const nextSeparation = curveSeparationMeters(viewer.camera.positionCartographic.height,
-    viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
+        viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
       const threshold = Math.max(300, lastCurveSeparation * 0.08)
       if (Math.abs(nextSeparation - lastCurveSeparation) < threshold || cameraRedrawFrame !== null) return
       cameraRedrawFrame = requestAnimationFrame(() => {
@@ -394,9 +400,28 @@ onMounted(() => {
   } finally {
     if (!cancelled) loading.value = false
   }
+}
+
+onMounted(() => {
+  // 先让地图页及侧栏完成首帧绘制，再在浏览器空闲时启动 WebGL；
+  // requestIdleCallback 不可用时退化为下一轮事件循环。
+  const idleWindow = window as IdleWindow
+  const start = () => {
+    cancelInitialization = null
+    initializeViewer()
+  }
+  if (idleWindow.requestIdleCallback) {
+    const handle = idleWindow.requestIdleCallback(start, { timeout: 1200 })
+    cancelInitialization = () => idleWindow.cancelIdleCallback?.(handle)
+  } else {
+    const handle = window.setTimeout(start, 0)
+    cancelInitialization = () => window.clearTimeout(handle)
+  }
 })
 onUnmounted(() => {
   cancelled = true
+  cancelInitialization?.()
+  cancelInitialization = null
   themeObserver?.disconnect()
   themeObserver = null
   removeCameraChangedListener?.()
