@@ -159,7 +159,6 @@ func TestGatewayDiscoveryAutoImportRejectsWrongScopeAndMalformedRecords(t *testi
 	}
 }
 
-
 func TestGatewayDiscoveryRefreshesExistingDeviceIPAndNetworkIP(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "refresh-existing-device.db"))
