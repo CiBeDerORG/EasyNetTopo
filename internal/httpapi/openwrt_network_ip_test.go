@@ -27,15 +27,15 @@ func routeDataForNetworkIP() json.RawMessage {
 					"node_info": map[string]any{
 						"network_name": "home",
 						"peer_id":      "peer-local",
-						"ipv4_addr":    ipv4AddressValue(168435201), // 10.10.30.1
-						"proxy_cidrs":  []string{"192.168.10.0/24"},
+						"ipv4_addr":    ipv4AddressValue(168430083), // 10.10.10.3；目标网段必须来自 mapped_cidr
+						"proxy_cidrs":  []string{"192.168.10.0/24->10.10.30.0/24"},
 					},
 					"peer_routes": []any{
 						map[string]any{
 							"route": map[string]any{
 								"peer_id":     "peer-remote",
-								"ipv4_addr":   ipv4AddressValue(168437761), // 10.10.40.1
-								"proxy_cidrs": []string{"192.168.20.0/24"},
+								"ipv4_addr":   ipv4AddressValue(168430084), // 10.10.10.4
+								"proxy_cidrs": []string{"192.168.20.0/24->10.10.40.0/24"},
 							},
 							"peer": map[string]any{"peer_id": "peer-remote"},
 						},
@@ -69,6 +69,26 @@ func TestOpenWrtNetworkIPMapperMapsLocalAndPeerRoutes(t *testing.T) {
 	}
 }
 
+func TestProxyIPv4MappingsSupportIdentityAndSingleHostRoutes(t *testing.T) {
+	raw := json.RawMessage(`["192.168.10.0/24->10.10.30.0/24","192.168.20.0/24","192.168.30.5/32->10.10.30.5/32"]`)
+	mappings := proxyIPv4Mappings(raw)
+	if len(mappings) != 3 {
+		t.Fatalf("应解析三条代理网段规则，实际得到 %d 条: %+v", len(mappings), mappings)
+	}
+	mapper := openWrtNetworkIPMapper{available: true, mappings: mappings}
+	if mapped, known := mapper.mapAddress("192.168.20.88"); !known || mapped != "192.168.20.88" {
+		t.Fatalf("未配置 mapped_cidr 时应保留原代理地址: mapped=%q known=%v", mapped, known)
+	}
+	if mapped, known := mapper.mapAddress("192.168.30.5"); !known || mapped != "10.10.30.5" {
+		t.Fatalf("/32 单主机映射失败: mapped=%q known=%v", mapped, known)
+	}
+
+	invalid := proxyIPv4Mappings(json.RawMessage(`["192.168.10.0/24->10.10.30.0/25","2001:db8::/64->2001:db8:1::/64","bad-cidr"]`))
+	if len(invalid) != 0 {
+		t.Fatalf("不等长、IPv6 或非法规则不应作为 IPv4 映射: %+v", invalid)
+	}
+}
+
 func TestOpenWrtNetworkIPMapperRejectsAmbiguousAndInvalidAddresses(t *testing.T) {
 	mapper, found := openWrtNetworkIPMapperFromRoute(routeDataForNetworkIP(), "network:home", "peer-local")
 	if !found {
@@ -87,12 +107,18 @@ func TestOpenWrtNetworkIPMapperRejectsAmbiguousAndInvalidAddresses(t *testing.T)
 	}
 
 	mismatched := mapper
-	mismatched.targetPrefix = netip.MustParsePrefix("10.10.30.1/25")
+	mismatched.mappings = []proxyIPv4Mapping{{
+		source: netip.MustParsePrefix("192.168.10.0/24"),
+		target: netip.MustParsePrefix("10.10.30.0/25"),
+	}}
 	if mapped, known := mismatched.mapAddress("192.168.10.162"); !known || mapped != "" {
-		t.Fatalf("代理网段与虚拟网段掩码不一致时不应映射: mapped=%q known=%v", mapped, known)
+		t.Fatalf("代理映射前后掩码不一致时不应映射: mapped=%q known=%v", mapped, known)
 	}
 
-	mapper.proxyPrefixes = append(mapper.proxyPrefixes, netip.MustParsePrefix("192.168.10.128/25"))
+	mapper.mappings = append(mapper.mappings, proxyIPv4Mapping{
+		source: netip.MustParsePrefix("192.168.10.128/25"),
+		target: netip.MustParsePrefix("10.10.30.128/25"),
+	})
 	if mapped, known := mapper.mapAddress("192.168.10.162"); !known || mapped != "" {
 		t.Fatalf("重叠代理网段应视为歧义而不映射: mapped=%q known=%v", mapped, known)
 	}
@@ -163,7 +189,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	instance := data[0].(map[string]any)
 	result := instance["result"].(map[string]any)
 	nodeInfo := result["node_info"].(map[string]any)
-	nodeInfo["ipv4_addr"] = ipv4AddressValue(168437761) // 10.10.40.1
+	nodeInfo["proxy_cidrs"] = []any{"192.168.10.0/24->10.10.40.0/24"}
 	updatedRoute, _ = json.Marshal(routeValue)
 	updatedMapper, found := openWrtNetworkIPMapperFromRoute(updatedRoute, "network:home", "peer-local")
 	if !found {

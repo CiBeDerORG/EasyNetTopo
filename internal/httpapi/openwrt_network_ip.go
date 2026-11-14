@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"net/netip"
 	"sort"
-	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -15,10 +14,14 @@ import (
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
+type proxyIPv4Mapping struct {
+	source netip.Prefix
+	target netip.Prefix
+}
+
 type openWrtNetworkIPMapper struct {
-	available     bool
-	proxyPrefixes []netip.Prefix
-	targetPrefix  netip.Prefix
+	available bool
+	mappings  []proxyIPv4Mapping
 }
 
 func (m openWrtNetworkIPMapper) mapAddress(raw string) (string, bool) {
@@ -30,20 +33,21 @@ func (m openWrtNetworkIPMapper) mapAddress(raw string) (string, bool) {
 		return "", false
 	}
 
-	matches := make([]netip.Prefix, 0, 1)
-	for _, prefix := range m.proxyPrefixes {
-		if prefix.IsValid() && prefix.Addr().Is4() && prefix.Contains(address) {
-			matches = append(matches, prefix.Masked())
+	matches := make([]proxyIPv4Mapping, 0, 1)
+	for _, mapping := range m.mappings {
+		if mapping.source.IsValid() && mapping.source.Addr().Is4() && mapping.source.Contains(address) {
+			matches = append(matches, mapping)
 		}
 	}
 	if len(matches) != 1 {
 		return "", true
 	}
 
-	source := matches[0]
-	target := m.targetPrefix.Masked()
-	if !target.IsValid() || !target.Addr().Is4() || source.Bits() != target.Bits() ||
-		source.Bits() < 1 || source.Bits() > 30 {
+	mapping := matches[0]
+	source := mapping.source.Masked()
+	target := mapping.target.Masked()
+	if !source.IsValid() || !target.IsValid() || !source.Addr().Is4() || !target.Addr().Is4() ||
+		source.Bits() != target.Bits() {
 		return "", true
 	}
 
@@ -51,7 +55,8 @@ func (m openWrtNetworkIPMapper) mapAddress(raw string) (string, bool) {
 	targetBase := ipv4ToUint32(target.Addr().As4())
 	offset := ipv4ToUint32(address.As4()) - sourceBase
 	hostCount := uint64(1) << uint(32-source.Bits())
-	if offset == 0 || uint64(offset) >= hostCount-1 {
+	// /31 和 /32 可以表示点到点或单主机代理，不排除其首尾地址。
+	if source.Bits() <= 30 && (offset == 0 || uint64(offset) >= hostCount-1) {
 		return "", true
 	}
 
@@ -74,68 +79,6 @@ func uint32ToIPv4(value uint32) netip.Addr {
 	return netip.AddrFrom4([4]byte{
 		byte(value >> 24), byte(value >> 16), byte(value >> 8), byte(value),
 	})
-}
-
-func parseIPv4Prefix(raw json.RawMessage) (netip.Prefix, bool) {
-	if len(raw) == 0 {
-		return netip.Prefix{}, false
-	}
-	var textValue string
-	if json.Unmarshal(raw, &textValue) == nil {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(textValue))
-		return validIPv4MappingPrefix(prefix, err)
-	}
-
-	var value map[string]json.RawMessage
-	if json.Unmarshal(raw, &value) != nil {
-		return netip.Prefix{}, false
-	}
-	var prefixLength int
-	if json.Unmarshal(value["network_length"], &prefixLength) != nil {
-		return netip.Prefix{}, false
-	}
-	var addressValue map[string]json.RawMessage
-	if json.Unmarshal(value["address"], &addressValue) != nil {
-		return netip.Prefix{}, false
-	}
-	rawAddress := addressValue["addr"]
-	if len(rawAddress) == 0 {
-		return netip.Prefix{}, false
-	}
-
-	var addressText string
-	if json.Unmarshal(rawAddress, &addressText) == nil {
-		addressText = strings.TrimSpace(addressText)
-		if prefix, err := netip.ParsePrefix(addressText); err == nil {
-			return validIPv4MappingPrefix(prefix, nil)
-		}
-		address, err := netip.ParseAddr(addressText)
-		if err != nil || !address.Is4() {
-			return netip.Prefix{}, false
-		}
-		return validIPv4MappingPrefix(netip.PrefixFrom(address, prefixLength), nil)
-	}
-
-	decoder := json.NewDecoder(bytes.NewReader(rawAddress))
-	decoder.UseNumber()
-	var number json.Number
-	if decoder.Decode(&number) != nil {
-		return netip.Prefix{}, false
-	}
-	parsed, err := strconv.ParseInt(number.String(), 10, 64)
-	if err != nil {
-		return netip.Prefix{}, false
-	}
-	address := uint32ToIPv4(uint32(parsed))
-	return validIPv4MappingPrefix(netip.PrefixFrom(address, prefixLength), nil)
-}
-
-func validIPv4MappingPrefix(prefix netip.Prefix, parseErr error) (netip.Prefix, bool) {
-	if parseErr != nil || !prefix.IsValid() || !prefix.Addr().Is4() ||
-		prefix.Bits() < 1 || prefix.Bits() > 30 {
-		return netip.Prefix{}, false
-	}
-	return prefix.Masked(), true
 }
 
 func jsonObject(raw json.RawMessage) map[string]json.RawMessage {
@@ -163,7 +106,7 @@ func jsonString(raw json.RawMessage) string {
 	return ""
 }
 
-func proxyIPv4Prefixes(raw json.RawMessage) []netip.Prefix {
+func proxyIPv4Mappings(raw json.RawMessage) []proxyIPv4Mapping {
 	var values []string
 	if json.Unmarshal(raw, &values) != nil {
 		var single string
@@ -172,42 +115,56 @@ func proxyIPv4Prefixes(raw json.RawMessage) []netip.Prefix {
 		}
 		values = []string{single}
 	}
-	prefixes := make([]netip.Prefix, 0, len(values))
-	seen := make(map[netip.Prefix]bool)
+
+	mappings := make([]proxyIPv4Mapping, 0, len(values))
+	seen := make(map[string]bool)
 	for _, value := range values {
-		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
-		if err != nil || !prefix.Addr().Is4() || prefix.Bits() < 1 || prefix.Bits() > 30 {
+		parts := strings.Split(strings.TrimSpace(value), "->")
+		if len(parts) < 1 || len(parts) > 2 {
 			continue
 		}
-		prefix = prefix.Masked()
-		if seen[prefix] {
+		source, err := netip.ParsePrefix(strings.TrimSpace(parts[0]))
+		if err != nil || !source.Addr().Is4() {
 			continue
 		}
-		seen[prefix] = true
-		prefixes = append(prefixes, prefix)
+		source = source.Masked()
+		target := source
+		if len(parts) == 2 {
+			target, err = netip.ParsePrefix(strings.TrimSpace(parts[1]))
+			if err != nil || !target.Addr().Is4() {
+				continue
+			}
+			target = target.Masked()
+		}
+		// EasyTier 要求映射前后的 CIDR 大小一致；不合法规则不参与映射。
+		if source.Bits() != target.Bits() {
+			continue
+		}
+		key := source.String() + "->" + target.String()
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+		mappings = append(mappings, proxyIPv4Mapping{source: source, target: target})
 	}
-	return prefixes
+	return mappings
 }
 
 func mapperFromNetworkNode(node map[string]json.RawMessage) (openWrtNetworkIPMapper, bool) {
-	target, ok := parseIPv4Prefix(node["ipv4_addr"])
-	if !ok {
+	mappings := proxyIPv4Mappings(node["proxy_cidrs"])
+	if len(mappings) == 0 {
 		return openWrtNetworkIPMapper{}, false
 	}
-	return openWrtNetworkIPMapper{
-		available:     true,
-		proxyPrefixes: proxyIPv4Prefixes(node["proxy_cidrs"]),
-		targetPrefix:  target,
-	}, true
+	return openWrtNetworkIPMapper{available: true, mappings: mappings}, true
 }
 
 func mapperSignature(mapper openWrtNetworkIPMapper) string {
-	prefixes := make([]string, 0, len(mapper.proxyPrefixes))
-	for _, prefix := range mapper.proxyPrefixes {
-		prefixes = append(prefixes, prefix.String())
+	mappings := make([]string, 0, len(mapper.mappings))
+	for _, mapping := range mapper.mappings {
+		mappings = append(mappings, mapping.source.String()+"->"+mapping.target.String())
 	}
-	sort.Strings(prefixes)
-	return mapper.targetPrefix.String() + "|" + strings.Join(prefixes, ",")
+	sort.Strings(mappings)
+	return strings.Join(mappings, ",")
 }
 
 func openWrtNetworkIPMapperFromRoute(raw json.RawMessage, networkKey, peerID string) (openWrtNetworkIPMapper, bool) {

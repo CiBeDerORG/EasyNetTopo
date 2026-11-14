@@ -231,7 +231,7 @@ const filteredDevices = computed(() => {
   if (!keyword) return devices.value
   return devices.value.filter(device => [
     device.name, device.group_name, device.gateway_group_name,
-    device.manufacturer, device.model, device.ip_address, device.mac_address,
+    device.manufacturer, device.model, device.ip_address, device.network_ip, device.mac_address,
     device.note, device.peer_id, device.network_key, ...(device.semantic_kinds || [])
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
@@ -937,6 +937,10 @@ watch(
             <div v-if="editingDeviceId && deviceDraft.is_gateway && !deviceDraft.gateway_group_id" class="field-hint">
               直属网关设备的管理 IP 为空时，将从所属网络节点代理网段自动建议首个可用 IP；不覆盖已有值，可手动修改。
             </div>
+          </el-form-item>
+          <el-form-item v-if="editingDeviceId" label="组网 IP（自动映射）">
+            <el-input :model-value="editingDevice?.network_ip || '尚未计算'" readonly />
+            <div class="field-hint">根据所属网络节点的 EasyTier 代理网段映射，扫描发现后自动更新；此字段不可手动修改。</div>
           </el-form-item>
           <el-form-item label="MAC 地址">
             <el-input v-model="deviceDraft.mac_address" placeholder="例如：AA:BB:CC:DD:EE:FF" />
