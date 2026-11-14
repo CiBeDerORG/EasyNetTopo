@@ -405,8 +405,9 @@ async function saveDeviceRecord() {
   if (previous?.is_node_device) {
     // 基础设备可以改绑到新的所属网络节点，但必须保持节点直属层级。
     draft.gateway_group_id = ''
-    if (!draft.network_key || !draft.peer_id || !draft.node_hostname) {
-      ElMessage.warning('请选择已报告原始主机名的所属网络节点')
+    const changedNode = draft.network_key !== previous.network_key || draft.peer_id !== previous.peer_id
+    if (!draft.network_key || !draft.peer_id || (changedNode && !draft.node_hostname)) {
+      ElMessage.warning('请为节点基础设备选择包含原始主机名的所属网络节点')
       return
     }
   }
