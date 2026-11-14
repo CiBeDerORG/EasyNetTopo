@@ -35,6 +35,7 @@ jobs:
           git diff --exit-code -- go.mod go.sum
       - name: Check gofmt
         run: |
+          gofmt -d internal/storage/devices.go internal/storage/devices_test.go
           gofmt -l cmd internal | tee /tmp/unformatted-go-files
           test ! -s /tmp/unformatted-go-files
       - name: Vet and test
