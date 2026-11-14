@@ -133,6 +133,10 @@ const liveNodeOptions = computed<LiveNodeOption[]>(() => (nodesQuery.data.value?
     isOnline: true, row: node.row, hostId: node.hostId
   }
 }))
+// 已登记的历史节点可能在旧版本没有写入 node_hostname，优先显示可核对的历史属性。
+function originalNodeHostname(node: NodeOption): string {
+  return node.hostname || attributesByKey.value.get(node.networkKey + '|' + node.peerId)?.hostname || ''
+}
 const nodeOptions = computed<NodeOption[]>(() => {
   const result: NodeOption[] = [...liveNodeOptions.value]
   const seen = new Set(result.map(nodeValue))
@@ -635,14 +639,21 @@ watch(
 
     <div class="node-scope-toolbar">
       <div class="node-scope-label">所处节点</div>
-      <el-select v-model="selectedNodeKey" filterable class="node-scope-select" placeholder="选择网络节点">
+      <el-select v-model="selectedNodeKey" filterable class="node-scope-select" popper-class="device-node-dropdown" placeholder="选择网络节点">
         <el-option label="全部" :value="ALL_SCOPE" />
         <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
           :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
           <div class="node-option">
-            <span>{{ node.label }}</span>
-            <el-tag size="small" :type="node.isOnline ? 'success' : 'info'">{{ node.isOnline ? '在线' : '离线' }}</el-tag>
-            <span class="node-option-meta">{{ node.ip || node.peerId }}</span>
+            <div class="node-option-info">
+              <div class="node-option-heading">
+                <span class="node-option-name" :title="node.label">{{ node.label }}</span>
+                <el-tag size="small" :type="node.isOnline ? 'success' : 'info'">{{ node.isOnline ? '在线' : '离线' }}</el-tag>
+              </div>
+              <span v-if="originalNodeHostname(node)" class="node-option-hostname" :title="originalNodeHostname(node)">
+                原主机名：{{ originalNodeHostname(node) }}
+              </span>
+            </div>
+            <span class="node-option-meta" :title="node.ip || node.peerId">{{ node.ip || node.peerId }}</span>
           </div>
         </el-option>
       </el-select>
@@ -650,6 +661,7 @@ watch(
         <el-tag :type="selectedNode.isOnline ? 'success' : 'info'" effect="plain">
           {{ selectedNode.isOnline ? '当前在线' : '历史节点' }}
         </el-tag>
+        <span v-if="originalNodeHostname(selectedNode)">原主机名：{{ originalNodeHostname(selectedNode) }}</span>
         <span>{{ selectedNode.instance || '历史节点信息' }}</span>
         <span>{{ selectedNode.ip || selectedNode.peerId }}</span>
       </div>
@@ -837,14 +849,21 @@ watch(
             <el-input v-model="deviceDraft.name" maxlength="100" placeholder="例如：客厅电视" />
           </el-form-item>
           <el-form-item label="所属网络节点" class="span-two">
-            <el-select v-model="deviceDraftNodeKey" clearable filterable class="full"
+            <el-select v-model="deviceDraftNodeKey" clearable filterable class="full" popper-class="device-node-dropdown"
               :disabled="isNodeDeviceEditing || (!editingDeviceId && !!deviceDraft.gateway_group_id)" placeholder="选择设备所属的网络节点">
               <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
                 :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
                 <div class="node-option">
-                  <span>{{ node.label }}</span>
-                  <el-tag size="small" :type="node.isOnline ? 'success' : 'info'">{{ node.isOnline ? '在线' : '离线' }}</el-tag>
-                  <span class="node-option-meta">{{ node.ip || node.peerId }}</span>
+                  <div class="node-option-info">
+                    <div class="node-option-heading">
+                      <span class="node-option-name" :title="node.label">{{ node.label }}</span>
+                      <el-tag size="small" :type="node.isOnline ? 'success' : 'info'">{{ node.isOnline ? '在线' : '离线' }}</el-tag>
+                    </div>
+                    <span v-if="originalNodeHostname(node)" class="node-option-hostname" :title="originalNodeHostname(node)">
+                      原主机名：{{ originalNodeHostname(node) }}
+                    </span>
+                  </div>
+                  <span class="node-option-meta" :title="node.ip || node.peerId">{{ node.ip || node.peerId }}</span>
                 </div>
               </el-option>
             </el-select>
@@ -1019,8 +1038,13 @@ watch(
 .node-scope-label { flex:none; color:var(--ent-muted); font-size:12px; font-weight:700; }
 .node-scope-select { width:min(420px,100%); }
 .node-scope-meta { display:flex; align-items:center; flex-wrap:wrap; gap:9px; color:var(--ent-muted); font-size:11px; }
-.node-option { display:flex; align-items:center; gap:9px; min-width:0; }
-.node-option-meta { overflow:hidden; margin-left:auto; color:var(--ent-dim); font-size:11px; text-overflow:ellipsis; }
+.node-option { display:flex; align-items:center; width:100%; gap:10px; min-width:0; padding:6px 0; }
+.node-option-info { display:flex; min-width:0; flex:1; flex-direction:column; gap:3px; }
+.node-option-heading { display:flex; min-width:0; align-items:center; gap:8px; }
+.node-option-name { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.node-option-hostname { overflow:hidden; color:var(--ent-muted); font-size:11px; line-height:1.4; text-overflow:ellipsis; white-space:nowrap; }
+.node-option-meta { flex:none; max-width:40%; overflow:hidden; margin-left:auto; color:var(--ent-dim); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
+:global(.device-node-dropdown .el-select-dropdown__item) { display:flex; align-items:center; min-height:42px; height:auto; line-height:normal; }
 .gateway-group-summary { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:10px 15px; border-bottom:1px solid var(--ent-line-soft); color:var(--ent-muted); font-size:11px; background:var(--ent-panel); }
 @media(max-width:760px) {
   .node-scope-toolbar { align-items:stretch; flex-direction:column; }
