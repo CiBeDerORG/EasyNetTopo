@@ -8,7 +8,7 @@ import { mergedNetworkRows, type NetworkRow } from './data'
 import NetworkNodeDetails from './NetworkNodeDetails.vue'
 import NetworkNodeLocationPicker from './NetworkNodeLocationPicker.vue'
 import { listNodeAttributes, saveNodeAttributes, type NodeAttributes } from './attributes'
-import { networkNodeAttributeKey } from './identity'
+import { networkNodeAttributeKey, stableNetworkRows } from './identity'
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -26,7 +26,7 @@ const query = useQuery({
     const id = encodeURIComponent(String(queryKey[1]))
     const response = await apiRequest<{ data: unknown }>(
       '/api/v1/hosts/' + id + '/network/route', { signal })
-    return mergedNetworkRows(response.data)
+    return stableNetworkRows(mergedNetworkRows(response.data), String(queryKey[1]))
   },
   enabled: computed(() => !!hostId.value),
   retry: 0,
