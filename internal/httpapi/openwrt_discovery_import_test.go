@@ -253,7 +253,7 @@ func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
 		MatchLocation:    "node_info",
 		MappingRules:     []string{"192.168.10.0/24 -> 10.10.30.0/24"},
 		Reason:           "测试路由匹配成功",
-		Hosts:            []openWrtNetworkIPHostDiagnostic{{
+		Hosts: []openWrtNetworkIPHostDiagnostic{{
 			HostID: "host-entry", HostName: "云端入口", Status: "matched",
 			MatchLocation: "node_info", MappingRules: []string{"192.168.10.0/24 -> 10.10.30.0/24"},
 		}},
@@ -289,7 +289,7 @@ func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
 			} `json:"route"`
 			Import struct {
 				Devices          []storage.DiscoveredDeviceSyncDiagnostic `json:"devices"`
-				NetworkIPWritten int                                     `json:"network_ip_written"`
+				NetworkIPWritten int                                      `json:"network_ip_written"`
 			} `json:"import"`
 		} `json:"diagnostics"`
 	}

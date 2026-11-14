@@ -112,17 +112,17 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 		return nil, discoveryError(http.StatusBadGateway, "openwrt_discovery_invalid_response", "发现返回的设备数据结构无效")
 	}
 	diagnostics := openWrtDiscoveryDiagnostics{
-		Gateway:  openWrtDiscoveryGatewayDiagnostic{
-			DeviceID:   gateway.ID, Name: gateway.Name, IPAddress: gateway.IPAddress,
+		Gateway: openWrtDiscoveryGatewayDiagnostic{
+			DeviceID: gateway.ID, Name: gateway.Name, IPAddress: gateway.IPAddress,
 			NetworkKey: gateway.NetworkKey, PeerID: gateway.PeerID,
 		},
 		Snapshot: openWrtDiscoverySnapshotDiagnostic{
-			Status:    snapshot.Status, HasSnapshot: snapshot.HasSnapshot, Truncated: snapshot.Truncated,
-			Source:    snapshot.Source, Count: snapshot.Count, DeviceCount: len(snapshot.Devices),
+			Status: snapshot.Status, HasSnapshot: snapshot.HasSnapshot, Truncated: snapshot.Truncated,
+			Source: snapshot.Source, Count: snapshot.Count, DeviceCount: len(snapshot.Devices),
 			CanImport: snapshot.Status != "error" && snapshot.HasSnapshot, Message: snapshot.Message,
 		},
-		Route:    routeDiagnostics,
-		Import:   storage.DiscoveredDeviceImportResult{
+		Route: routeDiagnostics,
+		Import: storage.DiscoveredDeviceImportResult{
 			Devices: make([]storage.DiscoveredDeviceSyncDiagnostic, 0),
 		},
 	}
