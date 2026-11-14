@@ -485,7 +485,7 @@ func TestNetworkNodePeerRotationKeepsDeviceIdentityAndChildren(t *testing.T) {
 	}
 	attrs, err := db.ListNodeAttributes(ctx)
 	if err != nil || len(attrs) != 1 || attrs[0].PeerID != "peer-new" ||
-		attrs[0].Alias != "自定义节点别名" || attrs[0].Location.Latitude == nil {
+		attrs[0].Hostname != "fnos" || attrs[0].Alias != "自定义节点别名" || attrs[0].Location.Latitude == nil {
 		t.Fatalf("原有节点别名与地理信息没有继承: %+v %v", attrs, err)
 	}
 	again, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
@@ -866,5 +866,24 @@ func TestLegacyGatewayGroupMigrationPromotesGatewayOwner(t *testing.T) {
 	groups, err := store.ListGatewayGroups(ctx, "network:legacy", "peer-legacy")
 	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != "legacy-gateway" || groups[0].DeviceCount != 1 {
 		t.Fatalf("旧网关组迁移后的所有者和设备数量错误: %+v %v", groups, err)
+	}
+}
+
+func TestNodeAttributeHostnameBackfillOnUnchangedPeer(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "backfill.db"))
+	if err != nil { t.Fatal(err) }
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil { t.Fatal(err) }
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{
+		NetworkKey: "network:home", PeerID: "old-peer", Alias: "上海-腾讯云",
+	}); err != nil { t.Fatal(err) }
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "yun", NetworkKey: "network:home", PeerID: "old-peer", Hostname: "yun"},
+	}); err != nil { t.Fatal(err) }
+	attrs, err := db.ListNodeAttributes(ctx)
+	if err != nil || len(attrs) != 1 || attrs[0].Hostname != "yun" || attrs[0].Alias != "上海-腾讯云" {
+		t.Fatalf("原 Peer ID 对应的手工节点属性应补全 hostname：%+v %v", attrs, err)
 	}
 }
