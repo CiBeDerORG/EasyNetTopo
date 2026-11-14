@@ -449,6 +449,25 @@ async function saveDeviceRecord() {
   finally { savingDevice.value = false }
 }
 
+async function deleteNodeBaseDevice(device: Device) {
+  if (!device.is_node_device) return
+  try {
+    await ElMessageBox.confirm(
+      '确定删除节点基础设备「' + device.name + '」吗？不会删除实际 EasyTier 节点或同节点其他设备。' +
+      (device.is_gateway ? '该设备下的设备会保留，并提升为当前节点直属设备。' : '') +
+      '删除后后台不会自动补回这个原主机名的基础设备。',
+      '删除节点基础设备', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
+    await deleteDevice(device.id)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-node-devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
+    ])
+    ElMessage.success('节点基础设备已删除，其他设备及 EasyTier 节点保留')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
+  }
+}
 async function deleteSelectedDevices() {
   const ids = [...selectedDeviceIds.value]
   if (!ids.length) return
@@ -773,6 +792,9 @@ watch(
               @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
             <el-button text circle aria-label="编辑设备" title="编辑设备"
               @click="openEditDevice(section.gatewayDevice)"><el-icon><Edit /></el-icon></el-button>
+            <el-button v-if="section.gatewayDevice.is_node_device" text circle type="danger"
+              aria-label="删除节点基础设备" title="删除节点基础设备"
+              @click="deleteNodeBaseDevice(section.gatewayDevice)"><el-icon><Delete /></el-icon></el-button>
             <el-button v-if="isOpenWrtDevice(section.gatewayDevice)" text circle
               aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
               @click="openOpenWrtSettings(section.gatewayDevice)"><el-icon><Setting /></el-icon></el-button>
@@ -813,6 +835,9 @@ watch(
                 <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
                   @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
+                <el-button v-if="device.is_node_device" text circle type="danger"
+                  aria-label="删除节点基础设备" title="删除节点基础设备"
+                  @click="deleteNodeBaseDevice(device)"><el-icon><Delete /></el-icon></el-button>
                 <el-button v-if="isOpenWrtDevice(device)" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
               </div>
