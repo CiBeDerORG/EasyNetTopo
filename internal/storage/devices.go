@@ -791,7 +791,7 @@ func createOwnedGatewayGroupTx(ctx context.Context, tx *sql.Tx, deviceID, device
 	return id, nil
 }
 
-func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkKey, peerID string, visited map[string]bool) error {
+func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkKey, peerID, nodeHostname string, visited map[string]bool) error {
 	if groupID == "" {
 		return nil
 	}
@@ -825,8 +825,8 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 		return err
 	}
 	for _, childID := range childIDs {
-		if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_key=?,peer_id=?,updated_at=? WHERE id=?",
-			networkKey, peerID, now, childID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE id=?",
+			networkKey, peerID, nodeHostname, now, childID); err != nil {
 			return err
 		}
 		var childGroupID string
@@ -837,11 +837,38 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 		if err != nil {
 			return err
 		}
-		if err := moveGatewayDescendantsTx(ctx, tx, childGroupID, networkKey, peerID, visited); err != nil {
+		if err := moveGatewayDescendantsTx(ctx, tx, childGroupID, networkKey, peerID, nodeHostname, visited); err != nil {
 			return err
 		}
 	}
 	return nil
+}
+
+// 所属节点的原始主机名优先取已登记的基础节点/手工属性；新节点可由当前实时选择明确传入。
+// 设备的可编辑名称不参与原主机名推断。
+func resolveDeviceNodeHostnameTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, supplied string) (string, error) {
+	if networkKey == "" || peerID == "" {
+		if supplied != "" { return "", ErrInvalidDevice }
+		return "", nil
+	}
+	known := ""
+	var stored string
+	err := tx.QueryRowContext(ctx, `SELECT node_hostname FROM devices
+		WHERE is_node_device=1 AND network_key=? AND peer_id=? LIMIT 1`, networkKey, peerID).Scan(&stored)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) { return "", err }
+	if err == nil && stored != "" { known = stored }
+	err = tx.QueryRowContext(ctx, `SELECT hostname FROM network_node_attributes
+		WHERE network_key=? AND peer_id=? LIMIT 1`, networkKey, peerID).Scan(&stored)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) { return "", err }
+	if err == nil && stored != "" {
+		if known != "" && !strings.EqualFold(known, stored) { return "", ErrInvalidDevice }
+		known = stored
+	}
+	if supplied != "" && known != "" && !strings.EqualFold(known, supplied) {
+		return "", ErrInvalidDevice
+	}
+	if known != "" { return known, nil }
+	return supplied, nil
 }
 
 func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Device, error) {
@@ -867,6 +894,8 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 		return Device{}, err
 	}
 	defer tx.Rollback()
+	input.NodeHostname, err = resolveDeviceNodeHostnameTx(ctx, tx, input.NetworkKey, input.PeerID, input.NodeHostname)
+	if err != nil { return Device{}, err }
 
 	adoptGroupID := ""
 	if input.GatewayGroupID != "" {
@@ -881,10 +910,10 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 		}
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	_, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds),
+	_, err = tx.ExecContext(ctx, `INSERT INTO devices(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,node_hostname,created_at,updated_at)
+		VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`, id, input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds),
 		0, input.IsGateway, input.Manufacturer, input.Model, input.IPAddress, input.MACAddress,
-		input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, now, now)
+		input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, input.NodeHostname, now, now)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
 			return Device{}, ErrDeviceGroupNotFound
@@ -991,7 +1020,7 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 				return Device{}, err
 			}
 		case currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID:
-			if err := moveGatewayDescendantsTx(ctx, tx, currentOwnedGroupID, input.NetworkKey, input.PeerID, make(map[string]bool)); err != nil {
+			if err := moveGatewayDescendantsTx(ctx, tx, currentOwnedGroupID, input.NetworkKey, input.PeerID, input.NodeHostname, make(map[string]bool)); err != nil {
 				return Device{}, err
 			}
 		}
