@@ -872,16 +872,24 @@ func TestLegacyGatewayGroupMigrationPromotesGatewayOwner(t *testing.T) {
 func TestNodeAttributeHostnameBackfillOnUnchangedPeer(t *testing.T) {
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "backfill.db"))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	defer db.Close()
 	store, err := NewDeviceStore(ctx, db)
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{
 		NetworkKey: "network:home", PeerID: "old-peer", Alias: "上海-腾讯云",
-	}); err != nil { t.Fatal(err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
 		{Name: "yun", NetworkKey: "network:home", PeerID: "old-peer", Hostname: "yun"},
-	}); err != nil { t.Fatal(err) }
+	}); err != nil {
+		t.Fatal(err)
+	}
 	attrs, err := db.ListNodeAttributes(ctx)
 	if err != nil || len(attrs) != 1 || attrs[0].Hostname != "yun" || attrs[0].Alias != "上海-腾讯云" {
 		t.Fatalf("原 Peer ID 对应的手工节点属性应补全 hostname：%+v %v", attrs, err)
