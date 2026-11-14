@@ -87,8 +87,10 @@ func newHandler(webDir string, db *storage.Store, catalogSvc *catalog.Service, h
 		}
 		http.ServeFile(w, r, index)
 	})
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+
+	handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		mux.ServeHTTP(w, r)
 	})
+	return gzipMiddleware(handler)
 }
