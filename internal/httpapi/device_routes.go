@@ -71,8 +71,6 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_gateway_group", "message": "网关组名称或所属节点不合法"})
 		case errors.Is(err, storage.ErrGatewayDeviceConflict):
 			reply(w, http.StatusConflict, map[string]string{"code": "gateway_device_conflict", "message": "该网关组已经绑定网关自身设备"})
-		case errors.Is(err, storage.ErrNodeDeviceProtected):
-			reply(w, http.StatusConflict, map[string]string{"code": "node_device_protected", "message": "网络节点基础设备不能删除"})
 		case errors.Is(err, storage.ErrNetworkNodeAutoSyncDisabled):
 			reply(w, http.StatusConflict, map[string]string{"code": "network_node_auto_sync_disabled", "message": "网络节点自动补充已关闭，请重新初始化后再执行自动同步"})
 		case errors.Is(err, storage.ErrDeviceGroupExists):
@@ -80,7 +78,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		case errors.Is(err, storage.ErrInvalidDeviceGroup):
 			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device_group", "message": "分组名称不能为空且不能超过 64 个字符"})
 		case errors.Is(err, storage.ErrDeviceNodeConflict):
-			reply(w, http.StatusConflict, map[string]string{"code": "device_node_conflict", "message": "该网络节点已经关联其他设备"})
+			reply(w, http.StatusConflict, map[string]string{"code": "device_node_conflict", "message": "目标网络节点已有基础设备，请先删除目标节点的重复基础设备后再迁移；不会自动覆盖现有设备"})
 		case errors.Is(err, storage.ErrDeviceNotOpenWrt):
 			reply(w, http.StatusConflict, map[string]string{"code": "device_not_openwrt", "message": "只有标记为 OpenWrt 的设备才能配置发现服务"})
 		case errors.Is(err, storage.ErrInvalidOpenWrtConfig):
