@@ -90,6 +90,7 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 	type identitySet map[string]struct{}
 	ips, macs := make(map[string]identitySet), make(map[string]identitySet)
 	deviceGatewayGroups := make(map[string]string)
+	deviceIPs := make(map[string]string)
 	addIdentity := func(index map[string]identitySet, key, id string) {
 		if key == "" {
 			return
@@ -99,6 +100,15 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 		}
 		index[key][id] = struct{}{}
 	}
+	removeIdentity := func(index map[string]identitySet, key, id string) {
+		if key == "" || index[key] == nil {
+			return
+		}
+		delete(index[key], id)
+		if len(index[key]) == 0 {
+			delete(index, key)
+		}
+	}
 	for rows.Next() {
 		var id, ipAddress, macAddress, groupID string
 		if err := rows.Scan(&id, &ipAddress, &macAddress, &groupID); err != nil {
@@ -106,6 +116,7 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			return result, err
 		}
 		deviceGatewayGroups[id] = groupID
+		deviceIPs[id] = ipAddress
 		addIdentity(ips, ipAddress, id)
 		addIdentity(macs, strings.ToLower(macAddress), id)
 	}
@@ -253,18 +264,36 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 				return result, err
 			}
 			deviceGatewayGroups[deviceID] = ownedGroupID
+			deviceIPs[deviceID] = ipAddress
 			addIdentity(ips, ipAddress, deviceID)
 			addIdentity(macs, macAddress, deviceID)
 			result.Created++
 		}
 
-		// 组网 IP 属于网络节点范围：即使设备已由其他入口登记，也同步本次计算结果。
-		// 若当前没有可用的 IPv4 映射输入，则保留历史值；若映射规则已确认但不匹配，则清空旧值。
-		if networkIPKnown {
-			if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_ip=?,updated_at=? WHERE id=? AND network_ip<>?",
-				networkIP, now, deviceID, networkIP); err != nil {
+		// 已有设备通过 MAC 或 IP 匹配后，也必须同步本次观测到的内网 IP。
+		// 组网 IP 与内网 IP 在同一条 UPDATE 中更新，避免出现新内网 IP 搭配旧组网 IP。
+		// 如果内网 IP 已变化但本次路由映射暂不可用，清空旧组网 IP，避免保留错误映射；
+		// 如果内网 IP 未变化且映射暂不可用，则保留已有组网 IP。
+		oldIPAddress := deviceIPs[deviceID]
+		updateIPAddress := ipAddress != "" && ipAddress != oldIPAddress
+		updateNetworkIP := networkIPKnown || updateIPAddress
+		if updateIPAddress || updateNetworkIP {
+			if _, err := tx.ExecContext(ctx, `UPDATE devices SET
+				ip_address=CASE WHEN ?<>'' THEN ? ELSE ip_address END,
+				network_ip=CASE WHEN ? THEN ? ELSE network_ip END,
+				updated_at=?
+				WHERE id=? AND (
+					(?<>'' AND ip_address<>?) OR (? AND network_ip<>?)
+				)`,
+				ipAddress, ipAddress, updateNetworkIP, networkIP, now, deviceID,
+				ipAddress, ipAddress, updateNetworkIP, networkIP); err != nil {
 				return result, err
 			}
+		}
+		if updateIPAddress {
+			removeIdentity(ips, oldIPAddress, deviceID)
+			deviceIPs[deviceID] = ipAddress
+			addIdentity(ips, ipAddress, deviceID)
 		}
 
 		// 已存在但不属于当前网关组的直属设备或其他网关设备只参与去重，不改写其发现状态。

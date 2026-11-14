@@ -158,3 +158,64 @@ func TestGatewayDiscoveryAutoImportRejectsWrongScopeAndMalformedRecords(t *testi
 		}
 	}
 }
+
+
+func TestGatewayDiscoveryRefreshesExistingDeviceIPAndNetworkIP(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "refresh-existing-device.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IsGateway: true,
+		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "历史设备", IPAddress: "192.168.10.20", MACAddress: "02:00:00:00:00:20",
+		NetworkKey: "network:home", PeerID: "peer-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	syncScan := func(ip, networkIP string) {
+		t.Helper()
+		result, syncErr := store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
+			{
+				Name: "重新发现的设备", IPAddress: ip, MACAddress: "02:00:00:00:00:20",
+				NetworkIP: networkIP, NetworkIPKnown: true, Observation: "recent",
+			},
+		}, false)
+		if syncErr != nil || result.Existing != 1 || result.Created != 0 {
+			t.Fatalf("重新扫描应匹配并更新历史设备: result=%+v err=%v", result, syncErr)
+		}
+	}
+
+	// 历史设备原来没有组网 IP：首次扫描应同时补齐内网 IP 和组网 IP。
+	syncScan("192.168.10.88", "10.10.30.88")
+	updated, err := store.Device(ctx, existing.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IPAddress != "192.168.10.88" || updated.NetworkIP != "10.10.30.88" {
+		t.Fatalf("首次重新发现没有同时补齐两个 IP: %+v", updated)
+	}
+
+	// DHCP 地址再次变化：同一 MAC 命中的历史设备必须同时更新两个地址。
+	syncScan("192.168.10.99", "10.10.30.99")
+	updated, err = store.Device(ctx, existing.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.IPAddress != "192.168.10.99" || updated.NetworkIP != "10.10.30.99" {
+		t.Fatalf("重复扫描没有同步更新内网 IP 和组网 IP: %+v", updated)
+	}
+}
