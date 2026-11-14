@@ -983,7 +983,9 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 			var conflicting int
 			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 				WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?`,
-				input.NetworkKey, input.PeerID, id).Scan(&conflicting); err != nil { return Device{}, err }
+				input.NetworkKey, input.PeerID, id).Scan(&conflicting); err != nil {
+					return Device{}, err
+				}
 			if conflicting > 0 {
 				return Device{}, ErrDeviceNodeConflict
 			}
@@ -997,7 +999,9 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		var duplicate int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 			WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE AND id<>?`,
-			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil { return Device{}, err }
+			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil {
+				return Device{}, err
+			}
 		if duplicate > 0 {
 			return Device{}, ErrDeviceNodeConflict
 		}
@@ -1084,9 +1088,13 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		// 人工改绑到曾被删除的自动节点后，解除该位置的同步抑制。
 		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
 			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
-			input.NetworkKey, input.PeerID, input.NodeHostname); err != nil { return Device{}, err }
+			input.NetworkKey, input.PeerID, input.NodeHostname); err != nil {
+				return Device{}, err
+			}
 		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at)
-			VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil { return Device{}, err }
+			VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil {
+				return Device{}, err
+			}
 	}
 	if err = tx.Commit(); err != nil {
 		return Device{}, err
@@ -1585,9 +1593,13 @@ func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
 		}
 		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
 			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
-			networkKey, peerID, hostname); err != nil { return err }
+			networkKey, peerID, hostname); err != nil {
+				return err
+			}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO network_node_sync_deleted(network_key,peer_id,hostname,deleted_at)
-			VALUES(?,?,?,?)`, networkKey, peerID, hostname, now); err != nil { return err }
+			VALUES(?,?,?,?)`, networkKey, peerID, hostname, now); err != nil {
+				return err
+			}
 	}
 	if ownedGroupID != "" {
 		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,updated_at=? WHERE gateway_group_id=?",
