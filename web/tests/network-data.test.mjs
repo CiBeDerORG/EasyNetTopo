@@ -1,3 +1,4 @@
+import { networkNodeIdentityKey, stableNetworkRows } from '../src/features/network-nodes/identity.ts'
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { networkRows, mergedNetworkRows, ipv4, ipv4Cidr } from '../src/features/network-nodes/data.ts'
@@ -215,4 +216,28 @@ test('从对端直连地址提取公网 IPv4 候选，排除内网及保留地�
       { tunnel: { remote_addr: { url: 'udp://192.168.1.1:11010' } } }
     ] } }]
   })[1].candidatePublicIP, '')
+})
+
+test('节点稳定身份绑定同组网原始主机名而非会变化的 Peer ID', () => {
+  const rows = mergedNetworkRows(yun)
+  const first = stableNetworkRows(rows, 'entry-one')
+  const updated = stableNetworkRows(mergedNetworkRows({
+    ...yun,
+    node_info: { ...yun.node_info, peer_id: 'new-local-id' },
+    peer_routes: yun.peer_routes.map(item => ({
+      ...item, route: { ...item.route, peer_id: 'new-' + item.route.peer_id }
+    }))
+  }), 'entry-one')
+  assert.deepEqual(first.map(row => row.key), updated.map(row => row.key))
+  assert.equal(networkNodeIdentityKey('network:home', 'FnOS', '123'),
+    networkNodeIdentityKey('network:home', 'fnos', '789'))
+  assert.notEqual(networkNodeIdentityKey('network:home', 'FnOS', '123'),
+    networkNodeIdentityKey('network:other', 'FnOS', '123'))
+  assert.notEqual(networkNodeIdentityKey('network:home', '', '123'),
+    networkNodeIdentityKey('network:home', '', '789'))
+  const colliding = stableNetworkRows([
+    { ...rows[1], id: '11', rawHostname: 'FnOS' },
+    { ...rows[2], id: '22', rawHostname: 'fnos' }
+  ], 'entry-one')
+  assert.notEqual(colliding[0].key, colliding[1].key, '同网络同名不同 Peer ID 不应静默合并')
 })
