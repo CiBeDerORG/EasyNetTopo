@@ -12,7 +12,7 @@ import (
 
 func ipv4AddressValue(value uint32) map[string]any {
 	return map[string]any{
-		"address": map[string]any{"addr": value},
+		"address":        map[string]any{"addr": value},
 		"network_length": 24,
 	}
 }
@@ -20,21 +20,21 @@ func ipv4AddressValue(value uint32) map[string]any {
 func routeDataForNetworkIP() json.RawMessage {
 	value := map[string]any{
 		"agent_id": "agent",
-		"data": []any{
+		"data":     []any{
 			map[string]any{
 				"instance_id": "instance-home",
-				"result": map[string]any{
+				"result":      map[string]any{
 					"node_info": map[string]any{
 						"network_name": "home",
-						"peer_id": "peer-local",
-						"ipv4_addr": ipv4AddressValue(168435201), // 10.10.30.1
-						"proxy_cidrs": []string{"192.168.10.0/24"},
+						"peer_id":      "peer-local",
+						"ipv4_addr":    ipv4AddressValue(168435201), // 10.10.30.1
+						"proxy_cidrs":  []string{"192.168.10.0/24"},
 					},
 					"peer_routes": []any{
 						map[string]any{
 							"route": map[string]any{
-								"peer_id": "peer-remote",
-								"ipv4_addr": ipv4AddressValue(168437761), // 10.10.40.1
+								"peer_id":     "peer-remote",
+								"ipv4_addr":   ipv4AddressValue(168437761), // 10.10.40.1
 								"proxy_cidrs": []string{"192.168.20.0/24"},
 							},
 							"peer": map[string]any{"peer_id": "peer-remote"},
@@ -117,13 +117,13 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 		t.Fatal(err)
 	}
 	snapshot, _ := json.Marshal(map[string]any{
-		"status": "ok",
+		"status":       "ok",
 		"has_snapshot": true,
-		"devices": []any{
+		"devices":      []any{
 			map[string]any{
-				"name": "电脑",
-				"ipv4": []string{"192.168.10.162"},
-				"mac": "02:11:22:33:44:55",
+				"name":        "电脑",
+				"ipv4":        []string{"192.168.10.162"},
+				"mac":         "02:11:22:33:44:55",
 				"observation": "recent",
 			},
 		},
@@ -186,13 +186,13 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	}
 
 	outsideSubnet, _ := json.Marshal(map[string]any{
-		"status": "ok",
+		"status":       "ok",
 		"has_snapshot": true,
-		"devices": []any{
+		"devices":      []any{
 			map[string]any{
-				"name": "电脑",
-				"ipv4": []string{"192.168.11.162"},
-				"mac": "02:11:22:33:44:55",
+				"name":        "电脑",
+				"ipv4":        []string{"192.168.11.162"},
+				"mac":         "02:11:22:33:44:55",
 				"observation": "recent",
 			},
 		},
