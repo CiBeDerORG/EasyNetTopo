@@ -19,6 +19,9 @@ func TestGzipCompressesFrontendAssets(t *testing.T) {
 	if err := os.MkdirAll(assetsDir, 0700); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0600); err != nil {
+		t.Fatal(err)
+	}
 
 	payload := []byte(strings.Repeat("export const appName = 'EasyNetTopo';\n", 256))
 	if err := os.WriteFile(filepath.Join(assetsDir, "app.js"), payload, 0600); err != nil {
@@ -95,6 +98,9 @@ func TestGzipRespectsQualityAndRangeRequests(t *testing.T) {
 	dir := t.TempDir()
 	assetsDir := filepath.Join(dir, "assets")
 	if err := os.MkdirAll(assetsDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte("<html></html>"), 0600); err != nil {
 		t.Fatal(err)
 	}
 	payload := []byte(strings.Repeat("const value = 'range-safe';\n", 128))
