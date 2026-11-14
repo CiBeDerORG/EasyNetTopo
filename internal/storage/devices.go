@@ -1340,6 +1340,17 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
 		hostname := strings.TrimSpace(node.Hostname)
+		if hostname != "" {
+			// 历史节点可能只有别名/坐标，没有同步过基础设备；按本次实时 Peer ID 补全原始主机名。
+			// 目标 hostname 已绑定其他 Peer ID 时，不覆盖或合并任何记录。
+			if _, err = tx.ExecContext(ctx, `UPDATE network_node_attributes SET hostname=?
+				WHERE network_key=? AND peer_id=? AND hostname='' AND NOT EXISTS (
+					SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
+				)`, hostname, input.NetworkKey, input.PeerID,
+				input.NetworkKey, hostname, input.PeerID); err != nil {
+				return NetworkNodeSyncResult{}, err
+			}
+		}
 		var existingID, oldHostname string
 		err := tx.QueryRowContext(ctx, "SELECT id,node_hostname FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID, &oldHostname)
 		if err == nil {
@@ -1372,16 +1383,6 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			}
 			if _, err = tx.ExecContext(ctx, "UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?", hostname, now, existingID); err != nil {
 				return NetworkNodeSyncResult{}, err
-			}
-			if hostname != "" {
-				// 自动为既有同 Peer ID 的历史坐标/别名填充原始主机名，不更改其余字段。
-				if _, err = tx.ExecContext(ctx, `UPDATE network_node_attributes SET hostname=?
-					WHERE network_key=? AND peer_id=? AND hostname='' AND NOT EXISTS (
-						SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
-					)`, hostname, input.NetworkKey, input.PeerID,
-					input.NetworkKey, hostname, input.PeerID); err != nil {
-					return NetworkNodeSyncResult{}, err
-				}
 			}
 			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {
 				return NetworkNodeSyncResult{}, err
