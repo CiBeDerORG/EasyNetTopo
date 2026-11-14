@@ -13,16 +13,16 @@ import (
 
 // DiscoveredDeviceInput 是经过接口层字段提取的设备候选，不能由浏览器任意指定所属网关。
 type DiscoveredDeviceInput struct {
-	Name           string
-	IPAddress      string
-	NetworkIP      string
-	NetworkIPKnown bool
+	Name            string
+	IPAddress       string
+	NetworkIP       string
+	NetworkIPKnown  bool
 	NetworkIPStatus string
-	MACAddress     string
-	Manufacturer   string
-	Model          string
-	Source         string
-	Observation    string
+	MACAddress      string
+	Manufacturer    string
+	Model           string
+	Source          string
+	Observation     string
 }
 
 type DiscoveredDeviceSyncDiagnostic struct {
@@ -41,7 +41,7 @@ type DiscoveredDeviceSyncDiagnostic struct {
 	CurrentNetworkIP       string `json:"current_network_ip,omitempty"`
 	NetworkIPAction        string `json:"network_ip_action,omitempty"`
 	NetworkIPMappingStatus string `json:"network_ip_mapping_status,omitempty"`
-	AddressFieldsUpdated  bool   `json:"address_fields_updated"`
+	AddressFieldsUpdated   bool   `json:"address_fields_updated"`
 	DatabaseUpdated        bool   `json:"database_updated"`
 	DiscoveryStatusUpdated bool   `json:"discovery_status_updated"`
 }
@@ -195,13 +195,13 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 
 	for _, item := range candidates {
 		diagnostic := DiscoveredDeviceSyncDiagnostic{
-			Name:        discoveredField(item.Name, 100),
-			Source:      strings.TrimSpace(item.Source),
-			Observation: strings.TrimSpace(item.Observation),
-			IPAddress:   strings.TrimSpace(item.IPAddress),
+			Name:                   discoveredField(item.Name, 100),
+			Source:                 strings.TrimSpace(item.Source),
+			Observation:            strings.TrimSpace(item.Observation),
+			IPAddress:              strings.TrimSpace(item.IPAddress),
 			MACAddress:             strings.TrimSpace(item.MACAddress),
 			NetworkIPMappingStatus: strings.TrimSpace(item.NetworkIPStatus),
-			Result:                  "skipped",
+			Result:                 "skipped",
 		}
 		recordSkipped := func(reason string) {
 			diagnostic.Result = "skipped"
@@ -406,11 +406,14 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 		switch diagnostic.NetworkIPAction {
 		case "written":
 			result.NetworkIPWritten++
-		case "cleared", "unavailable_cleared":
+		case "cleared":
 			result.NetworkIPCleared++
+		case "unavailable_cleared":
+			result.NetworkIPCleared++
+			result.NetworkIPUnavailable++
 		case "unchanged":
 			result.NetworkIPUnchanged++
-		case "unavailable", "unavailable_cleared", "unavailable_preserved":
+		case "unavailable", "unavailable_preserved":
 			result.NetworkIPUnavailable++
 		case "unmapped":
 			result.NetworkIPUnmapped++

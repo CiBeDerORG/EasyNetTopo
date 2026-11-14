@@ -136,6 +136,7 @@ function networkIPMappingStatusLabel(value?: string) {
     mapped: '命中规则并成功映射',
     mapper_unavailable: '未获取到路由映射器',
     no_matching_rule: 'IP 不在代理源网段内',
+    ambiguous_rule: '同时命中多个代理源网段',
     matched_unmapped: '命中网段但地址不可映射',
     ipv4_only: '当前仅支持 IPv4 映射',
     invalid_address: 'IP 地址无效',
@@ -155,7 +156,7 @@ function matchLocationLabel(value?: string) {
     <el-alert type="info" :closable="false" show-icon
       :title="kind === 'adb'
         ? '扫描会将发现的无线 ADB 设备自动添加到该网关下的设备列表；不执行配对、连接或 ADB 指令。'
-        : '点击开始扫描后，发现的设备会自动添加到当前 OpenWrt 网关下；已登记设备不覆盖、不重复添加。'" />
+        : '点击开始扫描后，发现的设备会自动添加到当前 OpenWrt 网关下；已登记设备按现有规则同步 IP，不重复添加。'" />
     <div class="discovery-toolbar">
       <span>上次快照：{{ snapshotTime(snapshot?.scanned_at) }}</span>
       <span v-if="snapshot">记录 {{ snapshot.count ?? snapshot.devices?.length ?? 0 }} 条</span>

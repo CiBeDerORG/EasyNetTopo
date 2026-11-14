@@ -43,7 +43,7 @@ type openWrtNetworkIPHostDiagnostic struct {
 
 type openWrtNetworkIPDiagnostics struct {
 	TargetNetworkKey string                           `json:"target_network_key"`
-	TargetPeerID      string                           `json:"target_peer_id"`
+	TargetPeerID     string                           `json:"target_peer_id"`
 	NetworkEntries   int                              `json:"network_entries"`
 	HostsQueried     int                              `json:"hosts_queried"`
 	HostsSucceeded   int                              `json:"hosts_succeeded"`
@@ -214,10 +214,19 @@ func (m openWrtNetworkIPMapper) diagnosticStatus(raw, mapped string, known bool)
 	if !m.available {
 		return "mapper_unavailable"
 	}
-	if !known {
+	matches := 0
+	for _, mapping := range m.mappings {
+		if mapping.source.Contains(address) {
+			matches++
+		}
+	}
+	if matches == 0 {
 		return "no_matching_rule"
 	}
-	if strings.TrimSpace(mapped) == "" {
+	if matches > 1 {
+		return "ambiguous_rule"
+	}
+	if !known || strings.TrimSpace(mapped) == "" {
 		return "matched_unmapped"
 	}
 	return "mapped"
@@ -423,8 +432,8 @@ func resolveOpenWrtNetworkIPMapper(ctx context.Context, hostSvc *hosts.Service, 
 func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *hosts.Service, device storage.Device) (openWrtNetworkIPMapper, openWrtNetworkIPDiagnostics) {
 	diagnostics := openWrtNetworkIPDiagnostics{
 		TargetNetworkKey: device.NetworkKey,
-		TargetPeerID:      device.PeerID,
-		Hosts:             make([]openWrtNetworkIPHostDiagnostic, 0),
+		TargetPeerID:     device.PeerID,
+		Hosts:            make([]openWrtNetworkIPHostDiagnostic, 0),
 	}
 	if hostSvc == nil {
 		diagnostics.Reason = "主机服务不可用，无法读取 EasyTier 组网入口"

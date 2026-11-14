@@ -2,8 +2,8 @@ package httpapi
 
 import (
 	"context"
-	"errors"
 	"encoding/json"
+	"errors"
 	"net"
 	"net/http"
 	"net/netip"
@@ -121,7 +121,7 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 			Source: snapshot.Source, Count: snapshot.Count, DeviceCount: len(snapshot.Devices),
 			CanImport: snapshot.Status != "error" && snapshot.HasSnapshot, Message: snapshot.Message,
 		},
-		Route: routeDiagnostics,
+		Route:  routeDiagnostics,
 		Import: storage.DiscoveredDeviceImportResult{
 			Devices: make([]storage.DiscoveredDeviceSyncDiagnostic, 0),
 		},

@@ -430,9 +430,9 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				mapper := openWrtNetworkIPMapper{}
 				routeDiagnostics := openWrtNetworkIPDiagnostics{
 					TargetNetworkKey: device.NetworkKey,
-					TargetPeerID:      device.PeerID,
-					Hosts:             make([]openWrtNetworkIPHostDiagnostic, 0),
-					Reason:            "当前扫描快照不可导入，未查询 EasyTier 路由",
+					TargetPeerID:     device.PeerID,
+					Hosts:            make([]openWrtNetworkIPHostDiagnostic, 0),
+					Reason:           "当前扫描快照不可导入，未查询 EasyTier 路由",
 				}
 				if discoverySnapshotCanImport(result) {
 					mapper, routeDiagnostics = resolveOpenWrtNetworkIPMapperWithDiagnostics(r.Context(), hostSvc, device)
