@@ -32,6 +32,7 @@ export type Device = {
   manufacturer?: string
   model?: string
   ip_address?: string
+  network_ip?: string
   mac_address?: string
   note?: string
   network_key?: string

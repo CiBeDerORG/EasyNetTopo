@@ -57,7 +57,7 @@ func newHandler(webDir string, db *storage.Store, catalogSvc *catalog.Service, h
 	}
 
 	if deviceStore != nil {
-		deviceRoutes(mux, db, deviceStore)
+		deviceRoutes(mux, db, deviceStore, hostSvc)
 	}
 	if hostSvc != nil {
 		hostRoutes(mux, db, hostSvc, catalogSvc, taskSvc)

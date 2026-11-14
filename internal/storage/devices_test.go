@@ -105,6 +105,10 @@ func TestDeviceNodeScopeIndexMigrationAllowsMultipleAssetsPerNode(t *testing.T) 
 	if err != nil {
 		t.Fatal(err)
 	}
+	legacyNode, err := store.Device(ctx, "legacy-node")
+	if err != nil || legacyNode.NetworkIP != "" {
+		t.Fatalf("历史设备应兼容新增 network_ip 字段: %+v %v", legacyNode, err)
+	}
 	child, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "迁移后新增设备", DeviceType: "电脑", NetworkKey: "network:legacy", PeerID: "peer-legacy",
 	})

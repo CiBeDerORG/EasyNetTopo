@@ -68,6 +68,7 @@ type Device struct {
 	Manufacturer        string   `json:"manufacturer,omitempty"`
 	Model               string   `json:"model,omitempty"`
 	IPAddress           string   `json:"ip_address,omitempty"`
+	NetworkIP           string   `json:"network_ip,omitempty"`
 	MACAddress          string   `json:"mac_address,omitempty"`
 	Note                string   `json:"note,omitempty"`
 	NetworkKey          string   `json:"network_key,omitempty"`
@@ -146,7 +147,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			device_type TEXT NOT NULL DEFAULT '通用设备', semantic_kinds TEXT NOT NULL DEFAULT '[]',
 			is_node_device INTEGER NOT NULL DEFAULT 0, is_gateway INTEGER NOT NULL DEFAULT 0,
 			manufacturer TEXT NOT NULL DEFAULT '', model TEXT NOT NULL DEFAULT '',
-			ip_address TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
+			ip_address TEXT NOT NULL DEFAULT '', network_ip TEXT NOT NULL DEFAULT '', mac_address TEXT NOT NULL DEFAULT '',
 			note TEXT NOT NULL DEFAULT '', is_openwrt INTEGER NOT NULL DEFAULT 0,
 			network_key TEXT NOT NULL DEFAULT '', peer_id TEXT NOT NULL DEFAULT '',
 			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
@@ -198,6 +199,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 		{"semantic_kinds", `semantic_kinds TEXT NOT NULL DEFAULT '[]'`},
 		{"is_node_device", "is_node_device INTEGER NOT NULL DEFAULT 0"},
 		{"node_hostname", "node_hostname TEXT NOT NULL DEFAULT ''"},
+		{"network_ip", "network_ip TEXT NOT NULL DEFAULT ''"},
 		{"is_gateway", "is_gateway INTEGER NOT NULL DEFAULT 0"},
 		{"gateway_group_id", "gateway_group_id TEXT REFERENCES device_gateway_groups(id) ON DELETE SET NULL"},
 	} {
@@ -601,7 +603,7 @@ func (s *DeviceStore) DeleteDeviceGroup(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(parent.name,gg.name,''),COALESCE(owned.id,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,d.node_hostname,
+const deviceSelect = `SELECT d.id,d.name,COALESCE(d.group_id,''),COALESCE(g.name,''),COALESCE(d.gateway_group_id,''),COALESCE(parent.name,gg.name,''),COALESCE(owned.id,''),d.device_type,d.semantic_kinds,d.is_node_device,d.is_gateway,d.manufacturer,d.model,d.ip_address,d.network_ip,d.mac_address,d.note,d.is_openwrt,d.network_key,d.peer_id,d.node_hostname,
 	CASE WHEN c.device_id IS NULL THEN 0 ELSE 1 END,COALESCE(c.rpcd_port,0),COALESCE(c.https,0),COALESCE(c.username,''),d.created_at,d.updated_at,
 	CASE
 		WHEN EXISTS(SELECT 1 FROM device_discovery_observations online_obs WHERE online_obs.device_id=d.id AND online_obs.status='online') THEN 'online'
@@ -622,7 +624,7 @@ func scanDevice(row interface{ Scan(...any) error }) (Device, error) {
 	var legacyIsOpenWrt bool
 	var semanticKinds string
 	err := row.Scan(&v.ID, &v.Name, &v.GroupID, &v.GroupName, &v.GatewayGroupID, &v.GatewayGroupName, &v.OwnedGatewayGroupID, &v.DeviceType, &semanticKinds, &v.IsNodeDevice, &v.IsGateway,
-		&v.Manufacturer, &v.Model, &v.IPAddress, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID, &v.NodeHostname,
+		&v.Manufacturer, &v.Model, &v.IPAddress, &v.NetworkIP, &v.MACAddress, &v.Note, &legacyIsOpenWrt, &v.NetworkKey, &v.PeerID, &v.NodeHostname,
 		&configured, &v.OpenWrtRPCDPort, &https, &v.OpenWrtUsername, &v.CreatedAt, &v.UpdatedAt,
 		&v.DiscoveryStatus, &v.DiscoveryLastSeenAt)
 	if err != nil {

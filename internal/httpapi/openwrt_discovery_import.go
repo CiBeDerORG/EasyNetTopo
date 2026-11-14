@@ -37,6 +37,10 @@ func firstDiscoveryIP(candidates ...string) string {
 
 // 仅 POST scan 的有效新快照自动导入；GET list 和失败时留下的旧快照都不能写设备库。
 func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.DeviceStore, gatewayID, kind string, raw json.RawMessage) (json.RawMessage, *openWrtDiscoveryError) {
+	return importOpenWrtDiscoverySnapshotWithNetworkIP(ctx, devices, gatewayID, kind, raw, openWrtNetworkIPMapper{})
+}
+
+func importOpenWrtDiscoverySnapshotWithNetworkIP(ctx context.Context, devices *storage.DeviceStore, gatewayID, kind string, raw json.RawMessage, mapper openWrtNetworkIPMapper) (json.RawMessage, *openWrtDiscoveryError) {
 	var snapshot struct {
 		Status      string                   `json:"status"`
 		HasSnapshot bool                     `json:"has_snapshot"`
@@ -72,6 +76,9 @@ func importOpenWrtDiscoverySnapshot(ctx context.Context, devices *storage.Device
 			candidate.IPAddress = firstDiscoveryIP(append(record.IPv4, record.IPv6...)...)
 			candidate.Manufacturer = record.Vendor
 			candidate.Model = record.Model
+		}
+		if candidate.IPAddress != "" {
+			candidate.NetworkIP, candidate.NetworkIPKnown = mapper.mapAddress(candidate.IPAddress)
 		}
 		// 忽略广播和组播 MAC；只有真实可定位的 MAC/IP 才允许自动登记。
 		if candidate.MACAddress != "" {

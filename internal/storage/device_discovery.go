@@ -13,13 +13,15 @@ import (
 
 // DiscoveredDeviceInput 是经过接口层字段提取的设备候选，不能由浏览器任意指定所属网关。
 type DiscoveredDeviceInput struct {
-	Name         string
-	IPAddress    string
-	MACAddress   string
-	Manufacturer string
-	Model        string
-	Source       string
-	Observation  string
+	Name           string
+	IPAddress      string
+	NetworkIP      string
+	NetworkIPKnown bool
+	MACAddress     string
+	Manufacturer   string
+	Model          string
+	Source         string
+	Observation    string
 }
 
 type DiscoveredDeviceImportResult struct {
@@ -185,6 +187,14 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			}
 			ipAddress = ip.String()
 		}
+		networkIP := ""
+		networkIPKnown := item.NetworkIPKnown && ipAddress != ""
+		if networkIPKnown && strings.TrimSpace(item.NetworkIP) != "" {
+			mapped, parseErr := netip.ParseAddr(strings.TrimSpace(item.NetworkIP))
+			if parseErr == nil && mapped.Is4() && mapped.IsGlobalUnicast() && !mapped.IsLinkLocalUnicast() && !mapped.IsLoopback() && mapped.Zone() == "" {
+				networkIP = mapped.String()
+			}
+		}
 		if macAddress != "" {
 			mac, err := net.ParseMAC(macAddress)
 			if err != nil || len(mac) != 6 || mac[0]&1 != 0 {
@@ -235,9 +245,9 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			}
 			_, err = tx.ExecContext(ctx, `INSERT INTO devices
 				(id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,
-				manufacturer,model,ip_address,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
-				VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,0,?,?,?,?)`,
-				deviceID, input.Name, ownedGroupID, input.Manufacturer, input.Model, input.IPAddress,
+				manufacturer,model,ip_address,network_ip,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at)
+				VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,?,0,?,?,?,?)`,
+				deviceID, input.Name, ownedGroupID, input.Manufacturer, input.Model, input.IPAddress, networkIP,
 				input.MACAddress, input.Note, networkKey, peerID, now, now)
 			if err != nil {
 				return result, err
@@ -246,6 +256,15 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			addIdentity(ips, ipAddress, deviceID)
 			addIdentity(macs, macAddress, deviceID)
 			result.Created++
+		}
+
+		// 组网 IP 属于网络节点范围：即使设备已由其他入口登记，也同步本次计算结果。
+		// 若当前没有可用的 IPv4 映射输入，则保留历史值；若映射规则已确认但不匹配，则清空旧值。
+		if networkIPKnown {
+			if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_ip=?,updated_at=? WHERE id=? AND network_ip<>?",
+				networkIP, now, deviceID, networkIP); err != nil {
+				return result, err
+			}
 		}
 
 		// 已存在但不属于当前网关组的直属设备或其他网关设备只参与去重，不改写其发现状态。

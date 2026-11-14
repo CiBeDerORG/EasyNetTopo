@@ -8,10 +8,11 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
-func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.DeviceStore) {
+func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.DeviceStore, hostSvc *hosts.Service) {
 	authorize := func(w http.ResponseWriter, r *http.Request) bool {
 		c, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), c.Value) {
@@ -426,7 +427,11 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				return
 			}
 			if action == "scan" {
-				result, callErr = importOpenWrtDiscoverySnapshot(r.Context(), devices, device.ID, kind, result)
+				mapper := openWrtNetworkIPMapper{}
+				if discoverySnapshotCanImport(result) {
+					mapper = resolveOpenWrtNetworkIPMapper(r.Context(), hostSvc, device)
+				}
+				result, callErr = importOpenWrtDiscoverySnapshotWithNetworkIP(r.Context(), devices, device.ID, kind, result, mapper)
 				if callErr != nil {
 					reply(w, callErr.status, map[string]string{"code": callErr.code, "message": callErr.message})
 					return

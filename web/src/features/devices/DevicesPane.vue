@@ -829,7 +829,10 @@ watch(
                 </div>
                 <div class="device-subtitle">
                   <span>{{ [device.manufacturer, device.model].filter(Boolean).join(' · ') || '未填写厂商与型号' }}</span>
-                  <span v-if="device.ip_address">{{ device.ip_address }}</span>
+                  <div class="device-ip-addresses">
+                    <span v-if="device.ip_address">内网 IP：{{ device.ip_address }}</span>
+                    <span v-if="device.network_ip">组网 IP：{{ device.network_ip }}</span>
+                  </div>
                 </div>
               </div>
               <div class="device-actions">
@@ -1033,6 +1036,7 @@ watch(
 .device-title { display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
 .device-title strong { overflow-wrap:anywhere; color:var(--ent-text); font-size:14px; }
 .device-subtitle { display:flex; flex-wrap:wrap; gap:8px; margin-top:7px; color:var(--ent-muted); font-size:11px; }
+.device-ip-addresses { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
 .device-actions { display:flex; flex:none; gap:0; margin-left:auto; }
 .device-actions :deep(.el-button) { color:var(--ent-muted); }
 .device-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:13px; color:var(--ent-muted); font-size:11px; }
