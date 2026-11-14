@@ -142,7 +142,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 			t.Fatal(listErr)
 		}
 		for _, item := range items {
-			if item.IPAddress == "192.168.10.162" {
+			if item.MACAddress == "02:11:22:33:44:55" {
 				return item
 			}
 		}

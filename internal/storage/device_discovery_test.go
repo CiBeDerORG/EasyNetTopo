@@ -75,16 +75,16 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	for _, d := range nodeDevices {
 		found[d.IPAddress] = d
 	}
-	for _, ip := range []string{"192.168.10.20", "192.168.10.21"} {
+	for _, ip := range []string{"192.168.10.25", "192.168.10.21"} {
 		d := found[ip]
 		if d.GatewayGroupID != gateway.OwnedGatewayGroupID || d.IsGateway || d.IsNodeDevice ||
 			d.NetworkKey != gateway.NetworkKey || d.PeerID != gateway.PeerID {
 			t.Fatalf("新设备未正确归属于网关: %+v", d)
 		}
 	}
-	if found["192.168.10.20"].MACAddress != "02:00:00:00:00:20" ||
-		found["192.168.10.20"].Manufacturer != "某品牌" {
-		t.Fatalf("设备属性没有保存: %+v", found["192.168.10.20"])
+	if found["192.168.10.25"].MACAddress != "02:00:00:00:00:20" ||
+		found["192.168.10.25"].Manufacturer != "某品牌" {
+		t.Fatalf("设备属性没有保存: %+v", found["192.168.10.25"])
 	}
 	if found["192.168.10.21"].Note != "来源：OpenWrt ADB 发现" {
 		t.Fatalf("ADB 来源标识不正确: %+v", found["192.168.10.21"])
@@ -96,8 +96,10 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	if err != nil || again.Created != 0 || again.Existing != 2 {
 		t.Fatalf("重复扫描不应重复创建设备: %+v %v", again, err)
 	}
-	if updated, err := store.Device(ctx, found["192.168.10.20"].ID); err != nil || updated.Name != "新设备甲" {
+	if updated, err := store.Device(ctx, found["192.168.10.25"].ID); err != nil || updated.Name != "新设备甲" {
 		t.Fatalf("重复扫描覆盖了手工可编辑设备属性: %+v %v", updated, err)
+	} else if updated.IPAddress != "192.168.10.20" {
+		t.Fatalf("后续扫描应继续按 MAC 更新设备当前 IP: %+v", updated)
 	}
 	other, err := store.Device(ctx, otherNode.ID)
 	if err != nil || other.Name != "其他节点设备" {
