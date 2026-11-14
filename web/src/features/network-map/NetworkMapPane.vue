@@ -1,13 +1,34 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { listNodeAttributes } from '../network-nodes/attributes'
 import { mergedNetworkRows } from '../network-nodes/data'
-import GlobeMap from './GlobeMap.vue'
 import { buildMapTopology, trafficRates, type MapLink, type MapNode, type TrafficSample } from './topology'
+
+ // 将 Cesium 地球引擎拆成第二层异步模块。路由数据、统计和侧栏先渲染，
+ // 大体积 WebGL 引擎随后下载，不再拖住地图页面的可见内容。
+const GlobeMap = defineAsyncComponent({
+  loader: () => import('./GlobeMap.vue'),
+  loadingComponent: {
+    setup: () => () => h('div', { class: 'globe-loading', role: 'status' }, [
+      h('span', { class: 'globe-loading-spinner', 'aria-hidden': 'true' }),
+      h('span', '正在后台加载 3D 地图引擎…')
+    ])
+  },
+  errorComponent: {
+    setup: () => () => h('div', { class: 'globe-load-error', role: 'alert' },
+      '3D 地图引擎加载失败，请检查网络后刷新页面重试。')
+  },
+  delay: 0,
+  timeout: 60_000,
+  onError: (_error, retry, fail, attempts) => {
+    if (attempts <= 2) retry()
+    else fail()
+  }
+})
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const router = useRouter()
@@ -260,6 +281,22 @@ function formatMs(value: number | null) {
 .map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 286px; min-height: 0; flex: 1; gap: 12px; }
 .globe-area { position: relative; min-height: 0; overflow: hidden; border: 1px solid var(--ent-line);
   border-radius: 14px; background: #061323; }
+.globe-loading, .globe-load-error {
+  position: absolute; inset: 0; display: flex; flex-direction: column;
+  align-items: center; justify-content: center; gap: 13px;
+  color: var(--ent-muted); font-size: 12px;
+  background: radial-gradient(circle at 48% 46%, #18364d, #071423 76%);
+}
+:global(:root[data-theme='light']) .globe-loading,
+:global(:root[data-theme='light']) .globe-load-error {
+  background: radial-gradient(circle at 48% 46%, #f7fbff, #d7e6f0 76%);
+}
+.globe-loading-spinner {
+  width: 26px; height: 26px; border: 2px solid var(--ent-line);
+  border-top-color: var(--ent-cyan); border-radius: 50%;
+  animation: globe-loading-spin .8s linear infinite;
+}
+@keyframes globe-loading-spin { to { transform: rotate(360deg); } }
 :global(:root[data-theme='light']) .globe-area { background: #dceaf4; }
 .map-legend { position: absolute; left: 16px; bottom: 16px; background: #0b1f32e8; color: #dbeaf8;
   border: 1px solid #28465b; padding: 10px 12px; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; box-shadow: 0 6px 20px #0003; backdrop-filter: blur(10px); }
