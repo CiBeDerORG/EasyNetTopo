@@ -164,6 +164,14 @@ watch(
   ([items, liveFetched, storedFetched]) => {
     if ((networkEntries.value.length > 0 && !liveFetched) || !storedFetched) return
     if (selectedNodeKey.value === ALL_SCOPE || items.some(node => nodeValue(node) === selectedNodeKey.value)) return
+    // 旧 URL 使用 [network_key,peer_id]；打开后升级为基于主机名的稳定选择键。
+    try {
+      const legacy = JSON.parse(selectedNodeKey.value)
+      if (Array.isArray(legacy) && legacy.length === 2) {
+        const matched = items.find(node => node.networkKey === legacy[0] && node.peerId === legacy[1])
+        if (matched) { selectedNodeKey.value = nodeValue(matched); return }
+      }
+    } catch { /* 非旧格式，使用默认筛选 */ }
     selectedNodeKey.value = ALL_SCOPE
   },
   { immediate: true }
@@ -195,7 +203,7 @@ const gatewayScopes = computed(() => {
   for (const device of devices.value) {
     if (device.network_key && device.peer_id) {
       const scope = { networkKey: device.network_key, peerId: device.peer_id }
-      scopes.set(nodeValue(scope), scope)
+      scopes.set(peerScopeValue(scope.networkKey, scope.peerId), scope)
     }
   }
   return [...scopes.values()]
@@ -209,6 +217,7 @@ const gatewayGroupsQuery = useQuery({
 })
 const gatewayGroups = computed(() => gatewayGroupsQuery.data.value || [])
 const nodeErrors = computed(() => nodesQuery.data.value?.errors || 0)
+const nodeConflicts = computed(() => nodesQuery.data.value?.conflicts || 0)
 const search = ref('')
 const selectedDeviceIds = ref<string[]>([])
 watch([search, selectedNodeKey], () => { selectedDeviceIds.value = [] })
@@ -337,7 +346,10 @@ const deviceDialogGatewayGroupOptions = computed(() =>
   (deviceDialogGatewayGroupsQuery.data.value || []).filter(group => group.gateway_device_id !== editingDeviceId.value))
 const deviceDraftNodeKey = computed({
   get: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
-    ? JSON.stringify([deviceDraft.value.network_key, deviceDraft.value.peer_id]) : '',
+    ? nodeValue(nodeOptions.value.find(node => node.networkKey === deviceDraft.value.network_key &&
+      node.peerId === deviceDraft.value.peer_id) || {
+      networkKey: deviceDraft.value.network_key, peerId: deviceDraft.value.peer_id, hostname: ''
+    }) : '',
   set: (value: string) => {
     const node = nodeOptions.value.find(item => nodeValue(item) === value)
     const networkKey = node?.networkKey || ''
@@ -417,8 +429,8 @@ async function saveDeviceRecord() {
     await queryClient.invalidateQueries({ queryKey: ['devices'] })
     await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
     await queryClient.invalidateQueries({ queryKey: ['device-node-devices'] })
-    const targetScope = draft.network_key && draft.peer_id
-      ? JSON.stringify([draft.network_key, draft.peer_id]) : ALL_SCOPE
+    const targetNode = nodeOptions.value.find(node => node.networkKey === draft.network_key && node.peerId === draft.peer_id)
+    const targetScope = targetNode ? nodeValue(targetNode) : ALL_SCOPE
     deviceDialogOpen.value = false
     if (!isAllScope.value && targetScope !== selectedNodeKey.value) selectedNodeKey.value = targetScope
     ElMessage.success(editingDeviceId.value ? '设备资料已更新' : '设备已添加')
@@ -624,7 +636,7 @@ watch(
       <div class="node-scope-label">所处节点</div>
       <el-select v-model="selectedNodeKey" filterable class="node-scope-select" placeholder="选择网络节点">
         <el-option label="全部" :value="ALL_SCOPE" />
-        <el-option v-for="node in nodeOptions" :key="node.networkKey + '|' + node.peerId"
+        <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
           :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
           <div class="node-option">
             <span>{{ node.label }}</span>
@@ -648,6 +660,8 @@ watch(
     <el-alert v-if="networkEntries.length && nodesQuery.isError.value"
       title="实时网络节点暂时无法读取；已登记的历史节点和设备仍可管理。" type="warning" :closable="false" show-icon />
     <el-alert v-else-if="nodeErrors" :title="nodeErrors + ' 个组网入口暂时不可用，已显示其他入口可读取的节点。'"
+      type="warning" :closable="false" show-icon />
+    <el-alert v-if="nodeConflicts" :title="nodeConflicts + ' 组同网络原始主机名冲突；为避免关联错误，暂按 Peer ID 区分这些节点。'"
       type="warning" :closable="false" show-icon />
     <el-alert v-if="!networkEntries.length && !nodeOptions.length"
       title="尚未设置组网入口；可以先查看全部设备，设置入口后即可选择网络节点。" type="info" :closable="false" />
