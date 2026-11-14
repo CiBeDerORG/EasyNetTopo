@@ -25,7 +25,7 @@ var (
 	ErrGatewayGroupNotFound        = errors.New("网关组不存在")
 	ErrInvalidGatewayGroup         = errors.New("网关组名称或节点范围不合法")
 	ErrGatewayDeviceConflict       = errors.New("该网关组已经绑定网关设备")
-		ErrNetworkNodeAutoSyncDisabled = errors.New("网络节点自动补充已关闭")
+	ErrNetworkNodeAutoSyncDisabled = errors.New("网络节点自动补充已关闭")
 	ErrInvalidDevice               = errors.New("设备信息不合法")
 	ErrInvalidDeviceGroup          = errors.New("设备分组名称不合法")
 	ErrDeviceNotOpenWrt            = errors.New("该设备未标记为 OpenWrt")
@@ -986,8 +986,8 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 				WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?`,
 				input.NetworkKey, input.PeerID, id).Scan(&conflicting); err != nil {
-					return Device{}, err
-				}
+				return Device{}, err
+			}
 			if conflicting > 0 {
 				return Device{}, ErrDeviceNodeConflict
 			}
@@ -1002,8 +1002,8 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 			WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE AND id<>?`,
 			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil {
-				return Device{}, err
-			}
+			return Device{}, err
+		}
 		if duplicate > 0 {
 			return Device{}, ErrDeviceNodeConflict
 		}
@@ -1091,12 +1091,12 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
 			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
 			input.NetworkKey, input.PeerID, input.NodeHostname); err != nil {
-				return Device{}, err
-			}
+			return Device{}, err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at)
 			VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil {
-				return Device{}, err
-			}
+			return Device{}, err
+		}
 	}
 	if err = tx.Commit(); err != nil {
 		return Device{}, err
@@ -1596,12 +1596,12 @@ func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
 		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
 			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
 			networkKey, peerID, hostname); err != nil {
-				return err
-			}
+			return err
+		}
 		if _, err = tx.ExecContext(ctx, `INSERT INTO network_node_sync_deleted(network_key,peer_id,hostname,deleted_at)
 			VALUES(?,?,?,?)`, networkKey, peerID, hostname, now); err != nil {
-				return err
-			}
+			return err
+		}
 	}
 	if ownedGroupID != "" {
 		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,updated_at=? WHERE gateway_group_id=?",
