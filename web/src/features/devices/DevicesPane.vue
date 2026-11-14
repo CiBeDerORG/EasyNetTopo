@@ -123,7 +123,8 @@ function peerScopeValue(networkKey: string, peerId: string): string {
 }
 const liveNodeOptions = computed<LiveNodeOption[]>(() => (nodesQuery.data.value?.nodes || []).map(node => {
   const hostname = node.row.rawHostname || ''
-  const attr = (hostname ? attributesByHostname.value.get(node.networkKey + '|' + hostname.toLocaleLowerCase()) : undefined)
+  const attr = (hostname && node.identityKey === networkNodeIdentityKey(node.networkKey, hostname, node.row.id)
+    ? attributesByHostname.value.get(node.networkKey + '|' + hostname.toLocaleLowerCase()) : undefined)
     || attributesByKey.value.get(node.networkKey + '|' + node.row.id)
   return {
     networkKey: node.networkKey, peerId: node.row.id, hostname,
