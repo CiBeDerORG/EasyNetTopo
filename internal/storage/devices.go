@@ -25,8 +25,7 @@ var (
 	ErrGatewayGroupNotFound        = errors.New("网关组不存在")
 	ErrInvalidGatewayGroup         = errors.New("网关组名称或节点范围不合法")
 	ErrGatewayDeviceConflict       = errors.New("该网关组已经绑定网关设备")
-	ErrNodeDeviceProtected         = errors.New("网络节点基础设备不能删除")
-	ErrNetworkNodeAutoSyncDisabled = errors.New("网络节点自动补充已关闭")
+		ErrNetworkNodeAutoSyncDisabled = errors.New("网络节点自动补充已关闭")
 	ErrInvalidDevice               = errors.New("设备信息不合法")
 	ErrInvalidDeviceGroup          = errors.New("设备分组名称不合法")
 	ErrDeviceNotOpenWrt            = errors.New("该设备未标记为 OpenWrt")
@@ -99,6 +98,7 @@ type DeviceInput struct {
 	Note               string   `json:"note"`
 	NetworkKey         string   `json:"network_key"`
 	PeerID             string   `json:"peer_id"`
+	NodeHostname       string   `json:"node_hostname,omitempty"`
 }
 
 type NetworkNodeDeviceInput struct {
@@ -164,6 +164,14 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			network_key TEXT NOT NULL, peer_id TEXT NOT NULL, first_seen_at TEXT NOT NULL,
 			PRIMARY KEY(network_key,peer_id)
 		)`,
+		`CREATE TABLE IF NOT EXISTS network_node_sync_deleted (
+			network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
+			hostname TEXT NOT NULL DEFAULT '', deleted_at TEXT NOT NULL,
+			PRIMARY KEY(network_key,peer_id)
+		)`,
+		`CREATE INDEX IF NOT EXISTS idx_network_node_deleted_hostname
+			ON network_node_sync_deleted(network_key,hostname COLLATE NOCASE)
+			WHERE hostname<>''`,
 		`CREATE TABLE IF NOT EXISTS device_openwrt_configs (
 			device_id TEXT PRIMARY KEY REFERENCES devices(id) ON DELETE CASCADE,
 			rpcd_port INTEGER NOT NULL DEFAULT 80, https INTEGER NOT NULL DEFAULT 0,
@@ -418,6 +426,7 @@ func normalizeDevice(v *DeviceInput) error {
 	v.Note = strings.TrimSpace(v.Note)
 	v.NetworkKey = strings.TrimSpace(v.NetworkKey)
 	v.PeerID = strings.TrimSpace(v.PeerID)
+	v.NodeHostname = strings.TrimSpace(v.NodeHostname)
 	if v.Name == "" || len([]rune(v.Name)) > 100 || strings.ContainsAny(v.Name, "\r\n\x00") {
 		return ErrInvalidDevice
 	}
@@ -476,13 +485,13 @@ func normalizeDevice(v *DeviceInput) error {
 		value string
 		limit int
 	}{
-		{v.Manufacturer, 100}, {v.Model, 120}, {v.Note, 1000}, {v.NetworkKey, 256}, {v.PeerID, 128},
+		{v.Manufacturer, 100}, {v.Model, 120}, {v.Note, 1000}, {v.NetworkKey, 256}, {v.PeerID, 128}, {v.NodeHostname, 100},
 	} {
 		if len([]rune(field.value)) > field.limit || strings.ContainsAny(field.value, "\x00") {
 			return ErrInvalidDevice
 		}
 	}
-	if (v.NetworkKey == "") != (v.PeerID == "") {
+	if (v.NetworkKey == "") != (v.PeerID == "") || (v.NetworkKey == "" && v.NodeHostname != "") || v.NodeHostname == "—" || strings.ContainsAny(v.NodeHostname, "\r\n") {
 		return ErrInvalidDevice
 	}
 	if v.IPAddress != "" {
@@ -1180,6 +1189,7 @@ func (s *DeviceStore) ClearDeviceData(ctx context.Context) error {
 		"DELETE FROM device_gateway_groups",
 		"DELETE FROM device_groups",
 		"DELETE FROM network_node_sync_seen",
+		"DELETE FROM network_node_sync_deleted",
 		"DELETE FROM settings WHERE key='device_network_node_auto_sync'",
 	} {
 		if _, err := tx.ExecContext(ctx, statement); err != nil {
