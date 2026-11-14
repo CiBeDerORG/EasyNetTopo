@@ -1221,10 +1221,16 @@ func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID,
 		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
+	// 老版本的手工属性可能没有保存 hostname；换绑时补齐持久身份。
+	// 若目标 Peer ID 已存在属性记录，保留两边原有数据，不冒险覆盖别名和坐标。
+	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes
+		SET peer_id=?,hostname=CASE WHEN hostname='' THEN ? ELSE hostname END
 		WHERE network_key=? AND peer_id=? AND NOT EXISTS (
 			SELECT 1 FROM network_node_attributes WHERE network_key=? AND peer_id=?
-		)`, newPeerID, networkKey, oldPeerID, networkKey, newPeerID); err != nil {
+		) AND NOT EXISTS (
+			SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
+		)`, newPeerID, hostname, networkKey, oldPeerID, networkKey, newPeerID,
+		networkKey, hostname, oldPeerID); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
@@ -1366,6 +1372,16 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			}
 			if _, err = tx.ExecContext(ctx, "UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?", hostname, now, existingID); err != nil {
 				return NetworkNodeSyncResult{}, err
+			}
+			if hostname != "" {
+				// 自动为既有同 Peer ID 的历史坐标/别名填充原始主机名，不更改其余字段。
+				if _, err = tx.ExecContext(ctx, `UPDATE network_node_attributes SET hostname=?
+					WHERE network_key=? AND peer_id=? AND hostname='' AND NOT EXISTS (
+						SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
+					)`, hostname, input.NetworkKey, input.PeerID,
+					input.NetworkKey, hostname, input.PeerID); err != nil {
+					return NetworkNodeSyncResult{}, err
+				}
 			}
 			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {
 				return NetworkNodeSyncResult{}, err
