@@ -1,9 +1,8 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
-import NetworkMapPane from '../../network-map/NetworkMapPane.vue'
 import DevicesPane from '../../devices/DevicesPane.vue'
-import { computed, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Delete, SwitchButton } from '@element-plus/icons-vue'
@@ -51,6 +50,35 @@ import type {
   Host,
   HostHealthStatus
 } from '../types'
+
+// 网络地图依赖 Cesium/WebGL，必须从工作台首屏拆分；只有进入地图菜单时才下载。
+const NetworkMapPane = defineAsyncComponent({
+  loader: () => import('../../network-map/NetworkMapPane.vue'),
+  loadingComponent: {
+    setup: () => () => h('div', {
+      role: 'status',
+      style: {
+        flex: '1 1 auto', minHeight: '320px', display: 'grid', placeItems: 'center',
+        padding: '24px', color: 'var(--ent-muted)'
+      }
+    }, '正在后台加载网络地图页面…')
+  },
+  errorComponent: {
+    setup: () => () => h('div', {
+      role: 'alert',
+      style: {
+        flex: '1 1 auto', minHeight: '320px', display: 'grid', placeItems: 'center',
+        padding: '24px', color: 'var(--ent-muted)'
+      }
+    }, '网络地图页面加载失败，请刷新页面重试。')
+  },
+  delay: 0,
+  timeout: 60_000,
+  onError: (_error, retry, fail, attempts) => {
+    if (attempts <= 2) retry()
+    else fail()
+  }
+})
 
 const route = useRoute()
 const isNetworkPage = computed(() => route.path === '/network-nodes')
