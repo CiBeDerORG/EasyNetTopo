@@ -860,7 +860,9 @@ func resolveDeviceNodeHostnameTx(ctx context.Context, tx *sql.Tx, networkKey, pe
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		return "", err
 	}
-	if err == nil && stored != "" { known = stored }
+	if err == nil && stored != "" {
+		known = stored
+	}
 	err = tx.QueryRowContext(ctx, `SELECT hostname FROM network_node_attributes
 		WHERE network_key=? AND peer_id=? LIMIT 1`, networkKey, peerID).Scan(&stored)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
