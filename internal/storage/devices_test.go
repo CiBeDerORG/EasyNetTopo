@@ -288,8 +288,8 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if deletedID == "" {
 		t.Fatal("未找到待删除节点设备")
 	}
-	if err := store.DeleteDevice(ctx, deletedID); !errors.Is(err, ErrNodeDeviceProtected) {
-		t.Fatalf("不允许删除网络节点基础设备: %v", err)
+	if err := store.DeleteDevice(ctx, deletedID); err != nil {
+		t.Fatalf("应允许删除网络节点基础设备: %v", err)
 	}
 	preDeleted, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "提前删除的节点", DeviceType: "通用设备", NetworkKey: "network:home", PeerID: "peer-predeleted",
@@ -309,11 +309,11 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if third.Created != 2 || third.Existing != 2 || third.Skipped != 0 {
+	if third.Created != 2 || third.Existing != 1 || third.Skipped != 1 {
 		t.Fatalf("自动补充新节点结果错误: %+v", third)
 	}
 	items, err = store.ListDevices(ctx)
-	if err != nil || len(items) != 4 {
+	if err != nil || len(items) != 3 {
 		t.Fatalf("节点基础设备或新节点创建结果错误: count=%d err=%v", len(items), err)
 	}
 	foundEntry, foundPreviouslyDeletedAssetScope := false, false
@@ -325,8 +325,8 @@ func TestNetworkNodeDeviceSyncIsIdempotentAndPreservesDeletion(t *testing.T) {
 			foundPreviouslyDeletedAssetScope = true
 		}
 	}
-	if !foundEntry {
-		t.Fatal("节点基础设备在同步后丢失")
+	if foundEntry {
+		t.Fatal("手动删除的节点基础设备不应被自动同步重新创建")
 	}
 	if !foundPreviouslyDeletedAssetScope {
 		t.Fatal("删除普通设备不应阻止该节点基础设备后续自动补充")
@@ -893,5 +893,153 @@ func TestNodeAttributeHostnameBackfillOnUnchangedPeer(t *testing.T) {
 	attrs, err := db.ListNodeAttributes(ctx)
 	if err != nil || len(attrs) != 1 || attrs[0].Hostname != "yun" || attrs[0].Alias != "上海-腾讯云" {
 		t.Fatalf("原 Peer ID 对应的手工节点属性应补全 hostname：%+v %v", attrs, err)
+	}
+}
+
+func TestDeleteNodeBasePreservesOtherAssetsAndSuppressesPeerRotation(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "delete-node.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "OWRT", NetworkKey: "network:home", PeerID: "peer-old", Hostname: "OWRT"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 1 {
+		t.Fatalf("节点基础设备缺失: %+v %v", nodes, err)
+	}
+	gateway, err := store.UpdateDevice(ctx, nodes[0].ID, DeviceInput{
+		Name: "上海-OWRT", NetworkKey: "network:home", PeerID: "peer-old",
+		NodeHostname: "OWRT", IsGateway: true, SemanticKinds: []string{"router", "openwrt"},
+		IPAddress: "192.168.10.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "下挂手机", NetworkKey: "network:home", PeerID: "peer-old",
+		GatewayGroupID: gateway.OwnedGatewayGroupID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.DeleteDevice(ctx, gateway.ID); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.Device(ctx, gateway.ID); !errors.Is(err, ErrDeviceNotFound) {
+		t.Fatalf("基础设备应删除: %v", err)
+	}
+	remaining, err := store.Device(ctx, child.ID)
+	if err != nil || remaining.GatewayGroupID != "" || remaining.NetworkKey != "network:home" ||
+		remaining.PeerID != "peer-old" || remaining.NodeHostname != "OWRT" {
+		t.Fatalf("删除节点基础网关不得删除子设备及所属主机名: %+v %v", remaining, err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "OWRT", NetworkKey: "network:home", PeerID: "peer-new", Hostname: "OWRT"},
+	})
+	if err != nil || result.Created != 0 || result.Skipped != 1 {
+		t.Fatalf("Peer ID 变化后不能重新创建手动删除的基础设备: %+v %v", result, err)
+	}
+	nodes, err = store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 0 {
+		t.Fatalf("手动删除的节点基础设备仍存在: %+v %v", nodes, err)
+	}
+}
+
+func TestMoveNodeBaseToSelectedHostnamePreservesGatewayAndChildren(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "move-node.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "历史上海-OWRT", NetworkKey: "network:home", PeerID: "old-peer", Hostname: "old-owrt"},
+		{Name: "当前 OWRT", NetworkKey: "network:home", PeerID: "new-peer", Hostname: "OWRT"},
+	}); err != nil {
+		t.Fatal(err)
+	}
+	nodes, err := store.ListNodeDevices(ctx)
+	if err != nil || len(nodes) != 2 {
+		t.Fatalf("需要两个独立节点作为初始数据: %+v %v", nodes, err)
+	}
+	var historical, fresh Device
+	for _, node := range nodes {
+		if node.NodeHostname == "old-owrt" {
+			historical = node
+		} else if node.NodeHostname == "OWRT" {
+			fresh = node
+		}
+	}
+	if historical.ID == "" || fresh.ID == "" {
+		t.Fatal("找不到旧节点或新节点")
+	}
+	gateway, err := store.UpdateDevice(ctx, historical.ID, DeviceInput{
+		Name: "上海-OWRT", IsGateway: true, NetworkKey: "network:home", PeerID: "old-peer",
+		NodeHostname: "old-owrt", SemanticKinds: []string{"openwrt", "router"}, IPAddress: "192.168.10.1",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := store.SaveDeviceOpenWrtConfig(ctx, gateway.ID, 80, false, "user", "password"); err != nil {
+		t.Fatal(err)
+	}
+	child, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "手机", NetworkKey: "network:home", PeerID: "old-peer", GatewayGroupID: gateway.OwnedGatewayGroupID,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 目标已存在基础设备时禁止覆盖或静默删除。
+	_, err = store.UpdateDevice(ctx, gateway.ID, DeviceInput{
+		Name: "上海-OWRT", NetworkKey: "network:home", PeerID: "new-peer",
+		NodeHostname: "OWRT", IsGateway: true, SemanticKinds: []string{"openwrt", "router"},
+		IPAddress: "192.168.10.1",
+	})
+	if !errors.Is(err, ErrDeviceNodeConflict) {
+		t.Fatalf("目标节点占用应返回安全冲突，而不是覆盖: %v", err)
+	}
+	if err := store.DeleteDevice(ctx, fresh.ID); err != nil {
+		t.Fatal(err)
+	}
+	moved, err := store.UpdateDevice(ctx, gateway.ID, DeviceInput{
+		Name: "上海-OWRT", NetworkKey: "network:home", PeerID: "new-peer",
+		NodeHostname: "OWRT", IsGateway: true, SemanticKinds: []string{"openwrt", "router"},
+		IPAddress: "192.168.10.1",
+	})
+	if err != nil || moved.ID != historical.ID || moved.NodeHostname != "OWRT" ||
+		moved.PeerID != "new-peer" || !moved.IsNodeDevice || !moved.IsGateway {
+		t.Fatalf("基础设备改绑失败或丢失身份与网关属性: %+v %v", moved, err)
+	}
+	remaining, err := store.Device(ctx, child.ID)
+	if err != nil || remaining.NetworkKey != "network:home" || remaining.PeerID != "new-peer" ||
+		remaining.NodeHostname != "OWRT" || remaining.GatewayGroupID != gateway.OwnedGatewayGroupID {
+		t.Fatalf("移动节点时下挂设备应跟随归属并绑定新原主机名: %+v %v", remaining, err)
+	}
+	groups, err := store.ListGatewayGroups(ctx, "network:home", "new-peer")
+	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != gateway.ID || groups[0].DeviceCount != 1 {
+		t.Fatalf("迁移后网关组层级错误: %+v %v", groups, err)
+	}
+	cfg, err := store.DeviceOpenWrtSecret(ctx, gateway.ID)
+	if err != nil || cfg.Password != "password" {
+		t.Fatalf("迁移后 OpenWrt 密钥丢失: %+v %v", cfg, err)
+	}
+	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "OWRT", NetworkKey: "network:home", PeerID: "new-peer", Hostname: "OWRT"},
+	})
+	if err != nil || result.Existing != 1 || result.Skipped != 0 {
+		t.Fatalf("手工改绑后应解除目标同步抑制: %+v %v", result, err)
 	}
 }

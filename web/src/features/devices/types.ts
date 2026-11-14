@@ -60,6 +60,7 @@ export type DeviceInput = {
   note: string
   network_key: string
   peer_id: string
+  node_hostname?: string
 }
 
 export type NetworkNodeDeviceInput = {

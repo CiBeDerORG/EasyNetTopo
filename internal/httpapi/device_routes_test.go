@@ -204,8 +204,16 @@ func TestNetworkNodeSyncAPI(t *testing.T) {
 		t.Fatalf("节点基础设备列表 API 错误: %d %s", nodeDevices.Code, nodeDevices.Body.String())
 	}
 	deleted := request("DELETE", "/api/v1/devices/"+nodeData.NodeDevices[0].ID, "", true, true)
-	if deleted.Code != http.StatusConflict || !strings.Contains(deleted.Body.String(), "node_device_protected") {
-		t.Fatalf("不应允许删除节点基础设备: %d %s", deleted.Code, deleted.Body.String())
+	if deleted.Code != http.StatusNoContent {
+		t.Fatalf("应允许删除节点基础设备: %d %s", deleted.Code, deleted.Body.String())
+	}
+	afterDeletion := request("GET", "/api/v1/devices/network-nodes", "", true, false)
+	if afterDeletion.Code != http.StatusOK || !strings.Contains(afterDeletion.Body.String(), `"node_devices":[]`) {
+		t.Fatalf("被删除的节点基础设备不应留在列表中: %d %s", afterDeletion.Code, afterDeletion.Body.String())
+	}
+	resynced := request("POST", "/api/v1/devices/network-nodes/sync", body, true, true)
+	if resynced.Code != http.StatusOK || !strings.Contains(resynced.Body.String(), `"skipped":1`) {
+		t.Fatalf("已删除的节点基础设备不应被同步重新建立: %d %s", resynced.Code, resynced.Body.String())
 	}
 }
 

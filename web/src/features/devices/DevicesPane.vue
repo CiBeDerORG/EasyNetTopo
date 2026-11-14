@@ -270,7 +270,7 @@ const deviceSections = computed<DeviceSection[]>(() => {
 })
 
 
-const selectableDevices = computed(() => filteredDevices.value.filter(device => !device.is_node_device))
+const selectableDevices = computed(() => filteredDevices.value)
 const allFilteredSelected = computed(() => selectableDevices.value.length > 0 &&
   selectableDevices.value.every(device => selectedDeviceIds.value.includes(device.id)))
 function toggleDeviceSelection(id: string, checked: boolean) {
@@ -334,7 +334,7 @@ function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
     is_gateway: false, manufacturer: '', model: '', ip_address: '', mac_address: '',
-    note: '', network_key: '', peer_id: ''
+    note: '', network_key: '', peer_id: '', node_hostname: ''
   }
 }
 const editingDevice = computed(() => devices.value.find(item => item.id === editingDeviceId.value))
@@ -364,6 +364,7 @@ const deviceDraftNodeKey = computed({
     }
     deviceDraft.value.network_key = networkKey
     deviceDraft.value.peer_id = peerId
+    deviceDraft.value.node_hostname = node ? originalNodeHostname(node) : ''
   }
 })
 function openCreateDevice(gatewayDevice: Device) {
@@ -377,7 +378,8 @@ function openCreateDevice(gatewayDevice: Device) {
     ...emptyDevice(),
     gateway_group_id: gatewayDevice.owned_gateway_group_id,
     network_key: gatewayDevice.network_key || '',
-    peer_id: gatewayDevice.peer_id || ''
+    peer_id: gatewayDevice.peer_id || '',
+    node_hostname: gatewayDevice.node_hostname || ''
   }
   deviceDialogOpen.value = true
 }
@@ -390,7 +392,8 @@ function openEditDevice(device: Device) {
     manufacturer: device.manufacturer || '', model: device.model || '',
     ip_address: device.ip_address || '', mac_address: device.mac_address || '',
     note: device.note || '',
-    network_key: device.network_key || '', peer_id: device.peer_id || ''
+    network_key: device.network_key || '', peer_id: device.peer_id || '',
+    node_hostname: device.node_hostname || ''
   }
   deviceDialogOpen.value = true
   fillGatewayIPIfNeeded()
@@ -400,9 +403,13 @@ async function saveDeviceRecord() {
   const previous = editingDevice.value
   const draft = { ...deviceDraft.value, group_id: '', semantic_kinds: [...deviceDraft.value.semantic_kinds] }
   if (previous?.is_node_device) {
-    draft.network_key = previous.network_key || ''
-    draft.peer_id = previous.peer_id || ''
+    // 基础设备可以改绑到新的所属网络节点，但必须保持节点直属层级。
     draft.gateway_group_id = ''
+    const changedNode = draft.network_key !== previous.network_key || draft.peer_id !== previous.peer_id
+    if (!draft.network_key || !draft.peer_id || (changedNode && !draft.node_hostname)) {
+      ElMessage.warning('请为节点基础设备选择包含原始主机名的所属网络节点')
+      return
+    }
   }
   if (draft.is_gateway && (!draft.network_key || !draft.peer_id)) {
     ElMessage.warning('网关设备必须归属于一个网络节点')
@@ -443,12 +450,33 @@ async function saveDeviceRecord() {
   finally { savingDevice.value = false }
 }
 
+async function deleteNodeBaseDevice(device: Device) {
+  if (!device.is_node_device) return
+  try {
+    await ElMessageBox.confirm(
+      '确定删除节点基础设备「' + device.name + '」吗？不会删除实际 EasyTier 节点或同节点其他设备。' +
+      (device.is_gateway ? '该设备下的设备会保留，并提升为当前节点直属设备。' : '') +
+      '删除后后台不会自动补回这个原主机名的基础设备。',
+      '删除节点基础设备', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
+    await deleteDevice(device.id)
+    await Promise.all([
+      queryClient.invalidateQueries({ queryKey: ['devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['device-node-devices'] }),
+      queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
+    ])
+    ElMessage.success('节点基础设备已删除，其他设备及 EasyTier 节点保留')
+  } catch (error) {
+    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
+  }
+}
 async function deleteSelectedDevices() {
   const ids = [...selectedDeviceIds.value]
   if (!ids.length) return
   try {
+    const nodeCount = devices.value.filter(device => ids.includes(device.id) && device.is_node_device).length
     await ElMessageBox.confirm(
-      '确定删除当前节点选中的 ' + ids.length + ' 台设备？只删除设备登记和各自的 OpenWrt 配置，不会删除 EasyTier 网络节点。',
+      '确定删除当前选中的 ' + ids.length + ' 台设备？' +
+      (nodeCount ? '其中有 ' + nodeCount + ' 台节点基础设备；删除不会影响 EasyTier 节点，也不会删除同节点的其他设备。若基础设备本身是网关，其下挂设备将提升为直属设备。该原主机名的基础设备不会被后台自动重新创建。' : '只删除设备登记及各自的 OpenWrt 配置，不会删除 EasyTier 网络节点。'),
       '批量删除设备', { type: 'warning', confirmButtonText: '删除所选设备', cancelButtonText: '取消' })
     const results = await Promise.allSettled(ids.map(id => deleteDevice(id)))
     const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled')
@@ -717,7 +745,6 @@ watch(
           <div v-if="section.gatewayDevice" class="gateway-heading-main">
             <el-checkbox class="gateway-heading-select"
               :model-value="selectedDeviceIds.includes(section.gatewayDevice.id)"
-              :disabled="section.gatewayDevice.is_node_device"
               :aria-label="'选择设备 ' + section.gatewayDevice.name"
               @update:model-value="toggleDeviceSelection(section.gatewayDevice.id, $event)" />
             <button class="group-toggle gateway-group-toggle" type="button"
@@ -766,6 +793,9 @@ watch(
               @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
             <el-button text circle aria-label="编辑设备" title="编辑设备"
               @click="openEditDevice(section.gatewayDevice)"><el-icon><Edit /></el-icon></el-button>
+            <el-button v-if="section.gatewayDevice.is_node_device" text circle type="danger"
+              aria-label="删除节点基础设备" title="删除节点基础设备"
+              @click="deleteNodeBaseDevice(section.gatewayDevice)"><el-icon><Delete /></el-icon></el-button>
             <el-button v-if="isOpenWrtDevice(section.gatewayDevice)" text circle
               aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
               @click="openOpenWrtSettings(section.gatewayDevice)"><el-icon><Setting /></el-icon></el-button>
@@ -781,7 +811,6 @@ watch(
           <article v-for="device in section.items" :key="device.id" class="device-card">
             <div class="device-card-head">
               <el-checkbox class="device-select" :model-value="selectedDeviceIds.includes(device.id)"
-                :disabled="device.is_node_device"
                 :aria-label="'选择设备 ' + device.name"
                 @update:model-value="toggleDeviceSelection(device.id, $event)" />
               <div class="device-avatar">
@@ -807,6 +836,9 @@ watch(
                 <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
                   @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
+                <el-button v-if="device.is_node_device" text circle type="danger"
+                  aria-label="删除节点基础设备" title="删除节点基础设备"
+                  @click="deleteNodeBaseDevice(device)"><el-icon><Delete /></el-icon></el-button>
                 <el-button v-if="isOpenWrtDevice(device)" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
                   @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
               </div>
@@ -850,7 +882,7 @@ watch(
           </el-form-item>
           <el-form-item label="所属网络节点" class="span-two">
             <el-select v-model="deviceDraftNodeKey" clearable filterable class="full" popper-class="device-node-dropdown"
-              :disabled="isNodeDeviceEditing || (!editingDeviceId && !!deviceDraft.gateway_group_id)" placeholder="选择设备所属的网络节点">
+              :disabled="!editingDeviceId && !!deviceDraft.gateway_group_id" placeholder="选择设备所属的网络节点">
               <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
                 :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
                 <div class="node-option">
@@ -867,7 +899,7 @@ watch(
                 </div>
               </el-option>
             </el-select>
-            <div class="field-hint">普通设备可以在编辑时迁移到其他网络节点；节点基础设备固定归属于其自身节点。通过网关设备卡片新增的设备会自动归属该网关。</div>
+            <div class="field-hint">普通设备和节点基础设备均可更换所属网络节点。保存后会将选中节点的原始主机名绑定到当前设备；基础设备必须直属节点，目标节点已有基础设备时需先处理冲突。通过网关卡片新增的设备会自动归属该网关。</div>
           </el-form-item>
           <el-form-item label="所属上级网关" class="span-two">
             <el-select v-model="deviceDraft.gateway_group_id" clearable filterable class="full"
