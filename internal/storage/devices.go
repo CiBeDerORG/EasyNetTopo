@@ -848,26 +848,36 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 // 设备的可编辑名称不参与原主机名推断。
 func resolveDeviceNodeHostnameTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, supplied string) (string, error) {
 	if networkKey == "" || peerID == "" {
-		if supplied != "" { return "", ErrInvalidDevice }
+		if supplied != "" {
+			return "", ErrInvalidDevice
+		}
 		return "", nil
 	}
 	known := ""
 	var stored string
 	err := tx.QueryRowContext(ctx, `SELECT node_hostname FROM devices
 		WHERE is_node_device=1 AND network_key=? AND peer_id=? LIMIT 1`, networkKey, peerID).Scan(&stored)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) { return "", err }
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
 	if err == nil && stored != "" { known = stored }
 	err = tx.QueryRowContext(ctx, `SELECT hostname FROM network_node_attributes
 		WHERE network_key=? AND peer_id=? LIMIT 1`, networkKey, peerID).Scan(&stored)
-	if err != nil && !errors.Is(err, sql.ErrNoRows) { return "", err }
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return "", err
+	}
 	if err == nil && stored != "" {
-		if known != "" && !strings.EqualFold(known, stored) { return "", ErrInvalidDevice }
+		if known != "" && !strings.EqualFold(known, stored) {
+			return "", ErrInvalidDevice
+		}
 		known = stored
 	}
 	if supplied != "" && known != "" && !strings.EqualFold(known, supplied) {
 		return "", ErrInvalidDevice
 	}
-	if known != "" { return known, nil }
+	if known != "" {
+		return known, nil
+	}
 	return supplied, nil
 }
 
@@ -895,7 +905,9 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	}
 	defer tx.Rollback()
 	input.NodeHostname, err = resolveDeviceNodeHostnameTx(ctx, tx, input.NetworkKey, input.PeerID, input.NodeHostname)
-	if err != nil { return Device{}, err }
+	if err != nil {
+		return Device{}, err
+	}
 
 	adoptGroupID := ""
 	if input.GatewayGroupID != "" {
@@ -963,24 +975,32 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	}
 	if isNodeDevice {
 		// 允许基础节点设备转移到新的网络节点，仍须保持基础设备的直属层级。
-		if input.NetworkKey == "" || input.PeerID == "" { return Device{}, ErrInvalidDevice }
+		if input.NetworkKey == "" || input.PeerID == "" {
+			return Device{}, ErrInvalidDevice
+		}
 		input.GatewayGroupID = ""
 		if currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID {
 			var conflicting int
 			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 				WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?`,
 				input.NetworkKey, input.PeerID, id).Scan(&conflicting); err != nil { return Device{}, err }
-			if conflicting > 0 { return Device{}, ErrDeviceNodeConflict }
+			if conflicting > 0 {
+				return Device{}, ErrDeviceNodeConflict
+			}
 		}
 	}
 	input.NodeHostname, err = resolveDeviceNodeHostnameTx(ctx, tx, input.NetworkKey, input.PeerID, input.NodeHostname)
-	if err != nil { return Device{}, err }
+	if err != nil {
+		return Device{}, err
+	}
 	if isNodeDevice && input.NodeHostname != "" {
 		var duplicate int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 			WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE AND id<>?`,
 			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil { return Device{}, err }
-		if duplicate > 0 { return Device{}, ErrDeviceNodeConflict }
+		if duplicate > 0 {
+			return Device{}, ErrDeviceNodeConflict
+		}
 	}
 	if input.CreateGatewayGroup {
 		input.IsGateway = true
@@ -1559,7 +1579,9 @@ func (s *DeviceStore) DeleteDevice(ctx context.Context, id string) error {
 			// 老节点记录如有同作用域属性，尽量保留实际原始主机名用于跨 Peer ID 的删除抑制。
 			err = tx.QueryRowContext(ctx, `SELECT hostname FROM network_node_attributes
 				WHERE network_key=? AND peer_id=?`, networkKey, peerID).Scan(&hostname)
-			if err != nil && !errors.Is(err, sql.ErrNoRows) { return err }
+			if err != nil && !errors.Is(err, sql.ErrNoRows) {
+				return err
+			}
 		}
 		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
 			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
