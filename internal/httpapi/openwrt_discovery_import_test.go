@@ -289,7 +289,7 @@ func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
 			} `json:"route"`
 			Import struct {
 				Devices          []storage.DiscoveredDeviceSyncDiagnostic `json:"devices"`
-				NetworkIPWritten int                                      `json:"network_ip_written"`
+				NetworkIPWritten int                                     `json:"network_ip_written"`
 			} `json:"import"`
 		} `json:"diagnostics"`
 	}
