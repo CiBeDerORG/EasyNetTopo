@@ -1043,4 +1043,3 @@ func TestMoveNodeBaseToSelectedHostnamePreservesGatewayAndChildren(t *testing.T)
 		t.Fatalf("手工改绑后应解除目标同步抑制: %+v %v", result, err)
 	}
 }
-
