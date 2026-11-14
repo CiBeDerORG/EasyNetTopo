@@ -962,8 +962,25 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		return Device{}, err
 	}
 	if isNodeDevice {
-		input.NetworkKey, input.PeerID = currentNetworkKey, currentPeerID
+		// 允许基础节点设备转移到新的网络节点，仍须保持基础设备的直属层级。
+		if input.NetworkKey == "" || input.PeerID == "" { return Device{}, ErrInvalidDevice }
 		input.GatewayGroupID = ""
+		if currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID {
+			var conflicting int
+			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
+				WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?`,
+				input.NetworkKey, input.PeerID, id).Scan(&conflicting); err != nil { return Device{}, err }
+			if conflicting > 0 { return Device{}, ErrDeviceNodeConflict }
+		}
+	}
+	input.NodeHostname, err = resolveDeviceNodeHostnameTx(ctx, tx, input.NetworkKey, input.PeerID, input.NodeHostname)
+	if err != nil { return Device{}, err }
+	if isNodeDevice && input.NodeHostname != "" {
+		var duplicate int
+		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
+			WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE AND id<>?`,
+			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil { return Device{}, err }
+		if duplicate > 0 { return Device{}, ErrDeviceNodeConflict }
 	}
 	if input.CreateGatewayGroup {
 		input.IsGateway = true
@@ -993,8 +1010,8 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if currentOwnedGroupID != "" && !input.IsGateway {
-		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,network_key=?,peer_id=?,updated_at=? WHERE gateway_group_id=?",
-			nullIfEmpty(input.GatewayGroupID), input.NetworkKey, input.PeerID, now, currentOwnedGroupID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE gateway_group_id=?",
+			nullIfEmpty(input.GatewayGroupID), input.NetworkKey, input.PeerID, input.NodeHostname, now, currentOwnedGroupID); err != nil {
 			return Device{}, err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM device_gateway_groups WHERE id=?", currentOwnedGroupID); err != nil {
@@ -1025,9 +1042,9 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 			}
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,updated_at=? WHERE id=?`,
+	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE id=?`,
 		input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds), input.IsGateway,
-		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, now, id)
+		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, input.NodeHostname, now, id)
 	if err != nil {
 		return Device{}, err
 	}
@@ -1042,6 +1059,14 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 		if _, err = tx.ExecContext(ctx, "DELETE FROM device_openwrt_configs WHERE device_id=?", id); err != nil {
 			return Device{}, err
 		}
+	}
+	if isNodeDevice {
+		// 人工改绑到曾被删除的自动节点后，解除该位置的同步抑制。
+		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
+			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
+			input.NetworkKey, input.PeerID, input.NodeHostname); err != nil { return Device{}, err }
+		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at)
+			VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil { return Device{}, err }
 	}
 	if err = tx.Commit(); err != nil {
 		return Device{}, err
