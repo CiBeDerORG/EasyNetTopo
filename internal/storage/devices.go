@@ -1221,10 +1221,16 @@ func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID,
 		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
 		return err
 	}
-	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes SET peer_id=?
+	// 老版本的手工属性可能没有保存 hostname；换绑时补齐持久身份。
+	// 若目标 Peer ID 已存在属性记录，保留两边原有数据，不冒险覆盖别名和坐标。
+	if _, err := tx.ExecContext(ctx, `UPDATE network_node_attributes
+		SET peer_id=?,hostname=CASE WHEN hostname='' THEN ? ELSE hostname END
 		WHERE network_key=? AND peer_id=? AND NOT EXISTS (
 			SELECT 1 FROM network_node_attributes WHERE network_key=? AND peer_id=?
-		)`, newPeerID, networkKey, oldPeerID, networkKey, newPeerID); err != nil {
+		) AND NOT EXISTS (
+			SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
+		)`, newPeerID, hostname, networkKey, oldPeerID, networkKey, newPeerID,
+		networkKey, hostname, oldPeerID); err != nil {
 		return err
 	}
 	_, err := tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)",
@@ -1334,6 +1340,17 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
 		hostname := strings.TrimSpace(node.Hostname)
+		if hostname != "" {
+			// 历史节点可能只有别名/坐标，没有同步过基础设备；按本次实时 Peer ID 补全原始主机名。
+			// 目标 hostname 已绑定其他 Peer ID 时，不覆盖或合并任何记录。
+			if _, err = tx.ExecContext(ctx, `UPDATE network_node_attributes SET hostname=?
+				WHERE network_key=? AND peer_id=? AND hostname='' AND NOT EXISTS (
+					SELECT 1 FROM network_node_attributes WHERE network_key=? AND hostname=? COLLATE NOCASE AND peer_id<>?
+				)`, hostname, input.NetworkKey, input.PeerID,
+				input.NetworkKey, hostname, input.PeerID); err != nil {
+				return NetworkNodeSyncResult{}, err
+			}
+		}
 		var existingID, oldHostname string
 		err := tx.QueryRowContext(ctx, "SELECT id,node_hostname FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=?", input.NetworkKey, input.PeerID).Scan(&existingID, &oldHostname)
 		if err == nil {

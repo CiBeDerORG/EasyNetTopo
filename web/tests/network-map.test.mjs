@@ -142,3 +142,39 @@ test('相近线路中段保持约 48 像素车道间距，适应不同窗口和�
   }
   assert.ok(Number.isFinite(curveSeparationMeters(200000, 0, NaN)))
 })
+
+test('地图节点和连线 identity 随 Peer ID 变更保持稳定，坐标继续按原主机名读取', () => {
+  const attrs = [{ ...attribute(200, 35.2, 139.6), hostname: 'FnOS', alias: '家用 NAS' }]
+  const original = buildMapTopology(route, attrs, 'entry-one')
+  const rotatedRoute = {
+    ...route, node_info: { ...route.node_info, peer_id: 900 },
+    peer_routes: route.peer_routes.map(item => ({
+      ...item, route: { ...item.route, peer_id: item.route.peer_id + 1000 }
+    }))
+  }
+  const updated = buildMapTopology(rotatedRoute, attrs, 'entry-one')
+  const oldNAS = original.nodes.find(item => item.hostname === 'FnOS')
+  const newNAS = updated.nodes.find(item => item.hostname === 'FnOS')
+  assert.equal(newNAS?.key, oldNAS?.key)
+  assert.equal(newNAS?.label, '家用 NAS')
+  assert.equal(newNAS?.latitude, 35.2)
+  assert.equal(newNAS?.longitude, 139.6)
+  assert.deepEqual(updated.links.map(item => item.key), original.links.map(item => item.key))
+  assert.ok(updated.links.some(link => link.from === newNAS.key || link.to === newNAS.key))
+})
+
+test('地图同网络原始主机名冲突时不得将两个节点或坐标合并', () => {
+  const collisions = {
+    ...route,
+    peer_routes: [
+      { route: { peer_id: 200, hostname: 'FnOS', cost: 1 } },
+      { route: { peer_id: 201, hostname: 'fnos', cost: 1 } }
+    ]
+  }
+  const graph = buildMapTopology(collisions, [{ ...attribute(200, 35, 139), hostname: 'FnOS' }], 'entry')
+  const named = graph.nodes.filter(item => item.hostname.toLowerCase() === 'fnos')
+  assert.equal(named.length, 2)
+  assert.notEqual(named[0].key, named[1].key)
+  // 有歧义时禁止把同一个历史坐标无条件应用于两个节点。
+  assert.equal(named.filter(item => item.latitude !== null).length, 1)
+})

@@ -1,6 +1,6 @@
 import type { NodeAttributes } from '../network-nodes/attributes'
 import { mergedNetworkRows, record, list, type NetworkRow } from '../network-nodes/data.ts'
-import { networkNodeAttributeKey } from '../network-nodes/identity.ts'
+import { networkNodeAttributeKey, stableNetworkRows } from '../network-nodes/identity.ts'
 
 export type MapLinkKind = 'p2p' | 'relay' | 'unknown'
 export type MapNode = {
@@ -237,13 +237,20 @@ export function buildMapTopology(
   entryHostID: string,
   peerCenterData?: unknown
 ): MapTopology {
-  const rows = mergedNetworkRows(routeData)
+  const rows = stableNetworkRows(mergedNetworkRows(routeData), entryHostID)
   const attrs = new Map(attributes.map(item => [item.network_key + '|' + item.peer_id, item]))
   const attrsByHostname = new Map(attributes.filter(item => item.hostname)
     .map(item => [item.network_key + '|' + item.hostname!.toLocaleLowerCase(), item]))
+  const hostnameCounts = new Map<string, number>()
+  for (const row of rows) {
+    if (!row.rawHostname) continue
+    const key = networkNodeAttributeKey(row, entryHostID) + '|' + row.rawHostname.toLocaleLowerCase()
+    hostnameCounts.set(key, (hostnameCounts.get(key) || 0) + 1)
+  }
   const nodes: MapNode[] = rows.map(row => {
     const scope = networkNodeAttributeKey(row, entryHostID)
-    const attr = (row.rawHostname ? attrsByHostname.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
+    const hostnameKey = scope + '|' + (row.rawHostname || '').toLocaleLowerCase()
+    const attr = (row.rawHostname && hostnameCounts.get(hostnameKey) === 1 ? attrsByHostname.get(hostnameKey) : undefined)
       || attrs.get(scope + '|' + row.id)
     const positioned = isValidLocation(attr)
     return {
