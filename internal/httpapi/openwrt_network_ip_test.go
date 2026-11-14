@@ -20,10 +20,10 @@ func ipv4AddressValue(value uint32) map[string]any {
 func routeDataForNetworkIP() json.RawMessage {
 	value := map[string]any{
 		"agent_id": "agent",
-		"data":     []any{
+		"data": []any{
 			map[string]any{
 				"instance_id": "instance-home",
-				"result":      map[string]any{
+				"result": map[string]any{
 					"node_info": map[string]any{
 						"network_name": "home",
 						"peer_id":      "peer-local",
@@ -119,7 +119,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	snapshot, _ := json.Marshal(map[string]any{
 		"status":       "ok",
 		"has_snapshot": true,
-		"devices":      []any{
+		"devices": []any{
 			map[string]any{
 				"name":        "电脑",
 				"ipv4":        []string{"192.168.10.162"},
@@ -188,7 +188,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	outsideSubnet, _ := json.Marshal(map[string]any{
 		"status":       "ok",
 		"has_snapshot": true,
-		"devices":      []any{
+		"devices": []any{
 			map[string]any{
 				"name":        "电脑",
 				"ipv4":        []string{"192.168.11.162"},
