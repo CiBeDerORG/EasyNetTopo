@@ -220,3 +220,97 @@ func TestGatewayDiscoveryRefreshesExistingDeviceIPAndNetworkIP(t *testing.T) {
 		t.Fatalf("重复扫描没有同步更新内网 IP 和组网 IP: %+v", updated)
 	}
 }
+
+func TestGatewayDiscoveryDiagnosticsReportNetworkIPDatabaseWrites(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "discovery-diagnostics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.CreateDevice(ctx, DeviceInput{
+		Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IsGateway: true,
+		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-a",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	first, err := store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
+		{
+			Name: "电脑", IPAddress: "192.168.10.20", MACAddress: "02:00:00:00:00:20",
+			NetworkIP: "10.10.30.20", NetworkIPKnown: true, Observation: "recent",
+		},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Created != 1 || len(first.Devices) != 1 {
+		t.Fatalf("首次扫描应创建设备并返回逐设备诊断: %+v", first)
+	}
+	created := first.Devices[0]
+	if created.Result != "created" || created.PreviousIPAddress != "" ||
+		created.CurrentIPAddress != "192.168.10.20" || created.PreviousNetworkIP != "" ||
+		created.CurrentNetworkIP != "10.10.30.20" || created.NetworkIPAction != "written" ||
+		!created.AddressFieldsUpdated || !created.DatabaseUpdated || !created.DiscoveryStatusUpdated || first.NetworkIPWritten != 1 {
+		t.Fatalf("新增设备诊断未准确反映数据库写入: %+v summary=%+v", created, first)
+	}
+
+	second, err := store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
+		{
+			Name: "扫描返回的新名称", IPAddress: "192.168.10.21", MACAddress: "02:00:00:00:00:20",
+			NetworkIP: "10.10.30.21", NetworkIPKnown: true, Observation: "recent",
+		},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if second.Existing != 1 || len(second.Devices) != 1 {
+		t.Fatalf("重复扫描应匹配历史设备: %+v", second)
+	}
+	updated := second.Devices[0]
+	if updated.Result != "existing" || updated.MatchedBy != "mac" ||
+		updated.PreviousIPAddress != "192.168.10.20" || updated.CurrentIPAddress != "192.168.10.21" ||
+		updated.PreviousNetworkIP != "10.10.30.20" || updated.CurrentNetworkIP != "10.10.30.21" ||
+		updated.NetworkIPAction != "written" || !updated.AddressFieldsUpdated || !updated.DatabaseUpdated ||
+		!updated.DiscoveryStatusUpdated || second.NetworkIPWritten != 1 {
+		t.Fatalf("历史设备 IP 更新诊断不准确: %+v summary=%+v", updated, second)
+	}
+
+	unavailable, err := store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
+		{
+			Name: "电脑", IPAddress: "192.168.10.21", MACAddress: "02:00:00:00:00:20",
+			Observation: "recent",
+		},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(unavailable.Devices) != 1 ||
+		unavailable.Devices[0].NetworkIPAction != "unavailable_preserved" ||
+		unavailable.Devices[0].CurrentNetworkIP != "10.10.30.21" ||
+		unavailable.Devices[0].AddressFieldsUpdated || !unavailable.Devices[0].DatabaseUpdated || unavailable.NetworkIPUnavailable != 1 {
+		t.Fatalf("映射暂不可用且内网 IP 未变化时应保留历史组网 IP: %+v", unavailable)
+	}
+
+	cleared, err := store.SyncGatewayDiscoveredDevices(ctx, gateway.ID, "devices", []DiscoveredDeviceInput{
+		{
+			Name: "电脑", IPAddress: "192.168.10.22", MACAddress: "02:00:00:00:00:20",
+			Observation: "recent",
+		},
+	}, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(cleared.Devices) != 1 ||
+		cleared.Devices[0].NetworkIPAction != "unavailable_cleared" ||
+		cleared.Devices[0].PreviousNetworkIP != "10.10.30.21" ||
+		cleared.Devices[0].CurrentNetworkIP != "" ||
+		!cleared.Devices[0].AddressFieldsUpdated || cleared.NetworkIPCleared != 1 || cleared.NetworkIPUnavailable != 1 {
+		t.Fatalf("内网 IP 变化且映射不可用时应清除过期组网 IP: %+v", cleared)
+	}
+}

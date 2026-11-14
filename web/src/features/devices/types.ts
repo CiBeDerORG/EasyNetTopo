@@ -105,6 +105,92 @@ export type OpenWrtDiscoveryDevice = {
   port?: number
 }
 
+export type OpenWrtNetworkIPHostDiagnostic = {
+  host_id: string
+  host_name: string
+  status: 'matched' | 'no_match' | 'failed' | 'cancelled' | 'ambiguous' | string
+  message?: string
+  instance_count: number
+  matching_network_instances: number
+  peer_route_count: number
+  matching_peer_routes: number
+  proxy_cidr_count: number
+  valid_mapping_count: number
+  observed_network_keys?: string[]
+  observed_peer_ids?: string[]
+  match_location?: 'node_info' | 'peer_routes' | string
+  mapping_rules?: string[]
+}
+
+export type OpenWrtNetworkIPDiagnostics = {
+  target_network_key: string
+  target_peer_id: string
+  network_entries: number
+  hosts_queried: number
+  hosts_succeeded: number
+  hosts_failed: number
+  hosts_matched: number
+  available: boolean
+  match_location?: string
+  mapping_rules?: string[]
+  reason?: string
+  hosts: OpenWrtNetworkIPHostDiagnostic[]
+}
+
+export type OpenWrtDeviceSyncDiagnostic = {
+  device_id?: string
+  name?: string
+  source?: string
+  observation?: string
+  ip_address?: string
+  mac_address?: string
+  matched_by?: string
+  result: 'created' | 'existing' | 'skipped' | string
+  reason?: string
+  previous_ip_address?: string
+  current_ip_address?: string
+  previous_network_ip?: string
+  current_network_ip?: string
+  network_ip_action?: string
+  network_ip_mapping_status?: string
+  address_fields_updated: boolean
+  database_updated: boolean
+  discovery_status_updated: boolean
+}
+
+export type OpenWrtDiscoveryDiagnostics = {
+  generated_at: string
+  gateway: {
+    device_id?: string
+    name?: string
+    ip_address?: string
+    network_key?: string
+    peer_id?: string
+  }
+  snapshot: {
+    status: string
+    has_snapshot: boolean
+    truncated: boolean
+    source?: string
+    count: number
+    device_count: number
+    can_import: boolean
+    message?: string
+  }
+  route: OpenWrtNetworkIPDiagnostics
+  import: {
+    created: number
+    existing: number
+    skipped: number
+    network_ip_written: number
+    network_ip_cleared: number
+    network_ip_unchanged: number
+    network_ip_unavailable: number
+    network_ip_unmapped: number
+    devices: OpenWrtDeviceSyncDiagnostic[]
+  }
+}
+
 export type OpenWrtDiscoverySnapshot = {
   status: 'ok' | 'partial' | 'error'
   has_snapshot?: boolean
@@ -121,4 +207,5 @@ export type OpenWrtDiscoverySnapshot = {
     existing: number
     skipped: number
   }
+  diagnostics?: OpenWrtDiscoveryDiagnostics
 }

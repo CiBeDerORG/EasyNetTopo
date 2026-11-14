@@ -216,3 +216,104 @@ func TestOpenWrtDiscoveryImportSynchronizesOnlineAndOfflineStatus(t *testing.T) 
 		t.Fatal("截断扫描不应批量修改缺席设备状态")
 	}
 }
+
+func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "discovery-diagnostics.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := storage.NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
+		Name: "上海-OWRT", SemanticKinds: []string{"openwrt"}, IsGateway: true,
+		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-local",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mapper, found := openWrtNetworkIPMapperFromRoute(routeDataForNetworkIP(), gateway.NetworkKey, gateway.PeerID)
+	if !found {
+		t.Fatal("测试路由映射缺失")
+	}
+	raw := json.RawMessage(`{"status":"ok","has_snapshot":true,"source":"easy-discovery","count":1,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.20"],"mac":"02:11:22:33:44:55","observation":"recent"}
+	]}`)
+	routeDiagnostics := openWrtNetworkIPDiagnostics{
+		TargetNetworkKey: gateway.NetworkKey,
+		TargetPeerID:     gateway.PeerID,
+		NetworkEntries:   1,
+		HostsQueried:     1,
+		HostsSucceeded:   1,
+		HostsMatched:     1,
+		Available:        true,
+		MatchLocation:    "node_info",
+		MappingRules:     []string{"192.168.10.0/24 -> 10.10.30.0/24"},
+		Reason:           "测试路由匹配成功",
+		Hosts: []openWrtNetworkIPHostDiagnostic{{
+			HostID: "host-entry", HostName: "云端入口", Status: "matched",
+			MatchLocation: "node_info", MappingRules: []string{"192.168.10.0/24 -> 10.10.30.0/24"},
+		}},
+	}
+	updated, callErr := importOpenWrtDiscoverySnapshotWithDiagnostics(ctx, store, gateway, "devices", raw, mapper, routeDiagnostics)
+	if callErr != nil {
+		t.Fatal(callErr)
+	}
+	var response struct {
+		Import struct {
+			Created  int `json:"created"`
+			Existing int `json:"existing"`
+			Skipped  int `json:"skipped"`
+		} `json:"import"`
+		Diagnostics struct {
+			GeneratedAt string `json:"generated_at"`
+			Gateway     struct {
+				Name       string `json:"name"`
+				NetworkKey string `json:"network_key"`
+				PeerID     string `json:"peer_id"`
+			} `json:"gateway"`
+			Snapshot struct {
+				CanImport   bool `json:"can_import"`
+				DeviceCount int  `json:"device_count"`
+			} `json:"snapshot"`
+			Route struct {
+				Available     bool     `json:"available"`
+				MatchLocation string   `json:"match_location"`
+				MappingRules  []string `json:"mapping_rules"`
+				Hosts         []struct {
+					HostName string `json:"host_name"`
+				} `json:"hosts"`
+			} `json:"route"`
+			Import struct {
+				Devices          []storage.DiscoveredDeviceSyncDiagnostic `json:"devices"`
+				NetworkIPWritten int                                     `json:"network_ip_written"`
+			} `json:"import"`
+		} `json:"diagnostics"`
+	}
+	if err := json.Unmarshal(updated, &response); err != nil {
+		t.Fatal(err)
+	}
+	if response.Import.Created != 1 || response.Import.Existing != 0 || response.Import.Skipped != 0 {
+		t.Fatalf("原有入库统计契约应保持不变: %+v", response.Import)
+	}
+	diagnostics := response.Diagnostics
+	if diagnostics.GeneratedAt == "" || diagnostics.Gateway.Name != "上海-OWRT" ||
+		diagnostics.Gateway.NetworkKey != gateway.NetworkKey || diagnostics.Gateway.PeerID != gateway.PeerID ||
+		!diagnostics.Snapshot.CanImport || diagnostics.Snapshot.DeviceCount != 1 ||
+		!diagnostics.Route.Available || diagnostics.Route.MatchLocation != "node_info" ||
+		len(diagnostics.Route.MappingRules) != 1 || len(diagnostics.Route.Hosts) != 1 ||
+		diagnostics.Route.Hosts[0].HostName != "云端入口" ||
+		len(diagnostics.Import.Devices) != 1 || diagnostics.Import.NetworkIPWritten != 1 {
+		t.Fatalf("扫描诊断信息不完整: %+v", diagnostics)
+	}
+	device := diagnostics.Import.Devices[0]
+	if device.Result != "created" || device.CurrentIPAddress != "192.168.10.20" ||
+		device.CurrentNetworkIP != "10.10.30.20" || device.NetworkIPAction != "written" ||
+		device.NetworkIPMappingStatus != "mapped" ||
+		!device.AddressFieldsUpdated || !device.DatabaseUpdated || !device.DiscoveryStatusUpdated {
+		t.Fatalf("逐设备数据库写入诊断不准确: %+v", device)
+	}
+}

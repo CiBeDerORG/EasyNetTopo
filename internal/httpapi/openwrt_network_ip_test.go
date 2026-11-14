@@ -231,3 +231,46 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 		t.Fatalf("规则已确认但设备地址不属于代理网段时应清除过期组网 IP: %+v", device)
 	}
 }
+
+func TestOpenWrtNetworkIPMapperDiagnosticsExplainRouteMatching(t *testing.T) {
+	raw := routeDataForNetworkIP()
+
+	local, found, localDiagnostics := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:home", "peer-local")
+	if !found || !local.available {
+		t.Fatalf("node_info 代理网段应匹配成功: mapper=%+v diagnostics=%+v", local, localDiagnostics)
+	}
+	if localDiagnostics.Status != "matched" || localDiagnostics.MatchLocation != "node_info" ||
+		localDiagnostics.InstanceCount != 1 || localDiagnostics.MatchingNetworkInstances != 1 ||
+		localDiagnostics.ProxyCIDRCount != 1 || localDiagnostics.ValidMappingCount != 1 ||
+		len(localDiagnostics.ObservedNetworkKeys) != 1 || localDiagnostics.ObservedNetworkKeys[0] != "network:home" ||
+		len(localDiagnostics.ObservedPeerIDs) != 1 || localDiagnostics.ObservedPeerIDs[0] != "peer-local" ||
+		len(localDiagnostics.MappingRules) != 1 ||
+		localDiagnostics.MappingRules[0] != "192.168.10.0/24 -> 10.10.30.0/24" {
+		t.Fatalf("node_info 匹配诊断字段不完整: %+v", localDiagnostics)
+	}
+
+	remote, found, remoteDiagnostics := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:home", "peer-remote")
+	if !found || !remote.available {
+		t.Fatalf("peer_routes 代理网段应匹配成功: mapper=%+v diagnostics=%+v", remote, remoteDiagnostics)
+	}
+	if remoteDiagnostics.Status != "matched" || remoteDiagnostics.MatchLocation != "peer_routes" ||
+		remoteDiagnostics.PeerRouteCount != 1 || remoteDiagnostics.MatchingPeerRoutes != 1 ||
+		remoteDiagnostics.ProxyCIDRCount != 1 || remoteDiagnostics.ValidMappingCount != 1 ||
+		len(remoteDiagnostics.ObservedNetworkKeys) != 1 || remoteDiagnostics.ObservedNetworkKeys[0] != "network:home" ||
+		len(remoteDiagnostics.ObservedPeerIDs) != 2 ||
+		len(remoteDiagnostics.MappingRules) != 1 ||
+		remoteDiagnostics.MappingRules[0] != "192.168.20.0/24 -> 10.10.40.0/24" {
+		t.Fatalf("peer_routes 匹配诊断字段不完整: %+v", remoteDiagnostics)
+	}
+
+	_, found, missing := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:missing", "peer-local")
+	if found || missing.Status != "no_match" || missing.MatchingNetworkInstances != 0 || missing.Message == "" {
+		t.Fatalf("未匹配网络应给出明确原因: found=%v diagnostics=%+v", found, missing)
+	}
+	if local.diagnosticStatus("192.168.10.20", "10.10.30.20", true) != "mapped" ||
+		local.diagnosticStatus("192.168.11.20", "", false) != "no_matching_rule" ||
+		(openWrtNetworkIPMapper{}).diagnosticStatus("192.168.10.20", "", false) != "mapper_unavailable" ||
+		local.diagnosticStatus("2001:db8::20", "", false) != "ipv4_only" {
+		t.Fatal("设备地址映射判定未区分映射成功、无规则、路由映射器不可用和 IPv6")
+	}
+}

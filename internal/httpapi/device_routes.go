@@ -428,10 +428,16 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			}
 			if action == "scan" {
 				mapper := openWrtNetworkIPMapper{}
-				if discoverySnapshotCanImport(result) {
-					mapper = resolveOpenWrtNetworkIPMapper(r.Context(), hostSvc, device)
+				routeDiagnostics := openWrtNetworkIPDiagnostics{
+					TargetNetworkKey: device.NetworkKey,
+					TargetPeerID:      device.PeerID,
+					Hosts:             make([]openWrtNetworkIPHostDiagnostic, 0),
+					Reason:            "当前扫描快照不可导入，未查询 EasyTier 路由",
 				}
-				result, callErr = importOpenWrtDiscoverySnapshotWithNetworkIP(r.Context(), devices, device.ID, kind, result, mapper)
+				if discoverySnapshotCanImport(result) {
+					mapper, routeDiagnostics = resolveOpenWrtNetworkIPMapperWithDiagnostics(r.Context(), hostSvc, device)
+				}
+				result, callErr = importOpenWrtDiscoverySnapshotWithDiagnostics(r.Context(), devices, device, kind, result, mapper, routeDiagnostics)
 				if callErr != nil {
 					reply(w, callErr.status, map[string]string{"code": callErr.code, "message": callErr.message})
 					return
