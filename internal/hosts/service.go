@@ -71,6 +71,9 @@ func (s *Service) Delete(ctx context.Context, id string) error {
 	return s.hosts.Delete(ctx, id)
 }
 func (s *Service) List(ctx context.Context) ([]storage.Host, error) { return s.hosts.List(ctx) }
+func (s *Service) Get(ctx context.Context, id string) (storage.Host, error) {
+	return s.hosts.Get(ctx, id)
+}
 func (s *Service) Pair(ctx context.Context, id, agentID, pin, code string) (storage.Host, error) {
 	s.pairingMu.Lock()
 	defer s.pairingMu.Unlock()

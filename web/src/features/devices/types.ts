@@ -25,12 +25,42 @@ export type DeviceServiceForwardInput = {
   allow_public_bind?: boolean
 }
 
+export type DeviceServiceSource = {
+  host_id: string
+  host_name: string
+  source_id: string
+  app_id: string
+  original_port: number
+}
+
+export type ServiceImportPort = {
+  port: number
+  protocols: ('tcp' | 'udp')[]
+  registered: boolean
+}
+
+export type ServiceImportApp = {
+  source_id: string
+  app_id: string
+  name: string
+  state: string
+  ports: ServiceImportPort[]
+}
+
+export type ServiceImportPreview = {
+  address_check: 'matched' | 'different' | 'unknown'
+  apps: ServiceImportApp[]
+}
+
+export type ServiceImportSelection = Pick<ServiceImportApp, 'app_id' | 'source_id'> & Pick<ServiceImportPort, 'port' | 'protocols'>
+
 export type DeviceService = DeviceServiceInput & {
   id: string
   device_id: string
   created_at: string
   navigation_enabled: boolean
   forward?: DeviceServiceForward
+  source?: DeviceServiceSource
 }
 
 export type DeviceGroup = {

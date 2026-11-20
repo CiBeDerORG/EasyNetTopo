@@ -7,6 +7,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"slices"
 	"strings"
 	"sync"
 	"time"
@@ -439,6 +440,83 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			default:
 				methodNotAllowed(w, "GET, POST")
 			}
+			return
+		}
+		if len(parts) == 3 && parts[0] != "" && parts[1] == "services" && parts[2] == "import" {
+			if r.Method != http.MethodGet && r.Method != http.MethodPost {
+				methodNotAllowed(w, "GET, POST")
+				return
+			}
+			var input serviceImportRequest
+			if r.Method == http.MethodPost {
+				if !mutation(w, r) || !decode(w, r, &input) {
+					return
+				}
+				if len(input.Items) == 0 || len(input.Items) > maxServiceImportItems {
+					http.Error(w, "请选择 1 至 100 个应用入口", http.StatusBadRequest)
+					return
+				}
+			}
+			if hostSvc == nil {
+				http.Error(w, "主机管理暂不可用", http.StatusServiceUnavailable)
+				return
+			}
+			ctx := r.Context()
+			device, err := devices.Device(ctx, parts[0])
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			host, err := hostSvc.Get(ctx, r.URL.Query().Get("host_id"))
+			if errors.Is(err, storage.ErrHostNotFound) || err == nil && host.AgentID == "" {
+				http.Error(w, errServiceImportHost.Error(), http.StatusBadRequest)
+				return
+			}
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			addressCheck := serviceImportAddressCheck(host, device)
+			if r.Method == http.MethodPost && addressCheck != "matched" && !input.ConfirmHostAddress {
+				http.Error(w, "请确认来源主机与当前设备对应", http.StatusBadRequest)
+				return
+			}
+			catalog, err := db.CatalogApps(ctx)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			apps, err := loadServiceImportApps(ctx, hostSvc, host, device, catalog)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusBadGateway)
+				return
+			}
+			if r.Method == http.MethodPost {
+				items, err := resolveServiceImports(host, apps, input.Items)
+				if err != nil {
+					http.Error(w, err.Error(), http.StatusConflict)
+					return
+				}
+				result, err := devices.ImportDeviceServices(ctx, device.ID, items)
+				if err != nil {
+					mapError(w, err)
+					return
+				}
+				reply(w, http.StatusOK, result)
+				return
+			}
+			services, err := devices.ListDeviceServices(ctx, device.ID)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			for i, app := range apps {
+				for j, port := range app.Ports {
+					item := serviceImportItem(host, app, port)
+					apps[i].Ports[j].Registered = slices.ContainsFunc(services, item.MatchesExisting)
+				}
+			}
+			reply(w, http.StatusOK, map[string]any{"apps": apps, "address_check": addressCheck})
 			return
 		}
 		if len(parts) >= 3 && len(parts) <= 4 && parts[0] != "" && parts[1] == "services" && parts[2] != "" {

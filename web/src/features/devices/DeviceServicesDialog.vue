@@ -2,12 +2,13 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Edit, Plus } from '@element-plus/icons-vue'
+import { Delete, Edit, Link, Plus } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import { instances, list, publicIPv4Candidate, record } from '../network-nodes/data'
 import type { Host } from '../host-store/types'
 import { checkDeviceServiceForward, createDeviceService, deleteDeviceService, getDeviceServices, navigationServicesKey, setDeviceServiceForward, setDeviceServiceNavigation, updateDeviceService } from './api'
 import type { Device, DeviceService, DeviceServiceInput } from './types'
+import DeviceServiceImport from './DeviceServiceImport.vue'
 import { activePublicURL, publicAccessURL, serviceIcon, serviceIcons, serviceURL } from './service-access'
 
 const props = defineProps<{
@@ -24,13 +25,15 @@ const { data: services, isPending: loading, isError: loadFailed, error: loadErro
   queryFn: ({ signal }) => getDeviceServices(props.device.id, signal)
 })
 const adding = ref(false)
+const importing = ref(false)
+const savingImport = ref(false)
 const editing = ref<DeviceService | null>(null)
 const saving = ref(false)
 const checking = ref(false)
 const switching = ref('')
 const deleting = ref('')
 const savingNavigation = ref('')
-const busy = computed(() => saving.value || checking.value || !!switching.value || !!deleting.value || !!savingNavigation.value)
+const busy = computed(() => savingImport.value || saving.value || checking.value || !!switching.value || !!deleting.value || !!savingNavigation.value)
 const errorMessage = ref('')
 const checkMessage = ref('')
 const form = reactive<Omit<DeviceServiceInput, 'port'> & { port: number | undefined }>({
@@ -180,8 +183,16 @@ async function removeForward() {
 }
 
 watch(open, value => {
-  if (value) adding.value = false
+  if (value) {
+    adding.value = false
+    importing.value = false
+  }
 })
+
+async function afterImport() {
+  importing.value = false
+  await client.invalidateQueries({ queryKey: queryKey.value })
+}
 
 async function saveService() {
   if (busy.value) return
@@ -226,10 +237,12 @@ async function saveService() {
 
 <template>
   <el-dialog
-    v-model="open" :title="(adding ? (editing ? '编辑服务' : '新增服务') : '服务列表') + ' · ' + device.name" width="min(660px, 94vw)" destroy-on-close
+    v-model="open" :title="(importing ? '关联主机' : adding ? (editing ? '编辑服务' : '新增服务') : '服务列表') + ' · ' + device.name" width="min(660px, 94vw)" destroy-on-close
     :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy"
   >
-    <el-form v-if="adding" class="service-form" label-position="top" @submit.prevent="saveService">
+    <DeviceServiceImport v-if="importing" v-model:saving="savingImport" :device="device" :hosts="hosts" :network-ip="networkIp"
+      @close="importing = false" @imported="afterImport" />
+    <el-form v-else-if="adding" class="service-form" label-position="top" @submit.prevent="saveService">
       <el-alert v-if="errorMessage" type="error" :title="errorMessage" show-icon :closable="false" />
       <el-form-item label="服务名称" required>
         <el-input v-model="form.name" maxlength="128" placeholder="例如：NAS 管理后台" :disabled="saving" />
@@ -309,6 +322,7 @@ async function saveService() {
     </el-form>
     <template v-else>
       <div class="service-list-actions">
+        <el-button :disabled="busy" :icon="Link" @click="importing = true">关联主机</el-button>
         <el-button type="primary" :disabled="busy" @click="startForm()"><el-icon><Plus /></el-icon>新增服务</el-button>
       </div>
       <el-skeleton v-if="loading" :rows="3" animated />
@@ -330,6 +344,7 @@ async function saveService() {
               <span>{{ link.label }}：</span>
               <a :href="link.url" target="_blank" rel="noopener noreferrer">{{ link.url }}</a>
             </div>
+            <p v-if="service.source" class="service-source">来源主机 {{ service.source.host_name }} · {{ service.source.app_id }}</p>
             <p v-if="service.note">{{ service.note }}</p>
           </div>
           <div class="service-actions">
@@ -378,6 +393,7 @@ async function saveService() {
 .service-details { display:flex; min-width:0; align-items:flex-start; flex-wrap:wrap; gap:6px 10px; overflow-wrap:anywhere; }
 .service-link, .service-details p { flex-basis:100%; }
 .service-details a { color:var(--ent-data-highlight); }
+.service-source { color:var(--ent-muted); font-size:12px; }
 .service-details p { margin:0; white-space:pre-wrap; }
 @media (max-width:560px) {
   .service-form-grid { grid-template-columns:1fr; gap:0; }

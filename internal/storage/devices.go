@@ -206,6 +206,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	for _, column := range []struct{ name, definition string }{
 		{"forward_config", "forward_config TEXT NOT NULL DEFAULT ''"},
 		{"navigation_enabled", "navigation_enabled INTEGER NOT NULL DEFAULT 0"},
+		{"import_source", "import_source TEXT NOT NULL DEFAULT ''"},
 	} {
 		if err := ensureDeviceServiceColumn(ctx, db, column.name, column.definition); err != nil {
 			return nil, fmt.Errorf("迁移设备服务字段 %s 失败: %w", column.name, err)

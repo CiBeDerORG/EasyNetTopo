@@ -70,3 +70,66 @@ func TestDeviceServiceMigrationAndState(t *testing.T) {
 		t.Fatalf("转发失效没有保留原规则信息: %+v %v", disabled, err)
 	}
 }
+
+func TestImportDeviceServicesKeepsExistingAndSources(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	device, err := store.CreateDevice(ctx, DeviceInput{Name: "目标设备"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	existing, err := store.CreateDeviceService(ctx, device.ID, DeviceServiceInput{
+		Name: "手工登记", Port: 8080, Protocols: []string{"tcp"}, Note: "保留备注",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = store.SetDeviceServiceNavigation(ctx, device.ID, existing.ID, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.db.ExecContext(ctx, "ALTER TABLE device_services DROP COLUMN import_source"); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	item := DeviceServiceImport{
+		DeviceServiceInput: DeviceServiceInput{Name: "已安装应用", Port: 15666, Protocols: []string{"tcp"}},
+		Source:             DeviceServiceSource{HostID: "host", HostName: "来源主机", SourceID: "source", AppID: "nas", OriginalPort: 15666},
+	}
+	conflict := item
+	conflict.Port = 8080
+	conflict.Source.OriginalPort = 8080
+	batch := []DeviceServiceImport{item, conflict, item}
+	result, err := store.ImportDeviceServices(ctx, device.ID, batch)
+	if err != nil || result.Imported != 1 || result.Skipped != 2 {
+		t.Fatalf("批量导入及去重异常: %+v %v", result, err)
+	}
+	result, err = store.ImportDeviceServices(ctx, device.ID, batch)
+	if err != nil || result.Imported != 0 || result.Skipped != 3 {
+		t.Fatalf("重复提交应全部跳过: %+v %v", result, err)
+	}
+	services, err := store.ListDeviceServices(ctx, device.ID)
+	if err != nil || len(services) != 2 {
+		t.Fatalf("读取导入结果失败: %+v %v", services, err)
+	}
+	for _, service := range services {
+		if service.ID == existing.ID {
+			if service.Source != nil || !service.NavigationEnabled || service.Note != "保留备注" {
+				t.Fatalf("手工服务被覆盖: %+v", service)
+			}
+		} else if service.Source == nil || *service.Source != item.Source ||
+			service.NavigationEnabled || service.Forward != nil || service.Port != 15666 {
+			t.Fatalf("导入结果的来源或默认状态错误: %+v", service)
+		}
+	}
+}

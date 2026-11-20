@@ -2,7 +2,7 @@ import { apiRequest } from '../../lib/api-client'
 import type {
   Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, DeviceService, DeviceServiceForwardInput, DeviceServiceInput, GatewayGroup,
   NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus,
-  OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot
+  OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot, ServiceImportPreview, ServiceImportSelection
 } from './types'
 
 export async function getNodeDevices() {
@@ -32,6 +32,20 @@ export async function getDeviceServices(deviceId: string, signal?: AbortSignal) 
   const result = await apiRequest<{ services: DeviceService[] }>(
     '/api/v1/devices/' + encodeURIComponent(deviceId) + '/services', { signal })
   return result.services || []
+}
+
+function deviceServiceImportPath(deviceId: string, hostId: string) {
+  return '/api/v1/devices/' + encodeURIComponent(deviceId) + '/services/import?' + new URLSearchParams({ host_id: hostId })
+}
+
+export function getDeviceServiceImport(deviceId: string, hostId: string, signal?: AbortSignal) {
+  return apiRequest<ServiceImportPreview>(deviceServiceImportPath(deviceId, hostId), { signal })
+}
+
+export function importDeviceServices(deviceId: string, hostId: string, items: ServiceImportSelection[], confirmHostAddress: boolean) {
+  return apiRequest<{ imported: number; skipped: number }>(deviceServiceImportPath(deviceId, hostId), {
+    method: 'POST', body: { items, confirm_host_address: confirmHostAddress }, timeoutMs: 30_000
+  })
 }
 
 export const navigationServicesKey = ['navigation-services'] as const

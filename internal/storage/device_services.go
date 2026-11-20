@@ -31,7 +31,8 @@ const deviceServiceSchema = `CREATE TABLE IF NOT EXISTS device_services (
 	note TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
 	forward_config TEXT NOT NULL DEFAULT '',
-	navigation_enabled INTEGER NOT NULL DEFAULT 0
+	navigation_enabled INTEGER NOT NULL DEFAULT 0,
+	import_source TEXT NOT NULL DEFAULT ''
 )`
 
 func ensureDeviceServiceColumn(ctx context.Context, db *Store, name, definition string) error {
@@ -64,6 +65,14 @@ type DeviceServiceInput struct {
 	Note      string   `json:"note"`
 }
 
+type DeviceServiceSource struct {
+	HostID       string `json:"host_id"`
+	HostName     string `json:"host_name"`
+	SourceID     string `json:"source_id"`
+	AppID        string `json:"app_id"`
+	OriginalPort int    `json:"original_port"`
+}
+
 type DeviceService struct {
 	ID       string `json:"id"`
 	DeviceID string `json:"device_id"`
@@ -71,6 +80,7 @@ type DeviceService struct {
 	CreatedAt         string                `json:"created_at"`
 	NavigationEnabled bool                  `json:"navigation_enabled"`
 	Forward           *DeviceServiceForward `json:"forward,omitempty"`
+	Source            *DeviceServiceSource  `json:"source,omitempty"`
 }
 
 func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
@@ -118,13 +128,13 @@ func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
 }
 
 const deviceServiceColumns = `COALESCE(ds.id,''),COALESCE(ds.device_id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
-	COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,''),COALESCE(ds.forward_config,''),COALESCE(ds.navigation_enabled,0)`
+	COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,''),COALESCE(ds.forward_config,''),COALESCE(ds.navigation_enabled,0),COALESCE(ds.import_source,'')`
 
 func scanDeviceService(row interface{ Scan(...any) error }) (DeviceService, error) {
 	var service DeviceService
-	var protocol, forward string
+	var protocol, forward, source string
 	if err := row.Scan(&service.ID, &service.DeviceID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon,
-		&service.Note, &service.CreatedAt, &forward, &service.NavigationEnabled); err != nil {
+		&service.Note, &service.CreatedAt, &forward, &service.NavigationEnabled, &source); err != nil {
 		return DeviceService{}, err
 	}
 	if service.ID != "" {
@@ -133,6 +143,11 @@ func scanDeviceService(row interface{ Scan(...any) error }) (DeviceService, erro
 	if forward != "" {
 		if err := json.Unmarshal([]byte(forward), &service.Forward); err != nil {
 			return DeviceService{}, fmt.Errorf("设备服务转发配置无效: %w", err)
+		}
+	}
+	if source != "" {
+		if err := json.Unmarshal([]byte(source), &service.Source); err != nil {
+			return DeviceService{}, fmt.Errorf("设备服务导入来源无效: %w", err)
 		}
 	}
 	return service, nil
@@ -197,7 +212,13 @@ func (s *DeviceStore) SaveDeviceServiceForward(ctx context.Context, deviceID, se
 }
 
 func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) ([]DeviceService, error) {
-	rows, err := s.store.db.QueryContext(ctx, "SELECT "+deviceServiceColumns+` FROM devices d LEFT JOIN device_services ds ON ds.device_id=d.id WHERE d.id=?
+	return listDeviceServices(ctx, s.store.db, deviceID)
+}
+
+func listDeviceServices(ctx context.Context, db interface {
+	QueryContext(context.Context, string, ...any) (*sql.Rows, error)
+}, deviceID string) ([]DeviceService, error) {
+	rows, err := db.QueryContext(ctx, "SELECT "+deviceServiceColumns+` FROM devices d LEFT JOIN device_services ds ON ds.device_id=d.id WHERE d.id=?
 		ORDER BY ds.name COLLATE NOCASE,ds.id`, deviceID)
 	if err != nil {
 		return nil, err
