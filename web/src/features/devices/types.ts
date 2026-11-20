@@ -7,7 +7,29 @@ export type DeviceServiceInput = {
   note: string
 }
 
-export type DeviceService = DeviceServiceInput & { id: string; device_id: string; created_at: string }
+export type DeviceServiceForward = {
+  enabled: boolean
+  host_id: string
+  instance_id: string
+  listen: string
+  destination: string
+  protocols: ('tcp' | 'udp')[]
+}
+
+export type DeviceServiceForwardInput = {
+  enabled: boolean
+  host_id?: string
+  instance_id?: string
+  listen?: string
+  allow_public_bind?: boolean
+}
+
+export type DeviceService = DeviceServiceInput & {
+  id: string
+  device_id: string
+  created_at: string
+  forward?: DeviceServiceForward
+}
 
 export type DeviceGroup = {
   id: string

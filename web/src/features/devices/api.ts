@@ -1,6 +1,6 @@
 import { apiRequest } from '../../lib/api-client'
 import type {
-  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, DeviceService, DeviceServiceInput, GatewayGroup,
+  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, DeviceService, DeviceServiceForwardInput, DeviceServiceInput, GatewayGroup,
   NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus,
   OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot
 } from './types'
@@ -36,6 +36,22 @@ export async function getDeviceServices(deviceId: string, signal?: AbortSignal) 
 
 export function createDeviceService(deviceId: string, body: DeviceServiceInput) {
   return apiRequest<DeviceService>('/api/v1/devices/' + encodeURIComponent(deviceId) + '/services', { method: 'POST', body })
+}
+
+function deviceServicePath(deviceId: string, serviceId: string) {
+  return '/api/v1/devices/' + encodeURIComponent(deviceId) + '/services/' + encodeURIComponent(serviceId)
+}
+
+export function updateDeviceService(deviceId: string, serviceId: string, body: DeviceServiceInput) {
+  return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId), { method: 'PATCH', body })
+}
+
+export function checkDeviceServiceForward(deviceId: string, serviceId: string) {
+  return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId) + '/check-forward', { method: 'POST' })
+}
+
+export function setDeviceServiceForward(deviceId: string, serviceId: string, body: DeviceServiceForwardInput) {
+  return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId) + '/forward', { method: 'PUT', body })
 }
 
 export async function getDeviceGroups() {

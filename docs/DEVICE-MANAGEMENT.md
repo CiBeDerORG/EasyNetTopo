@@ -75,6 +75,9 @@
 - GET `/api/v1/devices?unassigned=true`（读取未关联节点的旧设备）
 - GET/POST `/api/v1/devices`
 - GET/POST `/api/v1/devices/{id}/services`（按设备 ID 读取或新增已登记的服务）
+- PATCH `/api/v1/devices/{id}/services/{service_id}`（编辑服务资料）
+- PUT `/api/v1/devices/{id}/services/{service_id}/forward`（执行端口转发开启或关闭）
+- POST `/api/v1/devices/{id}/services/{service_id}/check-forward`（编辑打开时回读规则，按校验结果更新本地状态）
 - PATCH/DELETE `/api/v1/devices/{id}`
 - GET `/api/v1/devices/network-nodes`（读取已登记的节点基础设备，用于补齐历史离线节点选择项）
 - GET/POST `/api/v1/devices/network-nodes/sync`（读取自动补充状态、幂等同步当前实时节点）
@@ -107,7 +110,8 @@
 
 - 从任意设备的「设备服务列表」入口查看或新增登记。服务按设备 ID 保存，修改设备名称、地址、节点或所属网关时会保留服务归属，删除设备时同时删除其服务记录。
 - 新增时填写名称、TCP 和/或 UDP、端口，可选填访问 URL、图标和备注。访问链接仅接受 HTTP/HTTPS 地址，点击后由浏览器打开。
-- 查询读取 EasyNetTopo 已登记的服务，不会扫描设备端口或创建公网转发。
+- 列表只读取已登记的服务。新增或编辑时可手动选择已配对的组网入口和 EasyTier 实例，设置监听地址及端口。目标取设备组网 IP 与服务端口。只有 Agent 确认转发命令成功才记录为已开启。
+- 打开编辑时回读实际规则。确认规则缺失或目标不符会将状态改为关闭；查询失败保留旧状态。编辑校验不执行远端删除。可从表单移除仍匹配本服务的原规则。删除设备不会自动操作远端转发。
 
 ## 分期边界
 

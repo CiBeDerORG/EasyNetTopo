@@ -967,7 +967,7 @@ watch(
     </el-dialog>
 
     <DeviceServicesDialog v-if="serviceDevice" :key="serviceDevice.id"
-      v-model="servicesOpen" :device="serviceDevice" />
+      v-model="servicesOpen" :device="serviceDevice" :hosts="props.hosts" />
 
     <OpenWrtDiscoveryDialog v-if="discoveryTarget"
       :key="discoveryTarget.id + ':' + discoveryKind"

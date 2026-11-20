@@ -2,7 +2,10 @@ package storage
 
 import (
 	"context"
+	"database/sql"
+	"encoding/json"
 	"errors"
+	"fmt"
 	"net/url"
 	"slices"
 	"strings"
@@ -11,7 +14,11 @@ import (
 	"unicode/utf8"
 )
 
-var ErrInvalidDeviceService = errors.New("设备服务名称、协议、端口、访问地址、图标或备注不合法")
+var (
+	ErrInvalidDeviceService        = errors.New("设备服务名称、协议、端口、访问地址、图标或备注不合法")
+	ErrDeviceServiceNotFound       = errors.New("设备服务不存在")
+	ErrDeviceServiceForwardEnabled = errors.New("请先关闭转发，再修改服务协议或端口")
+)
 
 const deviceServiceSchema = `CREATE TABLE IF NOT EXISTS device_services (
 	id TEXT PRIMARY KEY,
@@ -22,8 +29,30 @@ const deviceServiceSchema = `CREATE TABLE IF NOT EXISTS device_services (
 	access_url TEXT NOT NULL DEFAULT '',
 	icon TEXT NOT NULL DEFAULT '',
 	note TEXT NOT NULL DEFAULT '',
-	created_at TEXT NOT NULL
+	created_at TEXT NOT NULL,
+	forward_config TEXT NOT NULL DEFAULT ''
 )`
+
+func ensureDeviceServiceForwardColumn(ctx context.Context, db *Store) error {
+	var exists bool
+	if err := db.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('device_services') WHERE name='forward_config')`).Scan(&exists); err != nil {
+		return err
+	}
+	if exists {
+		return nil
+	}
+	_, err := db.db.ExecContext(ctx, `ALTER TABLE device_services ADD COLUMN forward_config TEXT NOT NULL DEFAULT ''`)
+	return err
+}
+
+type DeviceServiceForward struct {
+	Enabled     bool     `json:"enabled"`
+	HostID      string   `json:"host_id"`
+	InstanceID  string   `json:"instance_id"`
+	Listen      string   `json:"listen"`
+	Destination string   `json:"destination"`
+	Protocols   []string `json:"protocols"`
+}
 
 type DeviceServiceInput struct {
 	Name      string   `json:"name"`
@@ -38,7 +67,8 @@ type DeviceService struct {
 	ID       string `json:"id"`
 	DeviceID string `json:"device_id"`
 	DeviceServiceInput
-	CreatedAt string `json:"created_at"`
+	CreatedAt string                `json:"created_at"`
+	Forward   *DeviceServiceForward `json:"forward,omitempty"`
 }
 
 func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
@@ -85,10 +115,72 @@ func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
 	}
 }
 
+const deviceServiceColumns = `COALESCE(ds.id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
+	COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,''),COALESCE(ds.forward_config,'')`
+
+func scanDeviceService(row interface{ Scan(...any) error }, deviceID string) (DeviceService, error) {
+	service := DeviceService{DeviceID: deviceID}
+	var protocol, forward string
+	if err := row.Scan(&service.ID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon,
+		&service.Note, &service.CreatedAt, &forward); err != nil {
+		return DeviceService{}, err
+	}
+	if service.ID != "" {
+		service.Protocols = strings.Split(protocol, "_")
+	}
+	if forward != "" {
+		if err := json.Unmarshal([]byte(forward), &service.Forward); err != nil {
+			return DeviceService{}, fmt.Errorf("设备服务转发配置无效: %w", err)
+		}
+	}
+	return service, nil
+}
+
+func (s *DeviceStore) DeviceService(ctx context.Context, deviceID, serviceID string) (DeviceService, error) {
+	row := s.store.db.QueryRowContext(ctx, "SELECT "+deviceServiceColumns+" FROM device_services ds WHERE ds.device_id=? AND ds.id=?", deviceID, serviceID)
+	service, err := scanDeviceService(row, deviceID)
+	if errors.Is(err, sql.ErrNoRows) {
+		return DeviceService{}, ErrDeviceServiceNotFound
+	}
+	return service, err
+}
+
+func (s *DeviceStore) UpdateDeviceService(ctx context.Context, deviceID, serviceID string, input DeviceServiceInput) (DeviceService, error) {
+	protocol, err := normalizeDeviceService(&input)
+	if err != nil {
+		return DeviceService{}, err
+	}
+	current, err := s.DeviceService(ctx, deviceID, serviceID)
+	if err != nil {
+		return DeviceService{}, err
+	}
+	if current.Forward != nil && current.Forward.Enabled && (current.Port != input.Port || !slices.Equal(current.Protocols, input.Protocols)) {
+		return DeviceService{}, ErrDeviceServiceForwardEnabled
+	}
+	if _, err := s.store.db.ExecContext(ctx, `UPDATE device_services SET name=?,protocol=?,port=?,access_url=?,icon=?,note=?
+		WHERE device_id=? AND id=?`, input.Name, protocol, input.Port, input.AccessURL, input.Icon, input.Note, deviceID, serviceID); err != nil {
+		return DeviceService{}, err
+	}
+	return s.DeviceService(ctx, deviceID, serviceID)
+}
+
+func (s *DeviceStore) SaveDeviceServiceForward(ctx context.Context, deviceID, serviceID string, forward *DeviceServiceForward) (DeviceService, error) {
+	value := ""
+	if forward != nil {
+		data, err := json.Marshal(forward)
+		if err != nil {
+			return DeviceService{}, err
+		}
+		value = string(data)
+	}
+	if _, err := s.store.db.ExecContext(ctx, "UPDATE device_services SET forward_config=? WHERE device_id=? AND id=?", value, deviceID, serviceID); err != nil {
+		return DeviceService{}, err
+	}
+	return s.DeviceService(ctx, deviceID, serviceID)
+}
+
 func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) ([]DeviceService, error) {
-	rows, err := s.store.db.QueryContext(ctx, `SELECT COALESCE(ds.id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
-		COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,'')
-		FROM devices d LEFT JOIN device_services ds ON ds.device_id=d.id WHERE d.id=?
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+deviceServiceColumns+` FROM devices d LEFT JOIN device_services ds ON ds.device_id=d.id WHERE d.id=?
 		ORDER BY ds.name COLLATE NOCASE,ds.id`, deviceID)
 	if err != nil {
 		return nil, err
@@ -98,14 +190,11 @@ func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) (
 	exists := false
 	for rows.Next() {
 		exists = true
-		var service DeviceService
-		var protocol string
-		if err := rows.Scan(&service.ID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon, &service.Note, &service.CreatedAt); err != nil {
+		service, err := scanDeviceService(rows, deviceID)
+		if err != nil {
 			return nil, err
 		}
 		if service.ID != "" {
-			service.DeviceID = deviceID
-			service.Protocols = strings.Split(protocol, "_")
 			items = append(items, service)
 		}
 	}

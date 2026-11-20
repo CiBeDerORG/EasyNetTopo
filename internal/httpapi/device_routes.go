@@ -1,18 +1,22 @@
 package httpapi
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"io"
 	"net/http"
 	"net/url"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/CiBeDerORG/EasyNetTopo/internal/hosts"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
 )
 
 func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.DeviceStore, hostSvc *hosts.Service) {
+	var serviceForwardMu sync.Mutex
 	authorize := func(w http.ResponseWriter, r *http.Request) bool {
 		c, err := r.Cookie(authCookie)
 		if err != nil || !db.HasSession(r.Context(), c.Value) {
@@ -64,6 +68,10 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		switch {
 		case errors.Is(err, storage.ErrDeviceNotFound), errors.Is(err, storage.ErrDeviceGroupNotFound):
 			reply(w, http.StatusNotFound, map[string]string{"code": "not_found", "message": "设备或分组不存在"})
+		case errors.Is(err, storage.ErrDeviceServiceNotFound):
+			reply(w, http.StatusNotFound, map[string]string{"code": "device_service_not_found", "message": err.Error()})
+		case errors.Is(err, storage.ErrDeviceServiceForwardEnabled):
+			reply(w, http.StatusConflict, map[string]string{"code": "service_forward_enabled", "message": err.Error()})
 		case errors.Is(err, storage.ErrInvalidDeviceService):
 			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device_service", "message": err.Error()})
 		case errors.Is(err, storage.ErrInvalidDevice):
@@ -416,6 +424,102 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			default:
 				methodNotAllowed(w, "GET, POST")
 			}
+			return
+		}
+		if len(parts) >= 3 && len(parts) <= 4 && parts[0] != "" && parts[1] == "services" && parts[2] != "" {
+			if len(parts) == 3 {
+				if r.Method != http.MethodPatch {
+					methodNotAllowed(w, "PATCH")
+					return
+				}
+				if !mutation(w, r) {
+					return
+				}
+				var input storage.DeviceServiceInput
+				if !decode(w, r, &input) {
+					return
+				}
+				serviceForwardMu.Lock()
+				defer serviceForwardMu.Unlock()
+				service, err := devices.UpdateDeviceService(r.Context(), parts[0], parts[2], input)
+				if err != nil {
+					mapError(w, err)
+					return
+				}
+				reply(w, http.StatusOK, service)
+				return
+			}
+			action := parts[3]
+			if action == "check-forward" && r.Method != http.MethodPost {
+				methodNotAllowed(w, "POST")
+				return
+			}
+			if action == "forward" && r.Method != http.MethodPut {
+				methodNotAllowed(w, "PUT")
+				return
+			}
+			if action != "forward" && action != "check-forward" {
+				http.NotFound(w, r)
+				return
+			}
+			if !mutation(w, r) {
+				return
+			}
+			var input serviceForwardInput
+			if action == "forward" && !decode(w, r, &input) {
+				return
+			}
+			serviceForwardMu.Lock()
+			defer serviceForwardMu.Unlock()
+			service, err := devices.DeviceService(r.Context(), parts[0], parts[2])
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			if action == "check-forward" && (service.Forward == nil || !service.Forward.Enabled) {
+				reply(w, http.StatusOK, service)
+				return
+			}
+			if hostSvc == nil {
+				reply(w, http.StatusServiceUnavailable, map[string]string{"code": "forward_unavailable", "message": errForwardNotReady.Error()})
+				return
+			}
+			device, err := devices.Device(r.Context(), parts[0])
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+			defer cancel()
+			var forward *storage.DeviceServiceForward
+			if action == "check-forward" {
+				forward, err = checkDeviceServiceForward(ctx, hostSvc, device, service)
+				if err == nil && forward.Enabled {
+					reply(w, http.StatusOK, service)
+					return
+				}
+			} else {
+				forward, err = updateDeviceServiceForward(ctx, hostSvc, device, service, input)
+			}
+			if err != nil {
+				status := http.StatusConflict
+				if errors.Is(err, errForwardInput) {
+					status = http.StatusBadRequest
+				} else if errors.Is(err, errForwardNotReady) {
+					status = http.StatusBadGateway
+				}
+				reply(w, status, map[string]string{"code": "service_forward_failed", "message": err.Error()})
+				return
+			}
+			// 命令成功后，即使浏览器断开，也要写入最终状态。
+			saveCtx, saveCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+			defer saveCancel()
+			service, err = devices.SaveDeviceServiceForward(saveCtx, parts[0], parts[2], forward)
+			if err != nil {
+				mapError(w, err)
+				return
+			}
+			reply(w, http.StatusOK, service)
 			return
 		}
 		if len(parts) == 4 && parts[0] != "" && parts[1] == "openwrt" && parts[2] == "discovery" {
