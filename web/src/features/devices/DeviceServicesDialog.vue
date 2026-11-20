@@ -3,12 +3,17 @@ import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { Box, Connection, Edit, Link, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
-import { instances } from '../network-nodes/data'
+import { instances, list, publicIPv4Candidate, record } from '../network-nodes/data'
 import type { Host } from '../host-store/types'
 import { checkDeviceServiceForward, createDeviceService, getDeviceServices, setDeviceServiceForward, updateDeviceService } from './api'
 import type { Device, DeviceService, DeviceServiceInput } from './types'
 
-const props = defineProps<{ device: Device; hosts: Host[] }>()
+const props = defineProps<{
+  device: Device
+  hosts: Host[]
+  networkIp: string
+  entryPublicIps: Record<string, Record<string, string>>
+}>()
 const open = defineModel<boolean>({ required: true })
 const client = useQueryClient()
 const queryKey = computed(() => ['device-services', props.device.id])
@@ -47,6 +52,45 @@ const { data: routes, isFetching: loadingInstances, isError: instancesFailed, re
     const value = await apiRequest<{ data: unknown }>('/api/v1/hosts/' + encodeURIComponent(forward.host_id) + '/network/route', { signal })
     return instances(value.data).filter(item => /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id))
   }
+})
+function serviceURL(ip: string, port: number | undefined, existing: string) {
+  if (!ip || port == null || !Number.isInteger(port) || port < 1 || port > 65535) return ''
+  const validIPv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip) && ip.split('.').every(octet => Number(octet) <= 255)
+  if (!validIPv4 && !/^[0-9a-f:.]+:[0-9a-f:.]+$/i.test(ip)) return ''
+  const host = validIPv4 ? ip : '[' + ip + ']'
+  const scheme = /^https:\/\//i.test(existing) ? 'https' : 'http'
+  try {
+    const normalized = new URL(scheme + '://' + host).hostname
+    if (['0.0.0.0', '[::]'].includes(normalized)) return ''
+    return scheme + '://' + normalized + ':' + port
+  } catch {
+    return ''
+  }
+}
+
+function publicAccessURL(ip: string, listen: string, existing: string) {
+  const colon = listen.lastIndexOf(':')
+  if (colon < 0) return ''
+  const bind = listen.slice(0, colon).replace(/^\[|\]$/g, '')
+  if (bind === '::1' || bind.startsWith('127.')) return ''
+  return serviceURL(publicIPv4Candidate(bind) || ip, Number(listen.slice(colon + 1)), existing)
+}
+
+function activePublicURL(service: DeviceService | null, existing = service?.access_url ?? '') {
+  const cfg = service?.forward
+  if (!cfg?.enabled) return ''
+  return publicAccessURL(props.entryPublicIps[cfg.host_id]?.[cfg.instance_id] || '', cfg.listen, existing)
+}
+
+const draftNetworkURL = computed(() => serviceURL(props.networkIp, form.port, form.access_url))
+const draftPublicURL = computed(() => {
+  if (editing.value?.forward) return activePublicURL(editing.value, form.access_url)
+  if (!enableForward.value || !forward.host_id || !forward.instance_id) return ''
+  const selected = routes.value?.find(item => item.id === forward.instance_id)
+  const candidates = new Set(list(record(record(selected?.result.node_info).stun_info).public_ip).map(publicIPv4Candidate).filter(Boolean))
+  const ip = props.entryPublicIps[forward.host_id]?.[forward.instance_id] || (candidates.size === 1 ? [...candidates][0] : '')
+  const bind = forward.bindIP.trim()
+  return publicAccessURL(ip, bind + ':' + (forward.port ?? form.port), form.access_url)
 })
 watch(() => forward.host_id, () => { forward.instance_id = '' }, { flush: 'sync' })
 watch([() => forward.host_id, () => forward.instance_id, () => forward.bindIP, () => forward.port], () => { forward.confirmed = false })
@@ -173,8 +217,16 @@ async function saveService() {
           <el-input-number v-model="form.port" :min="1" :max="65535" :precision="0" :controls="false" :disabled="busy || editing?.forward?.enabled" />
         </el-form-item>
       </div>
-      <el-form-item label="访问 URL（可选）">
-        <el-input v-model="form.access_url" maxlength="2048" placeholder="https://nas.example.com/" :disabled="saving" />
+      <div class="service-urls" aria-label="自动生成的访问 URL">
+        <el-form-item label="组网访问 URL">
+          <el-input :model-value="draftNetworkURL" readonly placeholder="需要设备组网 IP 和服务端口" />
+        </el-form-item>
+        <el-form-item label="公网访问 URL">
+          <el-input :model-value="draftPublicURL" readonly placeholder="需要公网入口 IP 和转发端口" />
+        </el-form-item>
+      </div>
+      <el-form-item v-if="form.access_url" label="原有自定义访问 URL">
+        <el-input v-model="form.access_url" maxlength="2048" :disabled="saving" />
       </el-form-item>
       <el-form-item label="图标（可选）">
         <el-select v-model="form.icon" clearable placeholder="默认服务图标" :disabled="saving">
@@ -242,7 +294,14 @@ async function saveService() {
             <strong>{{ service.name }}</strong>
             <el-tag size="small" effect="plain">{{ service.protocols.join(' / ').toUpperCase() }} · {{ service.port }}</el-tag>
             <el-tag v-if="service.forward?.enabled" size="small" type="success" effect="plain">转发已开启</el-tag>
-            <a v-if="service.access_url" :href="service.access_url" target="_blank" rel="noopener noreferrer">{{ service.access_url }}</a>
+            <div v-for="link in [
+              { label: '组网访问', url: serviceURL(networkIp, service.port, service.access_url) },
+              { label: '公网访问', url: activePublicURL(service) },
+              { label: '自定义访问', url: service.access_url }
+            ].filter(item => item.url)" :key="link.label" class="service-link">
+              <span>{{ link.label }}：</span>
+              <a :href="link.url" target="_blank" rel="noopener noreferrer">{{ link.url }}</a>
+            </div>
             <p v-if="service.note">{{ service.note }}</p>
           </div>
           <el-button class="service-edit" text circle aria-label="编辑服务" title="编辑服务" @click="editService(service)">
@@ -269,7 +328,7 @@ async function saveService() {
 .service-forward p { color:var(--ent-muted); overflow-wrap:anywhere; }
 .service-edit { margin-left:auto; flex:none; }
 .service-details { display:flex; min-width:0; align-items:flex-start; flex-wrap:wrap; gap:6px 10px; overflow-wrap:anywhere; }
-.service-details a, .service-details p { flex-basis:100%; }
+.service-link, .service-details p { flex-basis:100%; }
 .service-details a { color:var(--ent-data-highlight); }
 .service-details p { margin:0; white-space:pre-wrap; }
 @media (max-width:440px) { .service-form-grid { grid-template-columns:1fr; gap:0; } }

@@ -6,7 +6,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting, Grid } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
-import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
+import { mergedNetworkRows, publicIPv4Candidate, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey, networkNodeIdentityKey } from '../network-nodes/identity'
 import DeviceServicesDialog from './DeviceServicesDialog.vue'
 import OpenWrtDiscoveryDialog from './OpenWrtDiscoveryDialog.vue'
@@ -100,7 +100,7 @@ const nodesQuery = useQuery({
         ? networkNodeIdentityKey(node.networkKey, '', node.row.id) : identity
       if (!unique.has(key)) unique.set(key, { ...node, identityKey: key })
     }
-    return { nodes: [...unique.values()], errors }
+    return { nodes: [...unique.values()], localNodes: nodes.filter(node => node.row.kind === '入口实例'), errors }
   },
   enabled: computed(() => networkEntries.value.length > 0),
   retry: 0,
@@ -317,6 +317,24 @@ const deviceAssetCount = computed(() => filteredDevices.value.filter(device => !
 const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
 
 const serviceDevice = ref<Device | null>(null)
+const serviceEntryPublicIPs = computed(() => {
+  const result: Record<string, Record<string, string>> = {}
+  for (const { row, hostId, networkKey } of nodesQuery.data.value?.localNodes || []) {
+    const rawName = row.rawHostname?.toLocaleLowerCase()
+    const attr = (rawName ? attributesByHostname.value.get(networkKey + '|' + rawName) : undefined)
+      || attributesByKey.value.get(networkKey + '|' + row.id)
+    const candidates = new Set(row.publicIP.split('、').map(publicIPv4Candidate).filter(Boolean))
+    const address = attr?.has_public_ip && attr.public_ip
+      ? attr.public_ip : candidates.size === 1 ? [...candidates][0] : ''
+    if (address) (result[hostId] ??= {})[row.instanceID] = address
+  }
+  return result
+})
+function serviceDeviceNetworkIP(device: Device) {
+  if (device.network_ip) return device.network_ip
+  const nodeIP = deviceNetworkIP(device)
+  return device.is_node_device || (nodeIP && nodeIP === device.ip_address) ? nodeIP : ''
+}
 const servicesOpen = ref(false)
 function openDeviceServices(device: Device) {
   serviceDevice.value = device
@@ -967,7 +985,8 @@ watch(
     </el-dialog>
 
     <DeviceServicesDialog v-if="serviceDevice" :key="serviceDevice.id"
-      v-model="servicesOpen" :device="serviceDevice" :hosts="props.hosts" />
+      v-model="servicesOpen" :device="serviceDevice" :hosts="props.hosts"
+      :network-ip="serviceDeviceNetworkIP(serviceDevice)" :entry-public-ips="serviceEntryPublicIPs" />
 
     <OpenWrtDiscoveryDialog v-if="discoveryTarget"
       :key="discoveryTarget.id + ':' + discoveryKind"
