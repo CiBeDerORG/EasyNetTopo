@@ -5,7 +5,7 @@ import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, SwitchButton } from '@element-plus/icons-vue'
+import { CircleCheck, Delete, SwitchButton } from '@element-plus/icons-vue'
 import { formatApiError } from '../../../lib/api-client'
 import { clearDeviceData as clearDeviceDataApi } from '../../devices/api'
 import { clearNodeAttributes } from '../../network-nodes/attributes'
@@ -143,6 +143,22 @@ const agentMaintenanceForHost = computed(() => {
 const agentUpdateBusy = ref(false)
 let upgradeDeadline: ReturnType<typeof setTimeout> | null = null
 const data = useHostStoreData(selectedHostId, authenticated, shouldPoll, agentUpdating, isStorePage)
+const { selfUpdatePending } = data
+const selfUpdateDialog = ref<HTMLDialogElement | null>(null)
+watch(selfUpdateDialog, dialog => dialog?.showModal())
+
+async function refreshAfterSelfUpdate() {
+  if (!selfUpdatePending.value) return
+  selfUpdateDialog.value?.close()
+  selfUpdatePending.value = false
+  await nextTick()
+  window.location.reload()
+}
+
+function handleSelfUpdatePointerMove(event: PointerEvent) {
+  if (event.pointerType === 'mouse') void refreshAfterSelfUpdate()
+}
+
 
 const hosts = data.hosts
 const executionTasks = data.tasks
@@ -1011,9 +1027,53 @@ async function logout() {
       </template>
     </el-dialog>
   </div>
+
+  <dialog
+    v-if="authenticated && selfUpdatePending"
+    ref="selfUpdateDialog"
+    class="self-update-mask"
+    aria-labelledby="self-update-title"
+    aria-describedby="self-update-instructions"
+    @pointermove="handleSelfUpdatePointerMove"
+    @cancel.prevent
+  >
+    <section class="self-update-message">
+      <el-icon aria-hidden="true"><CircleCheck /></el-icon>
+      <h2 id="self-update-title">EasyNetTopo 更新成功</h2>
+      <p id="self-update-instructions">移动鼠标或点击下方按钮，即可刷新页面。</p>
+      <el-button type="primary" @click="refreshAfterSelfUpdate">立即刷新</el-button>
+    </section>
+  </dialog>
 </template>
 
 <style scoped>
+.self-update-mask {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: 20px;
+  border: 0;
+  background: var(--ent-panel);
+  color: var(--ent-text);
+}
+.self-update-mask[open] { display: grid; place-items: center; }
+.self-update-mask::backdrop { background: var(--ent-panel); }
+.self-update-message {
+  width: min(440px, 100%);
+  padding: clamp(22px, 6vw, 40px);
+  border: 1px solid var(--ent-line);
+  border-radius: 16px;
+  background: var(--ent-panel-2);
+  text-align: center;
+}
+.self-update-message > .el-icon { color: var(--el-color-success); font-size: 44px; }
+.self-update-message h2 { margin: 16px 0 10px; font-size: clamp(20px, 5vw, 26px); }
+.self-update-message p { margin: 0 0 22px; color: var(--ent-muted); }
+
 .auth-screen {
   display: grid;
   width: 100%;

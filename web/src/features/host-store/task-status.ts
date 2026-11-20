@@ -53,7 +53,7 @@ export function formatTaskTriggerTime(task: ExecutionTask): string {
   return Number.isNaN(time.getTime()) ? '未知' : time.toLocaleString()
 }
 
-// 首次响应只记录历史任务，后续跨主机的新成功更新触发一次刷新。
+// 首次响应只记录历史任务，后续跨主机的新成功更新只通知页面一次。
 export function createSelfUpdateDetector() {
   let initialized = false
   let triggered = false
@@ -66,9 +66,9 @@ export function createSelfUpdateDetector() {
       if (!completed.has(task.id)) changed = true
       completed.add(task.id)
     }
-    const shouldReload = initialized && changed && !triggered
+    const shouldNotify = initialized && changed && !triggered
     initialized = true
-    if (shouldReload) triggered = true
-    return shouldReload
+    if (shouldNotify) triggered = true
+    return shouldNotify
   }
 }
