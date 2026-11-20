@@ -136,6 +136,40 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	if list.Code != http.StatusOK || !strings.Contains(list.Body.String(), "peer-openwrt") {
 		t.Fatalf("设备列表缺少关联数据: %d %s", list.Code, list.Body.String())
 	}
+
+	servicePath := "/api/v1/devices/" + device.ID + "/services"
+	serviceBody := `{"name":"管理后台","protocols":["udp","tcp"],"port":443,"access_url":"https://router.example.com/","icon":"web","note":"局域网管理"}`
+	if got := request(http.MethodGet, servicePath, "", false, false); got.Code != http.StatusUnauthorized {
+		t.Fatalf("未认证仍可读取设备服务: %d", got.Code)
+	}
+	if got := request(http.MethodPost, servicePath, serviceBody, true, false); got.Code != http.StatusForbidden {
+		t.Fatalf("缺少同源标记仍可写入设备服务: %d", got.Code)
+	}
+	if got := request(http.MethodPost, servicePath, strings.Replace(serviceBody, "https://router.example.com/", "javascript:alert(1)", 1), true, true); got.Code != http.StatusBadRequest {
+		t.Fatalf("危险访问地址仍可登记: %d", got.Code)
+	}
+	if got := request(http.MethodPost, "/api/v1/devices/missing/services", serviceBody, true, true); got.Code != http.StatusNotFound {
+		t.Fatalf("可为不存在的设备登记服务: %d", got.Code)
+	}
+	added := request(http.MethodPost, servicePath, serviceBody, true, true)
+	var service storage.DeviceService
+	if added.Code != http.StatusCreated || json.Unmarshal(added.Body.Bytes(), &service) != nil ||
+		service.DeviceID != device.ID || service.ID == "" || service.Port != 443 || len(service.Protocols) != 2 {
+		t.Fatalf("登记服务失败: %d %s", added.Code, added.Body.String())
+	}
+	if got := request(http.MethodGet, servicePath, "", true, false); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), service.ID) {
+		t.Fatalf("设备服务列表缺少已登记服务: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(http.MethodGet, "/api/v1/devices/"+normalDevice.ID+"/services", "", true, false); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"services":[]`) {
+		t.Fatalf("其他设备不应读取到该服务: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(http.MethodDelete, "/api/v1/devices/"+device.ID, "", true, true); got.Code != http.StatusNoContent {
+		t.Fatalf("关联服务不应阻止设备删除: %d %s", got.Code, got.Body.String())
+	}
+	if got := request(http.MethodGet, servicePath, "", true, false); got.Code != http.StatusNotFound {
+		t.Fatalf("已删除的设备服务路径应返回不存在: %d", got.Code)
+	}
+
 }
 
 func TestNetworkNodeSyncAPI(t *testing.T) {

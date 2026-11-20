@@ -777,7 +777,7 @@ async function clearAllDeviceData() {
   if (dataClearBusy.value) return
   try {
     await ElMessageBox.confirm(
-      '将删除 EasyNetTopo 本地全部设备记录，包括网络节点基础设备、普通设备、历史设备、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录，并关闭节点自动补充。不会删除网络节点属性、主机登记、Agent 配对或远端资源。此操作不可恢复，是否继续？',
+      '将删除 EasyNetTopo 本地全部设备记录，包括网络节点基础设备、普通设备、历史设备、设备服务、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录，并关闭节点自动补充。不会删除网络节点属性、主机登记、Agent 配对或远端资源。此操作不可恢复，是否继续？',
       '确认清除设备数据',
       { type: 'warning', confirmButtonText: '确认清除全部设备', cancelButtonText: '取消' }
     )
@@ -1010,7 +1010,7 @@ async function logout() {
         <section class="data-clear-item">
           <div class="data-clear-copy">
             <h3>清除设备数据</h3>
-            <p>清除节点基础设备、普通及历史设备、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录。</p>
+            <p>清除节点基础设备、普通及历史设备、设备服务、设备分组、网关组、OpenWrt RPCD 配置和节点同步记录。</p>
             <span>同时关闭节点自动补充；网络节点属性、主机和 Agent 配对保持不变。</span>
           </div>
           <el-button

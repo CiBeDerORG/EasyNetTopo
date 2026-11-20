@@ -1,6 +1,6 @@
 import { apiRequest } from '../../lib/api-client'
 import type {
-  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, GatewayGroup,
+  Device, DeviceGroup, DeviceInput, DeviceOpenWrtConfig, DeviceService, DeviceServiceInput, GatewayGroup,
   NetworkNodeDeviceInput, NetworkNodeSyncResult, NetworkNodeSyncStatus,
   OpenWrtDiscoveryKind, OpenWrtDiscoverySnapshot
 } from './types'
@@ -26,6 +26,16 @@ export function updateDevice(id: string, payload: DeviceInput) {
 }
 export function deleteDevice(id: string) {
   return apiRequest<void>('/api/v1/devices/' + encodeURIComponent(id), { method: 'DELETE' })
+}
+
+export async function getDeviceServices(deviceId: string, signal?: AbortSignal) {
+  const result = await apiRequest<{ services: DeviceService[] }>(
+    '/api/v1/devices/' + encodeURIComponent(deviceId) + '/services', { signal })
+  return result.services || []
+}
+
+export function createDeviceService(deviceId: string, body: DeviceServiceInput) {
+  return apiRequest<DeviceService>('/api/v1/devices/' + encodeURIComponent(deviceId) + '/services', { method: 'POST', body })
 }
 
 export async function getDeviceGroups() {

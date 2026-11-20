@@ -64,6 +64,8 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		switch {
 		case errors.Is(err, storage.ErrDeviceNotFound), errors.Is(err, storage.ErrDeviceGroupNotFound):
 			reply(w, http.StatusNotFound, map[string]string{"code": "not_found", "message": "设备或分组不存在"})
+		case errors.Is(err, storage.ErrInvalidDeviceService):
+			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device_service", "message": err.Error()})
 		case errors.Is(err, storage.ErrInvalidDevice):
 			reply(w, http.StatusBadRequest, map[string]string{"code": "invalid_device", "message": "设备名称、类型名称、语义标签、IP、MAC 或网络节点关联信息不合法"})
 		case errors.Is(err, storage.ErrGatewayGroupNotFound):
@@ -385,6 +387,34 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				w.WriteHeader(http.StatusNoContent)
 			default:
 				methodNotAllowed(w, "PATCH, DELETE")
+			}
+			return
+		}
+		if len(parts) == 2 && parts[0] != "" && parts[1] == "services" {
+			switch r.Method {
+			case http.MethodGet:
+				items, err := devices.ListDeviceServices(r.Context(), parts[0])
+				if err != nil {
+					mapError(w, err)
+					return
+				}
+				reply(w, http.StatusOK, map[string]any{"services": items})
+			case http.MethodPost:
+				if !mutation(w, r) {
+					return
+				}
+				var input storage.DeviceServiceInput
+				if !decode(w, r, &input) {
+					return
+				}
+				service, err := devices.CreateDeviceService(r.Context(), parts[0], input)
+				if err != nil {
+					mapError(w, err)
+					return
+				}
+				reply(w, http.StatusCreated, service)
+			default:
+				methodNotAllowed(w, "GET, POST")
 			}
 			return
 		}

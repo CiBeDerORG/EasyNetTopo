@@ -1,3 +1,14 @@
+export type DeviceServiceInput = {
+  name: string
+  protocols: ('tcp' | 'udp')[]
+  port: number
+  access_url: string
+  icon: string
+  note: string
+}
+
+export type DeviceService = DeviceServiceInput & { id: string; device_id: string; created_at: string }
+
 export type DeviceGroup = {
   id: string
   name: string

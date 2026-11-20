@@ -3,11 +3,12 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting } from '@element-plus/icons-vue'
+import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting, Grid } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { mergedNetworkRows, type NetworkRow } from '../network-nodes/data'
 import { networkNodeAttributeKey, networkNodeIdentityKey } from '../network-nodes/identity'
+import DeviceServicesDialog from './DeviceServicesDialog.vue'
 import OpenWrtDiscoveryDialog from './OpenWrtDiscoveryDialog.vue'
 import { suggestedDirectGatewayIP } from './gateway-ip'
 import { listNodeAttributes, type NodeAttributes } from '../network-nodes/attributes'
@@ -315,6 +316,13 @@ const gatewayCount = computed(() => gatewayGroups.value.filter(group => !!group.
 const deviceAssetCount = computed(() => filteredDevices.value.filter(device => !device.is_node_device).length)
 const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
 
+const serviceDevice = ref<Device | null>(null)
+const servicesOpen = ref(false)
+function openDeviceServices(device: Device) {
+  serviceDevice.value = device
+  servicesOpen.value = true
+}
+
 const deviceDialogOpen = ref(false)
 const savingDevice = ref(false)
 const editingDeviceId = ref('')
@@ -448,7 +456,7 @@ async function deleteNodeBaseDevice(device: Device) {
   if (!device.is_node_device) return
   try {
     await ElMessageBox.confirm(
-      '确定删除节点基础设备「' + device.name + '」吗？不会删除实际 EasyTier 节点或同节点其他设备。' +
+      '确定删除节点基础设备「' + device.name + '」吗？该设备的服务登记也会删除。不会删除实际 EasyTier 节点或同节点其他设备。' +
       (device.is_gateway ? '该设备下的设备会保留，并提升为当前节点直属设备。' : '') +
       '删除后后台不会自动补回这个原主机名的基础设备。',
       '删除节点基础设备', { type: 'warning', confirmButtonText: '确认删除', cancelButtonText: '取消' })
@@ -469,7 +477,7 @@ async function deleteSelectedDevices() {
   try {
     const nodeCount = devices.value.filter(device => ids.includes(device.id) && device.is_node_device).length
     await ElMessageBox.confirm(
-      '确定删除当前选中的 ' + ids.length + ' 台设备？' +
+      '确定删除当前选中的 ' + ids.length + ' 台设备？所选设备的服务登记也会删除。' +
       (nodeCount ? '其中有 ' + nodeCount + ' 台节点基础设备；删除不会影响 EasyTier 节点，也不会删除同节点的其他设备。若基础设备本身是网关，其下挂设备将提升为直属设备。该原主机名的基础设备不会被后台自动重新创建。' : '只删除设备登记及各自的 OpenWrt 配置，不会删除 EasyTier 网络节点。'),
       '批量删除设备', { type: 'warning', confirmButtonText: '删除所选设备', cancelButtonText: '取消' })
     const results = await Promise.allSettled(ids.map(id => deleteDevice(id)))
@@ -787,6 +795,8 @@ watch(
             <span v-if="section.kind === 'gateway'" class="group-count">{{ section.items.length }}</span>
           </button>
           <div v-if="section.gatewayDevice" class="gateway-heading-actions">
+            <el-button text circle aria-label="设备服务列表" title="设备服务列表"
+              @click="openDeviceServices(section.gatewayDevice)"><el-icon><Grid /></el-icon></el-button>
             <el-button v-if="section.gatewayDevice.is_gateway && section.gatewayDevice.owned_gateway_group_id" text circle aria-label="新增下挂设备" title="新增下挂设备"
               @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
             <el-button text circle aria-label="编辑设备" title="编辑设备"
@@ -834,6 +844,8 @@ watch(
                 </div>
               </div>
               <div class="device-actions">
+                <el-button text circle aria-label="设备服务列表" title="设备服务列表"
+                  @click="openDeviceServices(device)"><el-icon><Grid /></el-icon></el-button>
                 <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
                   @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
                 <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
@@ -953,6 +965,9 @@ watch(
         <el-button type="primary" :loading="savingDevice" @click="saveDeviceRecord">保存设备</el-button>
       </template>
     </el-dialog>
+
+    <DeviceServicesDialog v-if="serviceDevice" :key="serviceDevice.id"
+      v-model="servicesOpen" :device="serviceDevice" />
 
     <OpenWrtDiscoveryDialog v-if="discoveryTarget"
       :key="discoveryTarget.id + ':' + discoveryKind"

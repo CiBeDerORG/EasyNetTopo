@@ -1,0 +1,146 @@
+package storage
+
+import (
+	"context"
+	"errors"
+	"net/url"
+	"slices"
+	"strings"
+	"time"
+	"unicode"
+	"unicode/utf8"
+)
+
+var ErrInvalidDeviceService = errors.New("设备服务名称、协议、端口、访问地址、图标或备注不合法")
+
+const deviceServiceSchema = `CREATE TABLE IF NOT EXISTS device_services (
+	id TEXT PRIMARY KEY,
+	device_id TEXT NOT NULL REFERENCES devices(id) ON DELETE CASCADE,
+	name TEXT NOT NULL,
+	protocol TEXT NOT NULL CHECK(protocol IN ('tcp','udp','tcp_udp')),
+	port INTEGER NOT NULL CHECK(port BETWEEN 1 AND 65535),
+	access_url TEXT NOT NULL DEFAULT '',
+	icon TEXT NOT NULL DEFAULT '',
+	note TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL
+)`
+
+type DeviceServiceInput struct {
+	Name      string   `json:"name"`
+	Protocols []string `json:"protocols"`
+	Port      int      `json:"port"`
+	AccessURL string   `json:"access_url"`
+	Icon      string   `json:"icon"`
+	Note      string   `json:"note"`
+}
+
+type DeviceService struct {
+	ID       string `json:"id"`
+	DeviceID string `json:"device_id"`
+	DeviceServiceInput
+	CreatedAt string `json:"created_at"`
+}
+
+func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
+	input.Name = strings.TrimSpace(input.Name)
+	input.AccessURL = strings.TrimSpace(input.AccessURL)
+	input.Note = strings.TrimSpace(input.Note)
+	if input.Name == "" || utf8.RuneCountInString(input.Name) > 128 || strings.ContainsFunc(input.Name, unicode.IsControl) ||
+		input.Port < 1 || input.Port > 65535 || utf8.RuneCountInString(input.Note) > 2000 ||
+		strings.ContainsRune(input.Note, 0) || len(input.AccessURL) > 2048 {
+		return "", ErrInvalidDeviceService
+	}
+	if input.AccessURL != "" {
+		parsed, err := url.Parse(input.AccessURL)
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") ||
+			parsed.Hostname() == "" || parsed.User != nil || strings.ContainsFunc(input.AccessURL, unicode.IsSpace) ||
+			strings.Contains(input.AccessURL, "\\") {
+			return "", ErrInvalidDeviceService
+		}
+	}
+	switch input.Icon {
+	case "", "web", "storage", "terminal", "media":
+	default:
+		return "", ErrInvalidDeviceService
+	}
+	if len(input.Protocols) == 0 || len(input.Protocols) > 2 {
+		return "", ErrInvalidDeviceService
+	}
+	for _, name := range input.Protocols {
+		if name != "tcp" && name != "udp" {
+			return "", ErrInvalidDeviceService
+		}
+	}
+	tcp, udp := slices.Contains(input.Protocols, "tcp"), slices.Contains(input.Protocols, "udp")
+	switch {
+	case tcp && udp:
+		input.Protocols = []string{"tcp", "udp"}
+		return "tcp_udp", nil
+	case tcp:
+		input.Protocols = []string{"tcp"}
+		return "tcp", nil
+	default:
+		input.Protocols = []string{"udp"}
+		return "udp", nil
+	}
+}
+
+func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) ([]DeviceService, error) {
+	rows, err := s.store.db.QueryContext(ctx, `SELECT COALESCE(ds.id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
+		COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,'')
+		FROM devices d LEFT JOIN device_services ds ON ds.device_id=d.id WHERE d.id=?
+		ORDER BY ds.name COLLATE NOCASE,ds.id`, deviceID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]DeviceService, 0)
+	exists := false
+	for rows.Next() {
+		exists = true
+		var service DeviceService
+		var protocol string
+		if err := rows.Scan(&service.ID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon, &service.Note, &service.CreatedAt); err != nil {
+			return nil, err
+		}
+		if service.ID != "" {
+			service.DeviceID = deviceID
+			service.Protocols = strings.Split(protocol, "_")
+			items = append(items, service)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if !exists {
+		return nil, ErrDeviceNotFound
+	}
+	return items, nil
+}
+
+func (s *DeviceStore) CreateDeviceService(ctx context.Context, deviceID string, input DeviceServiceInput) (DeviceService, error) {
+	protocol, err := normalizeDeviceService(&input)
+	if err != nil {
+		return DeviceService{}, err
+	}
+	id, err := uuid()
+	if err != nil {
+		return DeviceService{}, err
+	}
+	now := time.Now().UTC().Format(time.RFC3339)
+	result, err := s.store.db.ExecContext(ctx, `INSERT INTO device_services
+		(id,device_id,name,protocol,port,access_url,icon,note,created_at)
+		SELECT ?,id,?,?,?,?,?,?,? FROM devices WHERE id=?`,
+		id, input.Name, protocol, input.Port, input.AccessURL, input.Icon, input.Note, now, deviceID)
+	if err != nil {
+		return DeviceService{}, err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return DeviceService{}, err
+	}
+	if count == 0 {
+		return DeviceService{}, ErrDeviceNotFound
+	}
+	return DeviceService{ID: id, DeviceID: deviceID, DeviceServiceInput: input, CreatedAt: now}, nil
+}
