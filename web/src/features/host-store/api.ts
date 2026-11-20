@@ -1,5 +1,5 @@
 import { apiRequest } from '../../lib/api-client'
-import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot, AdapterTypesResponse } from './types'
+import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot, AdapterTypesResponse, ReverseDiscovery } from './types'
 
 export function getAuthStatus() {
   return apiRequest<AuthStatus>('/api/v1/auth/status')
@@ -112,4 +112,31 @@ export function resolveInterruptedExecutionTask(id: string) {
 
 export function setNetworkEntry(id: string, enabled: boolean) {
   return apiRequest<Host>('/api/v1/hosts/' + encodeURIComponent(id) + '/network-entry', { method: 'PUT', body: { enabled } })
+}
+
+export function getReverseDiscovery() {
+  return apiRequest<ReverseDiscovery>('/api/v1/reverse/discovery')
+}
+export function setReverseDiscovery(enabled: boolean) {
+  return apiRequest<{ enabled: boolean; until: number }>(
+    '/api/v1/reverse/discovery', { method: 'PUT', body: { enabled } }
+  )
+}
+export function acceptReverseAgent(agentID: string) {
+  return apiRequest<Host>('/api/v1/reverse/discovery/' + encodeURIComponent(agentID) + '/accept',
+    { method: 'POST' })
+}
+export function rejectReverseAgent(agentID: string) {
+  return apiRequest<void>('/api/v1/reverse/discovery/' + encodeURIComponent(agentID) + '/reject',
+    { method: 'POST' })
+}
+export function revokeTemporaryHost(hostID: string) {
+  return apiRequest<void>('/api/v1/hosts/' + encodeURIComponent(hostID) + '/temporary',
+    { method: 'DELETE' })
+}
+export function preinstallApp(hostID: string, payload: AppRef & { revision: string; config: Record<string, string> }) {
+  return apiRequest<{ accepted: boolean; task_id: string; state: string }>(
+    '/api/v1/hosts/' + encodeURIComponent(hostID) + '/preinstall',
+    { method: 'POST', body: payload }
+  )
 }

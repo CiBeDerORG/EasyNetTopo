@@ -6,6 +6,7 @@ import type { CatalogApp, ConfigField } from '../types'
 
 const props = defineProps<{
   modelValue: boolean
+  preInstall?: boolean
   app: CatalogApp | null
   revision: string
   fields: ConfigField[]
@@ -49,10 +50,10 @@ function submit() {
 </script>
 
 <template>
-  <el-dialog :model-value="modelValue" :title="'安装配置 · ' + (app?.name || '')"
+  <el-dialog :model-value="modelValue" :title="(preInstall ? '预安装配置 · ' : '安装配置 · ') + (app?.name || '')"
     width="min(600px, calc(100vw - 28px))" append-to-body :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)">
-    <p class="config-intro">以下参数由应用清单定义。密钥只会提交给 EasyNetTopo 服务端，并通过已配对 Agent 发送给目标主机。</p>
+    <p class="config-intro">以下参数由应用清单定义。密钥只会提交给 EasyNetTopo 服务端；临时主机预安装任务会在 Agent 下次领取时加密传递。</p>
     <el-form v-if="visibleFields.length" label-position="top">
       <el-form-item v-for="field in visibleFields" :key="field.key" :label="field.label" :required="field.required" :error="errors[field.key]">
         <el-select v-if="field.type === 'boolean'" v-model="values[field.key]" :disabled="saving || field.editable === false" class="full-width">
@@ -99,7 +100,7 @@ function submit() {
     <el-empty v-else description="该应用无需额外配置" :image-size="70" />
     <template #footer>
       <el-button @click="emit('update:modelValue', false)">取消</el-button>
-      <el-button type="primary" :loading="saving" :disabled="saving" @click="submit">确认安装</el-button>
+      <el-button type="primary" :loading="saving" :disabled="saving" @click="submit">{{ preInstall ? '保存预安装任务' : '确认安装' }}</el-button>
     </template>
   </el-dialog>
 </template>

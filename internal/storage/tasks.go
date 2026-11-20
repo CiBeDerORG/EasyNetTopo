@@ -217,7 +217,7 @@ func (s *TaskStore) ListLatest(ctx context.Context) ([]Task, error) {
 
 func (s *TaskStore) PendingHosts(ctx context.Context) ([]string, error) {
 	rows, err := s.db.QueryContext(ctx, `SELECT DISTINCT host_id FROM execution_tasks
-		WHERE type='application' AND state IN ('queued','preparing','running')
+		WHERE type='application' AND trigger_source<>'reverse_discovery' AND state IN ('queued','preparing','running')
 		ORDER BY host_id`)
 	if err != nil {
 		return nil, err
@@ -246,7 +246,7 @@ func (s *TaskStore) Next(ctx context.Context, hostID string) (Task, bool, error)
 		return Task{}, false, nil
 	}
 	row := s.db.QueryRowContext(ctx, "SELECT "+taskColumns+` FROM execution_tasks
-		WHERE host_id=? AND type='application' AND state IN ('queued','preparing','running')
+		WHERE host_id=? AND type='application' AND trigger_source<>'reverse_discovery' AND state IN ('queued','preparing','running')
 		ORDER BY CASE WHEN state='running' THEN 0 WHEN state='preparing' THEN 1 ELSE 2 END, rowid LIMIT 1`, hostID)
 	task, err := scanTask(row)
 	if errors.Is(err, sql.ErrNoRows) {
@@ -392,7 +392,7 @@ func cancelSupersededTasks(ctx context.Context, tx *sql.Tx, target TaskTarget, n
 // RecoverPreparation 仅回滚尚未向 Agent 发出更新命令的准备阶段。
 func (s *TaskStore) RecoverPreparation(ctx context.Context) error {
 	_, err := s.db.ExecContext(ctx, `UPDATE execution_tasks SET state='queued',message='服务重启后重新准备'
-		WHERE type='application' AND state='preparing'`)
+		WHERE trigger_source<>'reverse_discovery' AND type='application' AND state='preparing'`)
 	return err
 }
 

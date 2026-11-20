@@ -46,13 +46,28 @@ function recovered(row: AppStatus): boolean {
 const statusByKey = computed<Record<string, AppStatus>>(() => Object.fromEntries(props.rows.map(row =>
   [appKey(row), recovered(row) ? recoveredUninstallStatus(row) : row]
 )))
+function appPermission(app: CatalogApp) {
+  const standard = getAppPermissions(app, statusByKey.value[appKey(app)], props.snapshot?.platform)
+  if (props.host?.host_type !== 'temporary') return standard
+  const eligible = !!app.revision && app.app_id !== 'easynettopo'
+  return {
+    ...standard,
+    showInstall: eligible, canInstall: eligible,
+    showUpdate: false, canUpdate: false,
+    showUninstall: false, canUninstall: false,
+    showAdopt: false, canAdopt: false,
+    showForceUpdate: false, canForceUpdate: false,
+    blockReason: eligible ? '' : '该应用不支持临时主机预安装'
+  }
+}
 const installedCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
 const runningCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
-const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
+const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + (props.host?.host_type === 'temporary' ? 0 : 1))
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
+  if (props.host?.host_type === 'temporary') return { label: '主动报到', type: 'success' as const }
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
   if (taskActive(agentTask.value) || props.agentMaintenance?.state === 'waiting') return { label: '更新中', type: 'warning' as const }
   if (props.agentMaintenance?.state === 'timeout') return {
@@ -64,13 +79,14 @@ const agentState = computed(() => {
   return { label: '已配对', type: 'info' as const }
 })
 const showNativeAgent = computed(() =>
+  props.host?.host_type !== 'temporary' && (
   props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
   props.filter === 'available' && !props.snapshot ||
-  props.filter === 'update' && !!props.snapshot
+  props.filter === 'update' && !!props.snapshot)
 )
 const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
-  const permissions = getAppPermissions(app, row, props.snapshot?.platform)
+  const permissions = appPermission(app)
   if (props.filter === 'installed') return !!row && (row.managed || row.external)
   if (props.filter === 'available') return !row || (!row.managed && !row.external)
   if (props.filter === 'update') return permissions.canUpdate
@@ -159,10 +175,10 @@ function appPorts(app: CatalogApp): DockerPort[] {
         </div>
       </div>
 
-      <div v-if="snapshotError && !agentMaintenance" class="notice-line" role="status">
+      <div v-if="snapshotError && host.host_type !== 'temporary' && !agentMaintenance" class="notice-line" role="status">
         <el-alert title="暂时无法获取主机快照。连接失败不代表主机或 Docker 资源已删除。" type="warning" :closable="false" show-icon />
       </div>
-      <div v-if="statusError && !agentMaintenance" class="notice-line" role="alert">
+      <div v-if="statusError && host.host_type !== 'temporary' && !agentMaintenance" class="notice-line" role="alert">
         <el-alert :title="'应用状态未知。' + statusError" type="warning" :closable="false" show-icon />
       </div>
       <div v-if="!host.agent_id" class="notice-line">
@@ -172,7 +188,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
       <div class="store-heading">
         <div>
           <h3>应用市场</h3>
-          <p>Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新</p>
+          <p>{{ host.host_type === 'temporary' ? '临时主机仅支持预安装；Agent 下次主动领取后执行。' : 'Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新' }}</p>
         </div>
         <el-radio-group :model-value="filter" size="small" @update:model-value="$emit('filter-change', $event)">
           <el-radio-button label="all">全部</el-radio-button>
@@ -182,7 +198,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
         </el-radio-group>
       </div>
 
-      <div v-if="loading && rows.length === 0" class="market-loading">
+      <div v-if="loading && rows.length === 0 && host.host_type !== 'temporary'" class="market-loading">
         <el-skeleton :rows="4" animated />
       </div>
       <div v-else-if="visibleApps.length || showNativeAgent" class="market-grid">
@@ -205,11 +221,12 @@ function appPorts(app: CatalogApp): DockerPort[] {
           v-for="app in visibleApps"
           :key="appKey(app)"
           :app="app"
+          :pre-install="host.host_type === 'temporary'"
           :status="statusByKey[appKey(app)]"
           :task="cardTask(app)"
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
-          :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
+          :permissions="appPermission(app)"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
