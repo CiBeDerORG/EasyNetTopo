@@ -26,6 +26,7 @@ func routeDataForNetworkIP() json.RawMessage {
 				"result": map[string]any{
 					"node_info": map[string]any{
 						"network_name": "home",
+						"hostname":     "Local-OWRT",
 						"peer_id":      "peer-local",
 						"ipv4_addr":    ipv4AddressValue(168430083), // 10.10.10.3；目标网段必须来自 mapped_cidr
 						"proxy_cidrs":  []string{"192.168.10.0/24->10.10.30.0/24"},
@@ -34,6 +35,7 @@ func routeDataForNetworkIP() json.RawMessage {
 						map[string]any{
 							"route": map[string]any{
 								"peer_id":     "peer-remote",
+								"hostname":    "Remote-OWRT",
 								"ipv4_addr":   ipv4AddressValue(168430084), // 10.10.10.4
 								"proxy_cidrs": []string{"192.168.20.0/24->10.10.40.0/24"},
 							},
@@ -50,22 +52,22 @@ func routeDataForNetworkIP() json.RawMessage {
 
 func TestOpenWrtNetworkIPMapperMapsLocalAndPeerRoutes(t *testing.T) {
 	raw := routeDataForNetworkIP()
-	local, found := openWrtNetworkIPMapperFromRoute(raw, "network:home", "peer-local")
+	local, found, _ := findOpenWrtNetworkIPMapper(raw, "local-owrt", "entry-a")
 	if !found {
 		t.Fatal("应从本机 node_info 找到网络节点代理网段")
 	}
 	if mapped, known := local.mapAddress("192.168.10.162"); !known || mapped != "10.10.30.162" {
 		t.Fatalf("本机节点组网 IP 映射错误: mapped=%q known=%v", mapped, known)
 	}
-	remote, found := openWrtNetworkIPMapperFromRoute(raw, "network:home", "peer-remote")
+	remote, found, _ := findOpenWrtNetworkIPMapper(raw, "remote-owrt", "entry-a")
 	if !found {
 		t.Fatal("应从 peer_routes 找到远端网络节点代理网段")
 	}
 	if mapped, known := remote.mapAddress("192.168.20.88"); !known || mapped != "10.10.40.88" {
 		t.Fatalf("远端节点组网 IP 映射错误: mapped=%q known=%v", mapped, known)
 	}
-	if _, found := openWrtNetworkIPMapperFromRoute(raw, "network:other", "peer-local"); found {
-		t.Fatal("不应跨 network_key 匹配代理网段")
+	if _, found, _ := findOpenWrtNetworkIPMapper(raw, "missing", "entry-a"); found {
+		t.Fatal("不得使用其他主机名的代理网段")
 	}
 }
 
@@ -90,7 +92,7 @@ func TestProxyIPv4MappingsSupportIdentityAndSingleHostRoutes(t *testing.T) {
 }
 
 func TestOpenWrtNetworkIPMapperRejectsAmbiguousAndInvalidAddresses(t *testing.T) {
-	mapper, found := openWrtNetworkIPMapperFromRoute(routeDataForNetworkIP(), "network:home", "peer-local")
+	mapper, found, _ := findOpenWrtNetworkIPMapper(routeDataForNetworkIP(), "local-owrt", "entry-a")
 	if !found {
 		t.Fatal("测试映射规则缺失")
 	}
@@ -137,7 +139,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	}
 	gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
 		Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IsGateway: true,
-		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-local",
+		IPAddress: "192.168.10.1", NodeHostname: "Local-OWRT",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -154,7 +156,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 			},
 		},
 	})
-	mapper, found := openWrtNetworkIPMapperFromRoute(routeDataForNetworkIP(), "network:home", "peer-local")
+	mapper, found, _ := findOpenWrtNetworkIPMapper(routeDataForNetworkIP(), "local-owrt", "entry-a")
 	if !found {
 		t.Fatal("未能创建测试映射")
 	}
@@ -163,7 +165,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	}
 	findDevice := func() storage.Device {
 		t.Helper()
-		items, listErr := store.ListDevicesForNode(ctx, "network:home", "peer-local")
+		items, listErr := store.ListDevicesForHostname(ctx, "local-owrt")
 		if listErr != nil {
 			t.Fatal(listErr)
 		}
@@ -191,7 +193,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 	nodeInfo := result["node_info"].(map[string]any)
 	nodeInfo["proxy_cidrs"] = []any{"192.168.10.0/24->10.10.40.0/24"}
 	updatedRoute, _ = json.Marshal(routeValue)
-	updatedMapper, found := openWrtNetworkIPMapperFromRoute(updatedRoute, "network:home", "peer-local")
+	updatedMapper, found, _ := findOpenWrtNetworkIPMapper(updatedRoute, "local-owrt", "entry-a")
 	if !found {
 		t.Fatal("未能创建更新后的测试映射")
 	}
@@ -235,7 +237,7 @@ func TestOpenWrtDiscoveryImportPersistsAndRefreshesNetworkIP(t *testing.T) {
 func TestOpenWrtNetworkIPMapperDiagnosticsExplainRouteMatching(t *testing.T) {
 	raw := routeDataForNetworkIP()
 
-	local, found, localDiagnostics := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:home", "peer-local")
+	local, found, localDiagnostics := findOpenWrtNetworkIPMapper(raw, "local-owrt", "entry-a")
 	if !found || !local.available {
 		t.Fatalf("node_info 代理网段应匹配成功: mapper=%+v diagnostics=%+v", local, localDiagnostics)
 	}
@@ -243,13 +245,13 @@ func TestOpenWrtNetworkIPMapperDiagnosticsExplainRouteMatching(t *testing.T) {
 		localDiagnostics.InstanceCount != 1 || localDiagnostics.MatchingNetworkInstances != 1 ||
 		localDiagnostics.ProxyCIDRCount != 1 || localDiagnostics.ValidMappingCount != 1 ||
 		len(localDiagnostics.ObservedNetworkKeys) != 1 || localDiagnostics.ObservedNetworkKeys[0] != "network:home" ||
-		len(localDiagnostics.ObservedPeerIDs) != 1 || localDiagnostics.ObservedPeerIDs[0] != "peer-local" ||
+		len(localDiagnostics.ObservedPeerIDs) != 2 || localDiagnostics.ObservedPeerIDs[0] != "peer-local" ||
 		len(localDiagnostics.MappingRules) != 1 ||
 		localDiagnostics.MappingRules[0] != "192.168.10.0/24 -> 10.10.30.0/24" {
 		t.Fatalf("node_info 匹配诊断字段不完整: %+v", localDiagnostics)
 	}
 
-	remote, found, remoteDiagnostics := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:home", "peer-remote")
+	remote, found, remoteDiagnostics := findOpenWrtNetworkIPMapper(raw, "remote-owrt", "entry-a")
 	if !found || !remote.available {
 		t.Fatalf("peer_routes 代理网段应匹配成功: mapper=%+v diagnostics=%+v", remote, remoteDiagnostics)
 	}
@@ -263,7 +265,7 @@ func TestOpenWrtNetworkIPMapperDiagnosticsExplainRouteMatching(t *testing.T) {
 		t.Fatalf("peer_routes 匹配诊断字段不完整: %+v", remoteDiagnostics)
 	}
 
-	_, found, missing := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, "network:missing", "peer-local")
+	_, found, missing := findOpenWrtNetworkIPMapper(raw, "missing", "entry-a")
 	if found || missing.Status != "no_match" || missing.MatchingNetworkInstances != 0 || missing.Message == "" {
 		t.Fatalf("未匹配网络应给出明确原因: found=%v diagnostics=%+v", found, missing)
 	}
@@ -272,5 +274,30 @@ func TestOpenWrtNetworkIPMapperDiagnosticsExplainRouteMatching(t *testing.T) {
 		(openWrtNetworkIPMapper{}).diagnosticStatus("192.168.10.20", "", false) != "mapper_unavailable" ||
 		local.diagnosticStatus("2001:db8::20", "", false) != "ipv4_only" {
 		t.Fatal("设备地址映射判定未区分映射成功、无规则、路由映射器不可用和 IPv6")
+	}
+}
+
+func TestHostnameMappingRejectsDuplicateAndIncompleteRemoteRules(t *testing.T) {
+	raw := json.RawMessage(`{"data":[{"instance_id":"uuid","result":{
+	  "node_info":{"peer_id":100,"hostname":"entry"},
+	  "peer_routes":[{"route":{"peer_id":200,"hostname":"OWRT","proxy_cidrs":["192.168.10.0/24->10.10.30.0/24"]}}]
+	}}]}`)
+	mapper, found, diagnostic := findOpenWrtNetworkIPMapper(raw, "owrt", "yun")
+	if ip, known := mapper.mapAddress("192.168.10.162"); !found || !known || ip != "10.10.30.162" {
+		t.Fatalf("无网络名的实例应按原始主机名转换: %s %+v", ip, diagnostic)
+	}
+	raw = json.RawMessage(`{"data":[{"result":{
+	  "node_info":{"network_name":"home","peer_id":100,"hostname":"entry"},
+	  "peer_routes":[{"route":{"peer_id":200,"hostname":"OWRT","proxy_cidrs":["10.10.30.0/24"]}}]
+	}}]}`)
+	if _, found, diagnostic := findOpenWrtNetworkIPMapper(raw, "owrt", "yun"); found || len(diagnostic.matchedNodes) != 1 {
+		t.Fatalf("远端只给可达网段时不得推断原始网段: %+v", diagnostic)
+	}
+	raw = json.RawMessage(`{"data":[
+	  {"result":{"node_info":{"network_name":"home","peer_id":200,"hostname":"OWRT","proxy_cidrs":["192.168.10.0/24->10.10.30.0/24"]}}},
+	  {"result":{"node_info":{"network_name":"other","peer_id":200,"hostname":"owrt"}}}
+	]}`)
+	if _, found, diagnostic := findOpenWrtNetworkIPMapper(raw, "owrt", "yun"); found || diagnostic.Status != "ambiguous" {
+		t.Fatalf("不同网络下即使 Peer ID 相同也不得合并同名节点: %+v", diagnostic)
 	}
 }

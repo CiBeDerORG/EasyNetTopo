@@ -163,6 +163,8 @@ function matchLocationLabel(value?: string) {
       <el-tag v-if="snapshot?.truncated" size="small" type="warning">结果已截断</el-tag>
       <el-tag v-if="snapshot?.status === 'partial'" size="small" type="warning">部分成功</el-tag>
     </div>
+    <el-alert v-if="snapshot?.diagnostics?.route.import_paused" type="warning" :closable="false" show-icon
+      :title="snapshot.diagnostics.route.reason || '原始主机名有冲突，自动入库已暂停。'" />
     <el-alert v-if="snapshot?.import" type="success" :closable="false" show-icon
       :title="'自动入库完成：新增 ' + snapshot.import.created + ' 台，已存在 ' + snapshot.import.existing + ' 台，跳过 ' + snapshot.import.skipped + ' 条。'" />
     <el-collapse v-if="snapshot?.diagnostics" v-model="diagnosticsExpanded" class="discovery-diagnostics">
@@ -186,11 +188,8 @@ function matchLocationLabel(value?: string) {
               {{ snapshot.diagnostics.snapshot.status }} · {{ snapshot.diagnostics.snapshot.device_count }} 条
               <span v-if="snapshot.diagnostics.snapshot.truncated">· 已截断</span>
             </el-descriptions-item>
-            <el-descriptions-item label="network_key">
-              {{ snapshot.diagnostics.gateway.network_key || snapshot.diagnostics.route.target_network_key || '—' }}
-            </el-descriptions-item>
-            <el-descriptions-item label="peer_id">
-              {{ snapshot.diagnostics.gateway.peer_id || snapshot.diagnostics.route.target_peer_id || '—' }}
+            <el-descriptions-item label="原始主机名">
+              {{ snapshot.diagnostics.route.target_hostname || '—' }}
             </el-descriptions-item>
             <el-descriptions-item label="组网入口查询">
               {{ snapshot.diagnostics.route.hosts_queried }} 个入口 · 成功 {{ snapshot.diagnostics.route.hosts_succeeded }} · 失败 {{ snapshot.diagnostics.route.hosts_failed }}

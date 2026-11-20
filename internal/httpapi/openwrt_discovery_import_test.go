@@ -230,12 +230,12 @@ func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
 	}
 	gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
 		Name: "上海-OWRT", SemanticKinds: []string{"openwrt"}, IsGateway: true,
-		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-local",
+		IPAddress: "192.168.10.1", NodeHostname: "Local-OWRT",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	mapper, found := openWrtNetworkIPMapperFromRoute(routeDataForNetworkIP(), gateway.NetworkKey, gateway.PeerID)
+	mapper, found, _ := findOpenWrtNetworkIPMapper(routeDataForNetworkIP(), gateway.NodeHostname, "host-entry")
 	if !found {
 		t.Fatal("测试路由映射缺失")
 	}

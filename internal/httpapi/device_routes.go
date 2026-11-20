@@ -168,7 +168,16 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		switch r.Method {
 		case http.MethodGet:
 			networkKey, peerID := r.URL.Query().Get("network_key"), r.URL.Query().Get("peer_id")
-			items, err := devices.ListGatewayGroups(r.Context(), networkKey, peerID)
+			var items []storage.GatewayGroup
+			var err error
+			switch hostname := r.URL.Query().Get("node_hostname"); {
+			case hostname != "":
+				items, err = devices.ListGatewayGroupsForHostname(r.Context(), hostname)
+			case networkKey != "" || peerID != "":
+				items, err = devices.ListGatewayGroups(r.Context(), networkKey, peerID)
+			default:
+				items, err = devices.ListAllGatewayGroups(r.Context())
+			}
 			if err != nil {
 				mapError(w, err)
 				return
@@ -244,14 +253,17 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		case http.MethodGet:
 			var items []storage.Device
 			networkKey, peerID := r.URL.Query().Get("network_key"), r.URL.Query().Get("peer_id")
+			hostname := r.URL.Query().Get("node_hostname")
 			unassigned := r.URL.Query().Get("unassigned") == "true"
 			var err error
 			switch {
-			case unassigned && (networkKey != "" || peerID != ""):
+			case unassigned && (hostname != "" || networkKey != "" || peerID != ""):
 				http.Error(w, "unassigned 与节点筛选不能同时使用", http.StatusBadRequest)
 				return
 			case unassigned:
 				items, err = devices.ListUnassignedDevices(r.Context())
+			case hostname != "":
+				items, err = devices.ListDevicesForHostname(r.Context(), hostname)
 			case networkKey != "" || peerID != "":
 				items, err = devices.ListDevicesForNode(r.Context(), networkKey, peerID)
 			default:
@@ -430,6 +442,7 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				mapper := openWrtNetworkIPMapper{}
 				routeDiagnostics := openWrtNetworkIPDiagnostics{
 					TargetNetworkKey: device.NetworkKey,
+					TargetHostname:   device.NodeHostname,
 					TargetPeerID:     device.PeerID,
 					Hosts:            make([]openWrtNetworkIPHostDiagnostic, 0),
 					Reason:           "当前扫描快照不可导入，未查询 EasyTier 路由",

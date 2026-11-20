@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/netip"
+	"slices"
 	"sort"
 	"strings"
 	"sync"
@@ -15,8 +16,9 @@ import (
 )
 
 type proxyIPv4Mapping struct {
-	source netip.Prefix
-	target netip.Prefix
+	source   netip.Prefix
+	target   netip.Prefix
+	explicit bool
 }
 
 type openWrtNetworkIPMapper struct {
@@ -39,10 +41,13 @@ type openWrtNetworkIPHostDiagnostic struct {
 	ObservedPeerIDs          []string `json:"observed_peer_ids,omitempty"`
 	MatchLocation            string   `json:"match_location,omitempty"`
 	MappingRules             []string `json:"mapping_rules,omitempty"`
+	matchedNodes             map[string]struct{}
 }
 
 type openWrtNetworkIPDiagnostics struct {
 	TargetNetworkKey string                           `json:"target_network_key"`
+	PauseImport      bool                             `json:"import_paused,omitempty"`
+	TargetHostname   string                           `json:"target_hostname,omitempty"`
 	TargetPeerID     string                           `json:"target_peer_id"`
 	NetworkEntries   int                              `json:"network_entries"`
 	HostsQueried     int                              `json:"hosts_queried"`
@@ -149,7 +154,7 @@ func proxyIPv4Mappings(raw json.RawMessage) []proxyIPv4Mapping {
 	}
 
 	mappings := make([]proxyIPv4Mapping, 0, len(values))
-	seen := make(map[string]bool)
+	seen := make(map[string]int)
 	for _, value := range values {
 		parts := strings.Split(strings.TrimSpace(value), "->")
 		if len(parts) < 1 || len(parts) > 2 {
@@ -173,21 +178,14 @@ func proxyIPv4Mappings(raw json.RawMessage) []proxyIPv4Mapping {
 			continue
 		}
 		key := source.String() + "->" + target.String()
-		if seen[key] {
+		if index, exists := seen[key]; exists {
+			mappings[index].explicit = mappings[index].explicit || len(parts) == 2
 			continue
 		}
-		seen[key] = true
-		mappings = append(mappings, proxyIPv4Mapping{source: source, target: target})
+		seen[key] = len(mappings)
+		mappings = append(mappings, proxyIPv4Mapping{source: source, target: target, explicit: len(parts) == 2})
 	}
 	return mappings
-}
-
-func mapperFromNetworkNode(node map[string]json.RawMessage) (openWrtNetworkIPMapper, bool) {
-	mappings := proxyIPv4Mappings(node["proxy_cidrs"])
-	if len(mappings) == 0 {
-		return openWrtNetworkIPMapper{}, false
-	}
-	return openWrtNetworkIPMapper{available: true, mappings: mappings}, true
 }
 
 func mapperSignature(mapper openWrtNetworkIPMapper) string {
@@ -232,11 +230,6 @@ func (m openWrtNetworkIPMapper) diagnosticStatus(raw, mapped string, known bool)
 	return "mapped"
 }
 
-func openWrtNetworkIPMapperFromRoute(raw json.RawMessage, networkKey, peerID string) (openWrtNetworkIPMapper, bool) {
-	mapper, found, _ := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, networkKey, peerID)
-	return mapper, found
-}
-
 func mappingRuleLabels(mapper openWrtNetworkIPMapper) []string {
 	rules := make([]string, 0, len(mapper.mappings))
 	for _, mapping := range mapper.mappings {
@@ -270,10 +263,10 @@ func rawProxyCIDRCount(raw json.RawMessage) int {
 	return 0
 }
 
-func openWrtNetworkIPMapperFromRouteWithDiagnostics(raw json.RawMessage, networkKey, peerID string) (openWrtNetworkIPMapper, bool, openWrtNetworkIPHostDiagnostic) {
-	diagnostic := openWrtNetworkIPHostDiagnostic{Status: "no_match"}
-	if strings.TrimSpace(networkKey) == "" || strings.TrimSpace(peerID) == "" {
-		diagnostic.Message = "目标 network_key 或 peer_id 为空，无法匹配路由"
+func findOpenWrtNetworkIPMapper(raw json.RawMessage, hostname, entryID string) (openWrtNetworkIPMapper, bool, openWrtNetworkIPHostDiagnostic) {
+	diagnostic := openWrtNetworkIPHostDiagnostic{Status: "no_match", matchedNodes: make(map[string]struct{})}
+	if hostname == "" {
+		diagnostic.Message = "缺少原始主机名"
 		return openWrtNetworkIPMapper{}, false, diagnostic
 	}
 	payload := raw
@@ -287,7 +280,7 @@ func openWrtNetworkIPMapperFromRouteWithDiagnostics(raw json.RawMessage, network
 	}
 	diagnostic.InstanceCount = len(instances)
 
-	var selected *openWrtNetworkIPMapper
+	var local, remote networkIPMappingEvidence
 	for _, rawInstance := range instances {
 		instance := jsonObject(rawInstance)
 		result := jsonObject(instance["result"])
@@ -309,28 +302,22 @@ func openWrtNetworkIPMapperFromRouteWithDiagnostics(raw json.RawMessage, network
 		}
 		diagnostic.ObservedNetworkKeys = appendUniqueDiagnosticValue(diagnostic.ObservedNetworkKeys, currentNetworkKey)
 		diagnostic.ObservedPeerIDs = appendUniqueDiagnosticValue(diagnostic.ObservedPeerIDs, jsonString(nodeInfo["peer_id"]))
-		if currentNetworkKey != networkKey {
-			continue
-		}
-		diagnostic.MatchingNetworkInstances++
 
-		if jsonString(nodeInfo["peer_id"]) == peerID {
-			diagnostic.MatchLocation = "node_info"
-			diagnostic.ProxyCIDRCount += rawProxyCIDRCount(nodeInfo["proxy_cidrs"])
-			mapper, ok := mapperFromNetworkNode(nodeInfo)
-			if ok {
-				diagnostic.ValidMappingCount += len(mapper.mappings)
-				if !mergeNetworkIPMapper(&selected, mapper) {
-					diagnostic.Status = "ambiguous"
-					diagnostic.Message = "同一目标节点匹配到多组不一致的代理网段，已拒绝选择"
-					return openWrtNetworkIPMapper{}, false, diagnostic
-				}
-				diagnostic.MappingRules = mappingRuleLabels(mapper)
-				diagnostic.Message = "已通过 node_info.peer_id 匹配目标网络节点"
-			} else {
-				diagnostic.Message = "peer_id 已匹配 node_info，但 proxy_cidrs 中没有有效 IPv4 映射规则"
+		identityScope := currentNetworkKey
+		if strings.HasPrefix(identityScope, "instance:") {
+			identityScope = "entry:" + entryID + ":" + identityScope
+		}
+		matches := func(node map[string]json.RawMessage, id string) bool {
+			if id == "" || !strings.EqualFold(jsonString(node["hostname"]), hostname) {
+				return false
 			}
-			continue
+			diagnostic.matchedNodes[identityScope+"\x00"+id] = struct{}{}
+			return true
+		}
+		if matches(nodeInfo, jsonString(nodeInfo["peer_id"])) {
+			diagnostic.MatchingNetworkInstances++
+			diagnostic.ProxyCIDRCount += rawProxyCIDRCount(nodeInfo["proxy_cidrs"])
+			local.add(proxyIPv4Mappings(nodeInfo["proxy_cidrs"]))
 		}
 
 		var peerRoutes []json.RawMessage
@@ -347,53 +334,69 @@ func openWrtNetworkIPMapperFromRouteWithDiagnostics(raw json.RawMessage, network
 				routePeerID = jsonString(peer["peer_id"])
 			}
 			diagnostic.ObservedPeerIDs = appendUniqueDiagnosticValue(diagnostic.ObservedPeerIDs, routePeerID)
-			if routePeerID != peerID {
+			if !matches(route, routePeerID) {
 				continue
 			}
 			diagnostic.MatchingPeerRoutes++
-			diagnostic.MatchLocation = "peer_routes"
 			diagnostic.ProxyCIDRCount += rawProxyCIDRCount(route["proxy_cidrs"])
-			mapper, ok := mapperFromNetworkNode(route)
-			if ok {
-				diagnostic.ValidMappingCount += len(mapper.mappings)
-				if !mergeNetworkIPMapper(&selected, mapper) {
-					diagnostic.Status = "ambiguous"
-					diagnostic.Message = "同一目标节点匹配到多组不一致的代理网段，已拒绝选择"
-					return openWrtNetworkIPMapper{}, false, diagnostic
-				}
-				diagnostic.MappingRules = mappingRuleLabels(mapper)
-				diagnostic.Message = "已通过 peer_routes.route.peer_id 匹配目标网络节点"
-			} else {
-				diagnostic.Message = "peer_id 已匹配 peer_routes，但 route.proxy_cidrs 中没有有效 IPv4 映射规则"
-			}
+			// 远端通告的单段只表示可达网段，无法确定网关上的原始网段。
+			remote.add(slices.DeleteFunc(proxyIPv4Mappings(route["proxy_cidrs"]), func(rule proxyIPv4Mapping) bool {
+				return !rule.explicit
+			}))
 		}
 	}
 
 	sort.Strings(diagnostic.ObservedNetworkKeys)
 	sort.Strings(diagnostic.ObservedPeerIDs)
-	if selected == nil {
-		if diagnostic.MatchingNetworkInstances == 0 {
-			diagnostic.Message = "没有找到匹配的 network_key：" + networkKey
-		} else if diagnostic.MatchLocation == "" {
-			diagnostic.Message = "network_key 已匹配，但 node_info.peer_id 和 peer_routes.peer_id 均未匹配目标节点"
-		} else if diagnostic.Message == "" {
-			diagnostic.Message = "找到目标节点，但没有可用的代理网段"
+	if len(diagnostic.matchedNodes) > 1 {
+		diagnostic.Status = "ambiguous"
+		diagnostic.Message = "发现多个同名 EasyTier 节点，已暂停自动入库和组网 IP 转换"
+		return openWrtNetworkIPMapper{}, false, diagnostic
+	}
+	evidence, location := preferredNetworkIPMapping(local, remote)
+	if evidence.conflict {
+		diagnostic.Status = "ambiguous"
+		diagnostic.MatchLocation = location
+		diagnostic.Message = "同一节点返回的代理规则不一致"
+		return openWrtNetworkIPMapper{}, false, diagnostic
+	}
+	if !evidence.mapper.available {
+		diagnostic.Message = "未找到原始主机名对应的节点"
+		if len(diagnostic.matchedNodes) == 1 {
+			diagnostic.Message = "已找到节点，但没有完整的代理网段映射"
 		}
 		return openWrtNetworkIPMapper{}, false, diagnostic
 	}
 	diagnostic.Status = "matched"
-	diagnostic.MappingRules = mappingRuleLabels(*selected)
-	diagnostic.ValidMappingCount = len(selected.mappings)
+	diagnostic.MatchLocation = location
+	diagnostic.MappingRules = mappingRuleLabels(evidence.mapper)
+	diagnostic.ValidMappingCount = len(evidence.mapper.mappings)
 	diagnostic.Message = "已找到目标节点代理网段"
-	return *selected, true, diagnostic
+	return evidence.mapper, true, diagnostic
 }
-func mergeNetworkIPMapper(selected **openWrtNetworkIPMapper, candidate openWrtNetworkIPMapper) bool {
-	if *selected == nil {
-		copy := candidate
-		*selected = &copy
-		return true
+
+type networkIPMappingEvidence struct {
+	mapper   openWrtNetworkIPMapper
+	conflict bool
+}
+
+func (e *networkIPMappingEvidence) add(mappings []proxyIPv4Mapping) {
+	if len(mappings) == 0 {
+		return
 	}
-	return mapperSignature(**selected) == mapperSignature(candidate)
+	candidate := openWrtNetworkIPMapper{available: true, mappings: mappings}
+	if e.mapper.available {
+		e.conflict = e.conflict || mapperSignature(e.mapper) != mapperSignature(candidate)
+		return
+	}
+	e.mapper = candidate
+}
+
+func preferredNetworkIPMapping(local, remote networkIPMappingEvidence) (networkIPMappingEvidence, string) {
+	if local.mapper.available || local.conflict {
+		return local, "node_info"
+	}
+	return remote, "peer_routes"
 }
 
 func safeOpenWrtDiagnosticError(err error) string {
@@ -424,14 +427,10 @@ func safeOpenWrtDiagnosticError(err error) string {
 		return "route 数据请求失败（详细错误已隐藏）"
 	}
 }
-func resolveOpenWrtNetworkIPMapper(ctx context.Context, hostSvc *hosts.Service, device storage.Device) openWrtNetworkIPMapper {
-	mapper, _ := resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx, hostSvc, device)
-	return mapper
-}
-
 func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *hosts.Service, device storage.Device) (openWrtNetworkIPMapper, openWrtNetworkIPDiagnostics) {
 	diagnostics := openWrtNetworkIPDiagnostics{
 		TargetNetworkKey: device.NetworkKey,
+		TargetHostname:   device.NodeHostname,
 		TargetPeerID:     device.PeerID,
 		Hosts:            make([]openWrtNetworkIPHostDiagnostic, 0),
 	}
@@ -439,8 +438,9 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 		diagnostics.Reason = "主机服务不可用，无法读取 EasyTier 组网入口"
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
-	if strings.TrimSpace(device.NetworkKey) == "" || strings.TrimSpace(device.PeerID) == "" {
-		diagnostics.Reason = "网关设备缺少 network_key 或 peer_id，无法定位对应网络节点"
+	if strings.TrimSpace(device.NodeHostname) == "" {
+		diagnostics.PauseImport = true
+		diagnostics.Reason = "网关设备缺少 EasyTier 原始主机名，请确认归属节点"
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
 	entries, err := hostSvc.List(ctx)
@@ -496,7 +496,7 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 				results <- queryResult{diagnostic: hostDiagnostic}
 				return
 			}
-			mapper, found, parsed := openWrtNetworkIPMapperFromRouteWithDiagnostics(raw, device.NetworkKey, device.PeerID)
+			mapper, found, parsed := findOpenWrtNetworkIPMapper(raw, device.NodeHostname, entry.ID)
 			parsed.HostID = entry.ID
 			parsed.HostName = entry.Name
 			if found {
@@ -513,9 +513,12 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 	wait.Wait()
 	close(results)
 
-	var selected *openWrtNetworkIPMapper
-	conflict := false
+	var local, remote networkIPMappingEvidence
+	matchedNodes := make(map[string]struct{})
 	for item := range results {
+		for identity := range item.diagnostic.matchedNodes {
+			matchedNodes[identity] = struct{}{}
+		}
 		diagnostics.Hosts = append(diagnostics.Hosts, item.diagnostic)
 		switch item.diagnostic.Status {
 		case "failed", "cancelled":
@@ -523,12 +526,16 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 		default:
 			diagnostics.HostsSucceeded++
 		}
-		if !item.found {
-			continue
+		evidence := &remote
+		if item.diagnostic.MatchLocation == "node_info" {
+			evidence = &local
 		}
-		diagnostics.HostsMatched++
-		if !mergeNetworkIPMapper(&selected, item.mapper) {
-			conflict = true
+		if item.diagnostic.Status == "ambiguous" {
+			evidence.conflict = true
+		}
+		if item.found {
+			diagnostics.HostsMatched++
+			evidence.add(item.mapper.mappings)
 		}
 	}
 	sort.Slice(diagnostics.Hosts, func(i, j int) bool {
@@ -537,25 +544,32 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 		}
 		return diagnostics.Hosts[i].HostName < diagnostics.Hosts[j].HostName
 	})
-	if conflict {
+	if len(matchedNodes) > 1 {
+		diagnostics.PauseImport = true
+		diagnostics.Reason = "发现多个同名 EasyTier 节点，已暂停自动入库和组网 IP 转换"
+		return openWrtNetworkIPMapper{}, diagnostics
+	}
+	if diagnostics.HostsFailed > 0 {
+		diagnostics.PauseImport = true
+		diagnostics.Reason = "部分组网入口查询失败，无法确认原始主机名唯一"
+		return openWrtNetworkIPMapper{}, diagnostics
+	}
+	evidence, location := preferredNetworkIPMapping(local, remote)
+	if evidence.conflict {
 		diagnostics.Reason = "多个 EasyTier 组网入口返回了不同的代理网段，无法安全确定映射规则"
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
-	if selected == nil {
-		diagnostics.Reason = "所有组网入口查询完成，但没有找到匹配目标 network_key / peer_id 的有效代理网段"
+	if !evidence.mapper.available {
+		diagnostics.Reason = "未找到目标原始主机名对应的完整代理网段"
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
 	diagnostics.Available = true
-	diagnostics.MappingRules = mappingRuleLabels(*selected)
-	for _, host := range diagnostics.Hosts {
-		if host.Status == "matched" {
-			diagnostics.MatchLocation = host.MatchLocation
-			break
-		}
-	}
+	diagnostics.MappingRules = mappingRuleLabels(evidence.mapper)
+	diagnostics.MatchLocation = location
 	diagnostics.Reason = "已找到目标网络节点代理网段"
-	return *selected, diagnostics
+	return evidence.mapper, diagnostics
 }
+
 func discoverySnapshotCanImport(raw json.RawMessage) bool {
 	value := jsonObject(raw)
 	if len(value) == 0 || jsonString(value["status"]) == "error" {

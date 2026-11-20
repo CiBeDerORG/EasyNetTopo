@@ -59,8 +59,6 @@ export type DeviceInput = {
   ip_address: string
   mac_address: string
   note: string
-  network_key: string
-  peer_id: string
   node_hostname?: string
 }
 
@@ -123,6 +121,8 @@ export type OpenWrtNetworkIPHostDiagnostic = {
 }
 
 export type OpenWrtNetworkIPDiagnostics = {
+  import_paused?: boolean
+  target_hostname?: string
   target_network_key: string
   target_peer_id: string
   network_entries: number

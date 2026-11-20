@@ -9,13 +9,10 @@ export async function getNodeDevices() {
   const result = await apiRequest<{ node_devices: Device[] }>('/api/v1/devices/network-nodes')
   return result.node_devices || []
 }
-export async function getDevices(scope?: { networkKey: string; peerId: string } | { unassigned: true }) {
+export async function getDevices(scope?: { hostname: string } | { unassigned: true }) {
   const params = new URLSearchParams()
   if (scope && 'unassigned' in scope) params.set('unassigned', 'true')
-  else if (scope) {
-    params.set('network_key', scope.networkKey)
-    params.set('peer_id', scope.peerId)
-  }
+  else if (scope) params.set('node_hostname', scope.hostname)
   const query = params.toString()
   const suffix = query ? '?' + query : ''
   const result = await apiRequest<{ devices: Device[] }>('/api/v1/devices' + suffix)
@@ -45,9 +42,9 @@ export function deleteDeviceGroup(id: string) {
   return apiRequest<void>('/api/v1/device-groups/' + encodeURIComponent(id), { method: 'DELETE' })
 }
 
-export async function getGatewayGroups(networkKey: string, peerId: string) {
-  const params = new URLSearchParams({ network_key: networkKey, peer_id: peerId })
-  const result = await apiRequest<{ groups: GatewayGroup[] }>('/api/v1/gateway-groups?' + params.toString())
+export async function getGatewayGroups(hostname?: string) {
+  const query = hostname ? '?' + new URLSearchParams({ node_hostname: hostname }).toString() : ''
+  const result = await apiRequest<{ groups: GatewayGroup[] }>('/api/v1/gateway-groups' + query)
   return result.groups || []
 }
 export function createGatewayGroup(name: string, networkKey: string, peerId: string) {

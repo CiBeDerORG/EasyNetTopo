@@ -60,22 +60,31 @@ type DiscoveredDeviceImportResult struct {
 
 // ImportGatewayDiscoveredDevices 保留原有导入入口；不做离线批量判定。
 func (s *DeviceStore) ImportGatewayDiscoveredDevices(ctx context.Context, gatewayID string, candidates []DiscoveredDeviceInput) (DiscoveredDeviceImportResult, error) {
-	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, "", candidates, false)
+	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, "", candidates, false, nil)
 }
 
 // SyncGatewayDiscoveredDevices 将单一来源的一次扫描作为状态同步。
 // 只有完整成功的快照才会把该来源之前观测到、但本次缺席的设备标记为离线。
 func (s *DeviceStore) SyncGatewayDiscoveredDevices(ctx context.Context, gatewayID, source string, candidates []DiscoveredDeviceInput, complete bool) (DiscoveredDeviceImportResult, error) {
+	return s.syncGatewayDiscoveredSource(ctx, gatewayID, source, candidates, complete, nil)
+}
+
+// 同一事务内校验扫描使用的网关，避免将旧节点的映射写入已经改绑的设备。
+func (s *DeviceStore) SyncGatewayDiscoverySnapshot(ctx context.Context, gateway Device, source string, candidates []DiscoveredDeviceInput, complete bool) (DiscoveredDeviceImportResult, error) {
+	return s.syncGatewayDiscoveredSource(ctx, gateway.ID, source, candidates, complete, &gateway)
+}
+
+func (s *DeviceStore) syncGatewayDiscoveredSource(ctx context.Context, gatewayID, source string, candidates []DiscoveredDeviceInput, complete bool, gateway *Device) (DiscoveredDeviceImportResult, error) {
 	if source != "devices" && source != "adb" {
 		return DiscoveredDeviceImportResult{}, ErrInvalidDevice
 	}
 	for i := range candidates {
 		candidates[i].Source = source
 	}
-	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, source, candidates, complete)
+	return s.syncGatewayDiscoveredDevices(ctx, gatewayID, source, candidates, complete, gateway)
 }
 
-func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayID, completeSource string, candidates []DiscoveredDeviceInput, complete bool) (DiscoveredDeviceImportResult, error) {
+func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayID, completeSource string, candidates []DiscoveredDeviceInput, complete bool, expected *Device) (DiscoveredDeviceImportResult, error) {
 	var result DiscoveredDeviceImportResult
 	result.Devices = make([]DiscoveredDeviceSyncDiagnostic, 0, len(candidates))
 	if len(candidates) > 256 {
@@ -88,30 +97,49 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 	}
 	defer tx.Rollback()
 
-	var networkKey, peerID, ownedGroupID, kinds string
+	var networkKey, peerID, hostname, gatewayIP, ownedGroupID, kinds string
 	var isGateway, legacyOpenWrt bool
-	err = tx.QueryRowContext(ctx, `SELECT d.network_key,d.peer_id,d.is_gateway,d.semantic_kinds,d.is_openwrt,
+	err = tx.QueryRowContext(ctx, `SELECT d.network_key,d.peer_id,d.node_hostname,d.ip_address,d.is_gateway,d.semantic_kinds,d.is_openwrt,
 		COALESCE((SELECT gg.id FROM device_gateway_groups gg
-			WHERE gg.gateway_device_id=d.id AND gg.network_key=d.network_key AND gg.peer_id=d.peer_id LIMIT 1),'')
+			WHERE gg.gateway_device_id=d.id LIMIT 1),'')
 		FROM devices d WHERE d.id=?`, gatewayID).
-		Scan(&networkKey, &peerID, &isGateway, &kinds, &legacyOpenWrt, &ownedGroupID)
+		Scan(&networkKey, &peerID, &hostname, &gatewayIP, &isGateway, &kinds, &legacyOpenWrt, &ownedGroupID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return result, ErrDeviceNotFound
 	}
 	if err != nil {
 		return result, err
 	}
+	if expected != nil && (!strings.EqualFold(expected.NodeHostname, hostname) || expected.IPAddress != gatewayIP) {
+		return result, ErrDeviceNodeConflict
+	}
 	var semanticKinds []string
 	if err := json.Unmarshal([]byte(kinds), &semanticKinds); err != nil {
 		return result, err
 	}
 	if !isGateway || (!hasSemanticKind(semanticKinds, "openwrt") && !legacyOpenWrt) ||
-		networkKey == "" || peerID == "" || ownedGroupID == "" {
+		(hostname == "" && (networkKey == "" || peerID == "")) || ownedGroupID == "" {
 		return result, ErrInvalidDevice
 	}
 
 	// 整个网络节点内的设备都参与去重，包括直属设备、手工录入设备和其他网关下的设备。
-	rows, err := tx.QueryContext(ctx, "SELECT id,name,ip_address,network_ip,mac_address,COALESCE(gateway_group_id,'') FROM devices WHERE network_key=? AND peer_id=?", networkKey, peerID)
+	scope := "(node_hostname=? COLLATE NOCASE OR (node_hostname='' AND gateway_group_id=?))"
+	args := []any{hostname, ownedGroupID}
+	if hostname == "" {
+		// 未迁移的历史记录只在本网关下去重，避免猜测节点归属。
+		scope = "(gateway_group_id=? OR id=?)"
+		args = []any{ownedGroupID, gatewayID}
+	}
+	var duplicateNodes int
+	if hostname != "" {
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM devices WHERE is_node_device=1 AND node_hostname=? COLLATE NOCASE", hostname).Scan(&duplicateNodes); err != nil {
+			return result, err
+		}
+		if duplicateNodes > 1 {
+			return result, ErrDeviceNodeConflict
+		}
+	}
+	rows, err := tx.QueryContext(ctx, "SELECT id,name,ip_address,network_ip,mac_address,COALESCE(gateway_group_id,'') FROM devices WHERE "+scope, args...)
 	if err != nil {
 		return result, err
 	}
@@ -308,7 +336,10 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			input := DeviceInput{
 				Name: name, IPAddress: ipAddress, MACAddress: macAddress,
 				Manufacturer: discoveredField(item.Manufacturer, 100), Model: discoveredField(item.Model, 120),
-				Note: note, NetworkKey: networkKey, PeerID: peerID, GatewayGroupID: ownedGroupID,
+				Note: note, NodeHostname: hostname, GatewayGroupID: ownedGroupID,
+			}
+			if hostname == "" {
+				input.NetworkKey, input.PeerID = networkKey, peerID
 			}
 			if err := normalizeDevice(&input); err != nil {
 				recordSkipped("设备字段校验失败")
@@ -318,9 +349,9 @@ func (s *DeviceStore) syncGatewayDiscoveredDevices(ctx context.Context, gatewayI
 			if err != nil {
 				return result, err
 			}
-			_, err = tx.ExecContext(ctx, "INSERT INTO devices (id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,network_ip,mac_address,note,is_openwrt,network_key,peer_id,created_at,updated_at) VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,?,0,?,?,?,?)",
+			_, err = tx.ExecContext(ctx, "INSERT INTO devices (id,name,group_id,gateway_group_id,device_type,semantic_kinds,is_node_device,is_gateway,manufacturer,model,ip_address,network_ip,mac_address,note,is_openwrt,network_key,peer_id,node_hostname,created_at,updated_at) VALUES(?,?,NULL,?,'通用设备','[]',0,0,?,?,?,?,?,?,0,?,?,?,?,?)",
 				deviceID, input.Name, ownedGroupID, input.Manufacturer, input.Model, input.IPAddress, networkIP,
-				input.MACAddress, input.Note, networkKey, peerID, now, now)
+				input.MACAddress, input.Note, input.NetworkKey, input.PeerID, hostname, now, now)
 			if err != nil {
 				return result, err
 			}

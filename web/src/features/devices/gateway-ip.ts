@@ -26,13 +26,11 @@ type GatewayDeviceDraft = {
   is_gateway: boolean
   gateway_group_id?: string
   ip_address?: string
-  network_key?: string
-  peer_id?: string
+  node_hostname?: string
 }
 
 type ProxySubnetNode = {
-  networkKey: string
-  peerId: string
+  hostname?: string
   row?: { subnets: string }
 }
 
@@ -41,8 +39,10 @@ export function suggestedDirectGatewayIP(
   device: GatewayDeviceDraft,
   nodes: ProxySubnetNode[]
 ): string {
-  if (!device.is_gateway || device.gateway_group_id || device.ip_address?.trim() ||
-      !device.network_key || !device.peer_id) return ''
-  const node = nodes.find(item => item.networkKey === device.network_key && item.peerId === device.peer_id)
+  if (!device.is_gateway || device.gateway_group_id || device.ip_address?.trim()) return ''
+  const hostname = device.node_hostname?.trim().toLowerCase()
+  if (!hostname) return ''
+  const matches = nodes.filter(item => item.hostname?.trim().toLowerCase() === hostname)
+  const node = matches.length === 1 ? matches[0] : undefined
   return node?.row ? gatewayIPFromProxySubnets(node.row.subnets) : ''
 }
