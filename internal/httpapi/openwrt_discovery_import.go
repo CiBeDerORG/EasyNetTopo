@@ -149,6 +149,13 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 	if snapshot.Devices == nil || len(snapshot.Devices) > 256 {
 		return nil, discoveryError(http.StatusBadGateway, "openwrt_discovery_invalid_response", "发现结果缺少有效设备列表或超过最大条目数")
 	}
+	if routeDiagnostics.PauseImport {
+		updated, err := attachOpenWrtDiscoveryDiagnostics(raw, diagnostics)
+		if err != nil {
+			return nil, discoveryError(http.StatusBadGateway, "openwrt_discovery_invalid_response", "无法附加扫描诊断信息")
+		}
+		return updated, nil
+	}
 	items := make([]storage.DiscoveredDeviceInput, 0, len(snapshot.Devices))
 	for _, record := range snapshot.Devices {
 		candidate := storage.DiscoveredDeviceInput{Source: kind, Observation: record.Observation}
@@ -182,7 +189,16 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 	}
 	// partial 或 truncated 快照只能确认本次明确观测到的设备在线，不能据此把缺席设备判为离线。
 	complete := snapshot.Status == "ok" && !snapshot.Truncated
-	summary, err := devices.SyncGatewayDiscoveredDevices(ctx, gateway.ID, kind, items, complete)
+	var summary storage.DiscoveredDeviceImportResult
+	var err error
+	if includeDiagnostics {
+		summary, err = devices.SyncGatewayDiscoverySnapshot(ctx, gateway, kind, items, complete)
+	} else {
+		summary, err = devices.SyncGatewayDiscoveredDevices(ctx, gateway.ID, kind, items, complete)
+	}
+	if errors.Is(err, storage.ErrDeviceNodeConflict) {
+		return nil, discoveryError(http.StatusConflict, "openwrt_discovery_node_conflict", "扫描期间网关归属发生变化，或原始主机名存在冲突，请确认节点后重新扫描")
+	}
 	if err != nil {
 		return nil, discoveryError(http.StatusServiceUnavailable, "openwrt_discovery_import_failed", "扫描已完成，但自动添加设备失败；请检查设备管理数据后重新扫描")
 	}

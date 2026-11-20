@@ -21,7 +21,7 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	gateway, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "网关", SemanticKinds: []string{"openwrt"}, IsGateway: true,
 		IPAddress: "192.168.10.1", MACAddress: "02:00:00:00:00:01",
-		NetworkKey: "network:home", PeerID: "peer-a",
+		NodeHostname: "openwrt-a",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -31,14 +31,14 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	}
 	manual, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "手工设备", IPAddress: "192.168.10.12", Note: "保留用户输入",
-		NetworkKey: "network:home", PeerID: "peer-a",
+		NodeHostname: "openwrt-a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	otherNode, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "其他节点设备", IPAddress: "192.168.10.20",
-		NetworkKey: "network:home", PeerID: "peer-b",
+		NodeHostname: "openwrt-b",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -61,7 +61,7 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	if result.Created != 2 || result.Existing != 4 || result.Skipped != 2 {
 		t.Fatalf("自动导入计数错误: %+v", result)
 	}
-	nodeDevices, err := store.ListDevicesForNode(ctx, "network:home", "peer-a")
+	nodeDevices, err := store.ListDevicesForHostname(ctx, "OPENWRT-A")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -78,7 +78,7 @@ func TestGatewayDiscoveryAutoImportCreatesChildrenAndDeduplicates(t *testing.T) 
 	for _, ip := range []string{"192.168.10.25", "192.168.10.21"} {
 		d := found[ip]
 		if d.GatewayGroupID != gateway.OwnedGatewayGroupID || d.IsGateway || d.IsNodeDevice ||
-			d.NetworkKey != gateway.NetworkKey || d.PeerID != gateway.PeerID {
+			d.NodeHostname != gateway.NodeHostname || d.NetworkKey != "" || d.PeerID != "" {
 			t.Fatalf("新设备未正确归属于网关: %+v", d)
 		}
 	}
@@ -174,14 +174,14 @@ func TestGatewayDiscoveryRefreshesExistingDeviceIPAndNetworkIP(t *testing.T) {
 	}
 	gateway, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "OpenWrt", SemanticKinds: []string{"openwrt"}, IsGateway: true,
-		IPAddress: "192.168.10.1", NetworkKey: "network:home", PeerID: "peer-a",
+		IPAddress: "192.168.10.1", NodeHostname: "openwrt-a",
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
 	existing, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "历史设备", IPAddress: "192.168.10.20", MACAddress: "02:00:00:00:00:20",
-		NetworkKey: "network:home", PeerID: "peer-a",
+		NodeHostname: "openwrt-a",
 	})
 	if err != nil {
 		t.Fatal(err)

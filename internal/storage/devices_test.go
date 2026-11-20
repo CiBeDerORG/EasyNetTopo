@@ -441,7 +441,7 @@ func TestNetworkNodePeerRotationKeepsDeviceIdentityAndChildren(t *testing.T) {
 		t.Fatal(err)
 	}
 	gateway, err := store.CreateDevice(ctx, DeviceInput{
-		Name: "保留的网关", IsGateway: true, NetworkKey: "network:home", PeerID: "peer-old",
+		Name: "保留的网关", IsGateway: true, NodeHostname: "FnOS",
 		SemanticKinds: []string{"router", "openwrt"}, IPAddress: "192.168.10.1",
 	})
 	if err != nil {
@@ -452,7 +452,7 @@ func TestNetworkNodePeerRotationKeepsDeviceIdentityAndChildren(t *testing.T) {
 	}
 	child, err := store.CreateDevice(ctx, DeviceInput{
 		Name: "下挂设备", GatewayGroupID: gateway.OwnedGatewayGroupID,
-		NetworkKey: "network:home", PeerID: "peer-old",
+		NodeHostname: "fnos",
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -468,19 +468,15 @@ func TestNetworkNodePeerRotationKeepsDeviceIdentityAndChildren(t *testing.T) {
 		nodes[0].PeerID != "peer-new" || nodes[0].Name != "原始节点显示名" {
 		t.Fatalf("节点被重复创建或丢失自定义资料: %+v %v", nodes, err)
 	}
-	oldScope, err := store.ListDevicesForNode(ctx, "network:home", "peer-old")
-	if err != nil || len(oldScope) != 0 {
-		t.Fatalf("旧节点关联未迁出: %+v %v", oldScope, err)
-	}
-	newScope, err := store.ListDevicesForNode(ctx, "network:home", "peer-new")
-	if err != nil || len(newScope) != 3 {
-		t.Fatalf("节点下挂设备未同步换绑: %+v %v", newScope, err)
+	associated, err := store.ListDevicesForHostname(ctx, "FNOS")
+	if err != nil || len(associated) != 3 {
+		t.Fatalf("Peer ID 轮换不应改变原主机名归属: %+v %v", associated, err)
 	}
 	updatedChild, err := store.Device(ctx, child.ID)
-	if err != nil || updatedChild.GatewayGroupID != gateway.OwnedGatewayGroupID {
+	if err != nil || updatedChild.GatewayGroupID != gateway.OwnedGatewayGroupID || updatedChild.PeerID != "" {
 		t.Fatalf("网关设备层级丢失: %+v %v", updatedChild, err)
 	}
-	groups, err := store.ListGatewayGroups(ctx, "network:home", "peer-new")
+	groups, err := store.ListGatewayGroupsForHostname(ctx, "FnOS")
 	if err != nil || len(groups) != 1 || groups[0].GatewayDeviceID != gateway.ID || groups[0].DeviceCount != 1 {
 		t.Fatalf("网关组未跟随节点重新绑定: %+v %v", groups, err)
 	}
@@ -511,10 +507,13 @@ func TestNetworkNodeHostnameLegacyMigrationAndAmbiguityGuards(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// 旧版只有展示名称、没有 node_hostname，首次遇到同名原始 hostname 时应安全接管。
+	// 旧设备没有 node_hostname 时，使用历史记录的原始节点属性核对身份。
 	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
 		{Name: "yun", NetworkKey: "network:alpha", PeerID: "old"},
 	}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{NetworkKey: "network:alpha", PeerID: "old", Hostname: "yun"}); err != nil {
 		t.Fatal(err)
 	}
 	before, err := store.ListNodeDevices(ctx)
@@ -532,22 +531,23 @@ func TestNetworkNodeHostnameLegacyMigrationAndAmbiguityGuards(t *testing.T) {
 		after[0].NodeHostname != "yun" || after[0].PeerID != "new" {
 		t.Fatalf("旧记录迁移错误: %+v %v", after, err)
 	}
-	// 相同 hostname 允许存在于不同 network_key，不应该跨网络关联。
+	// 不同网络中发现同名节点时，两条观测都不能自动关联。
 	result, err = store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+		{Name: "原网络", NetworkKey: "network:alpha", PeerID: "new", Hostname: "yun"},
 		{Name: "另一个网络", NetworkKey: "network:beta", PeerID: "beta-peer", Hostname: "yun"},
 	})
-	if err != nil || result.Created != 1 {
+	if err != nil || result.Skipped != 2 || result.Created != 0 {
 		t.Fatalf("跨网络同名节点误合并: %+v %v", result, err)
 	}
 	// 同一批数据报告两个不同 Peer ID 却使用相同原始主机名时不能猜测关联。
-	if _, err = store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
+	if result, err = store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
 		{Name: "节点 1", NetworkKey: "network:alpha", PeerID: "a", Hostname: "yun"},
 		{Name: "节点 2", NetworkKey: "network:alpha", PeerID: "b", Hostname: "YUN"},
-	}); !errors.Is(err, ErrInvalidDevice) {
-		t.Fatalf("相同网络同名节点冲突应拒绝: %v", err)
+	}); err != nil || result.Created != 0 || result.Skipped != 2 {
+		t.Fatalf("相同网络同名节点冲突应跳过: %+v %v", result, err)
 	}
 	after, err = store.ListNodeDevices(ctx)
-	if err != nil || len(after) != 2 {
+	if err != nil || len(after) != 1 {
 		t.Fatalf("有歧义的同步不得改写数据: %+v %v", after, err)
 	}
 }
@@ -573,6 +573,9 @@ func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
 		t.Fatalf("初始化旧节点失败: %+v %v", nodes, err)
 	}
 	originalID := nodes[0].ID
+	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{NetworkKey: "network:home", PeerID: "old", Hostname: "FnOS"}); err != nil {
+		t.Fatal(err)
+	}
 	child, err := store.CreateDevice(ctx, DeviceInput{Name: "旧节点的下挂设备", NetworkKey: "network:home", PeerID: "old"})
 	if err != nil {
 		t.Fatal(err)
@@ -597,8 +600,8 @@ func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
 		t.Fatalf("原历史节点 ID 未保留: %+v %v", nodes, err)
 	}
 	c, err := store.Device(ctx, child.ID)
-	if err != nil || c.PeerID != "new" {
-		t.Fatalf("原有子设备丢失: %+v %v", c, err)
+	if err != nil || c.NodeHostname != "FnOS" || c.PeerID != "old" {
+		t.Fatalf("原有子设备未保留主机名归属: %+v %v", c, err)
 	}
 }
 
@@ -830,7 +833,7 @@ func TestLegacyGatewayGroupMigrationPromotesGatewayOwner(t *testing.T) {
 	for _, stmt := range []string{
 		`CREATE TABLE devices (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, group_id TEXT,
-			gateway_group_id TEXT, device_type TEXT NOT NULL DEFAULT '通用设备',
+			gateway_group_id TEXT REFERENCES device_gateway_groups(id) ON DELETE SET NULL, device_type TEXT NOT NULL DEFAULT '通用设备',
 			semantic_kinds TEXT NOT NULL DEFAULT '[]', is_node_device INTEGER NOT NULL DEFAULT 0,
 			is_gateway INTEGER NOT NULL DEFAULT 0, manufacturer TEXT NOT NULL DEFAULT '',
 			model TEXT NOT NULL DEFAULT '', ip_address TEXT NOT NULL DEFAULT '',
@@ -840,7 +843,8 @@ func TestLegacyGatewayGroupMigrationPromotesGatewayOwner(t *testing.T) {
 		)`,
 		`CREATE TABLE device_gateway_groups (
 			id TEXT PRIMARY KEY, name TEXT NOT NULL, network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
-			created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+			CHECK (network_key<>'' AND peer_id<>'')
 		)`,
 		`CREATE UNIQUE INDEX idx_devices_gateway_group_gateway ON devices(gateway_group_id)
 			WHERE gateway_group_id IS NOT NULL AND gateway_group_id<>'' AND is_gateway=1`,
@@ -1045,5 +1049,46 @@ func TestMoveNodeBaseToSelectedHostnamePreservesGatewayAndChildren(t *testing.T)
 	})
 	if err != nil || result.Existing != 1 || result.Skipped != 0 {
 		t.Fatalf("手工改绑后应解除目标同步抑制: %+v %v", result, err)
+	}
+}
+
+func TestMoveHostnameGatewayUpdatesChildrenAndInvalidatesOldNetworkIP(t *testing.T) {
+	ctx := context.Background()
+	db, err := Open(filepath.Join(t.TempDir(), "hostname-move.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	store, err := NewDeviceStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	input := DeviceInput{Name: "网关", NodeHostname: "owrt-old", IsGateway: true,
+		SemanticKinds: []string{"openwrt"}, IPAddress: "192.168.10.1"}
+	gateway, err := store.CreateDevice(ctx, input)
+	if err != nil {
+		t.Fatal(err)
+	}
+	records := []DiscoveredDeviceInput{{Name: "手机", IPAddress: "192.168.10.10",
+		NetworkIP: "10.10.30.10", NetworkIPKnown: true}}
+	if _, err := store.SyncGatewayDiscoverySnapshot(ctx, gateway, "devices", records, false); err != nil {
+		t.Fatal(err)
+	}
+	input.NodeHostname = "owrt-new"
+	moved, err := store.UpdateDevice(ctx, gateway.ID, input)
+	if err != nil || moved.OwnedGatewayGroupID != gateway.OwnedGatewayGroupID {
+		t.Fatalf("改绑丢失网关组: %+v %v", moved, err)
+	}
+	if _, err := store.SyncGatewayDiscoverySnapshot(ctx, gateway, "devices", records, false); !errors.Is(err, ErrDeviceNodeConflict) {
+		t.Fatalf("旧扫描不能覆盖新归属的组网 IP: %v", err)
+	}
+	items, err := store.ListDevicesForHostname(ctx, "owrt-new")
+	if err != nil || len(items) != 2 {
+		t.Fatalf("下挂设备未随网关改绑: %+v %v", items, err)
+	}
+	for _, item := range items {
+		if item.NetworkIP != "" || item.PeerID != "" || item.NetworkKey != "" {
+			t.Fatalf("新归属仍含有旧组网地址或双字段: %+v", item)
+		}
 	}
 }

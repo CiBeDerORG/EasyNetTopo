@@ -62,35 +62,26 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	}
 
 	nodeSync := request("POST", "/api/v1/devices/network-nodes/sync",
-		`{"nodes":[{"name":"入口节点","network_key":"network:home","peer_id":"peer-openwrt"}]}`, true, true)
+		`{"nodes":[{"name":"入口节点","network_key":"network:home","peer_id":"peer-openwrt","hostname":"owrt-home"}]}`, true, true)
 	if nodeSync.Code != http.StatusOK {
 		t.Fatalf("初始化网络节点失败: %d %s", nodeSync.Code, nodeSync.Body.String())
 	}
-	gatewayGroupResponse := request("POST", "/api/v1/gateway-groups",
-		`{"name":"家庭网络","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
-	if gatewayGroupResponse.Code != http.StatusCreated {
-		t.Fatalf("创建网关组失败: %d %s", gatewayGroupResponse.Code, gatewayGroupResponse.Body.String())
-	}
-	var gatewayGroup struct {
-		ID string `json:"id"`
-	}
-	if err := json.Unmarshal(gatewayGroupResponse.Body.Bytes(), &gatewayGroup); err != nil {
-		t.Fatal(err)
-	}
-	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","gateway_group_id":"` + gatewayGroup.ID + `","semantic_kinds":["openwrt"],"ip_address":"192.168.1.1","is_gateway":true,"network_key":"network:home","peer_id":"peer-openwrt"}`
+	deviceBody := `{"name":"OpenWrt 路由器","group_id":"` + groupData.ID + `","create_gateway_group":true,"gateway_group_name":"家庭网络","semantic_kinds":["openwrt"],"ip_address":"192.168.1.1","is_gateway":true,"node_hostname":"owrt-home"}`
 	created := request("POST", "/api/v1/devices", deviceBody, true, true)
 	if created.Code != http.StatusCreated {
 		t.Fatalf("创建设备失败: %d %s", created.Code, created.Body.String())
 	}
 	var device struct {
-		ID string `json:"id"`
+		ID           string `json:"id"`
+		OwnedGroupID string `json:"owned_gateway_group_id"`
 	}
 	if err := json.Unmarshal(created.Body.Bytes(), &device); err != nil {
 		t.Fatal(err)
 	}
-	if strings.Contains(created.Body.String(), `"is_openwrt"`) ||
+	if device.OwnedGroupID == "" || strings.Contains(created.Body.String(), `"peer_id"`) ||
+		strings.Contains(created.Body.String(), `"network_key"`) || strings.Contains(created.Body.String(), `"is_openwrt"`) ||
 		!strings.Contains(created.Body.String(), `"semantic_kinds":["openwrt"]`) {
-		t.Fatalf("设备 API 应只返回 OpenWrt 语义标签，不应暴露重复布尔标识: %s", created.Body.String())
+		t.Fatalf("主机名创建应生成网关组，且仅返回主机名与 OpenWrt 语义标签: %s", created.Body.String())
 	}
 
 	config := request("PUT", "/api/v1/devices/"+device.ID+"/openwrt",
@@ -123,16 +114,16 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	}
 
 	child := request("POST", "/api/v1/devices",
-		`{"name":"客厅电视","semantic_kinds":["tv"],"gateway_group_id":"`+gatewayGroup.ID+`","network_key":"network:home","peer_id":"peer-openwrt"}`, true, true)
+		`{"name":"客厅电视","semantic_kinds":["tv"],"gateway_group_id":"`+device.OwnedGroupID+`","node_hostname":"OWRT-HOME"}`, true, true)
 	if child.Code != http.StatusCreated {
 		t.Fatalf("同一节点网关组下添加第二台设备失败: %d %s", child.Code, child.Body.String())
 	}
-	filtered := request("GET", "/api/v1/devices?network_key=network%3Ahome&peer_id=peer-openwrt", "", true, false)
+	filtered := request("GET", "/api/v1/devices?node_hostname=OWRT-HOME", "", true, false)
 	if filtered.Code != http.StatusOK || !strings.Contains(filtered.Body.String(), "OpenWrt 路由器") ||
 		!strings.Contains(filtered.Body.String(), "客厅电视") || !strings.Contains(filtered.Body.String(), `"is_node_device":true`) {
 		t.Fatalf("按网络节点筛选设备失败: %d %s", filtered.Code, filtered.Body.String())
 	}
-	groups := request("GET", "/api/v1/gateway-groups?network_key=network%3Ahome&peer_id=peer-openwrt", "", true, false)
+	groups := request("GET", "/api/v1/gateway-groups?node_hostname=owrt-home", "", true, false)
 	if groups.Code != http.StatusOK || !strings.Contains(groups.Body.String(), "家庭网络") ||
 		!strings.Contains(groups.Body.String(), "OpenWrt 路由器") {
 		t.Fatalf("读取节点网关组失败: %d %s", groups.Code, groups.Body.String())

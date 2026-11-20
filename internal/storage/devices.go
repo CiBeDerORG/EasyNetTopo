@@ -154,13 +154,7 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			CHECK ((network_key='' AND peer_id='') OR (network_key<>'' AND peer_id<>''))
 		)`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_group ON devices(group_id,name)`,
-		`CREATE TABLE IF NOT EXISTS device_gateway_groups (
-			id TEXT PRIMARY KEY, name TEXT NOT NULL,
-			network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
-			gateway_device_id TEXT NOT NULL DEFAULT '',
-			created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
-			CHECK (network_key<>'' AND peer_id<>'')
-		)`,
+		"CREATE TABLE IF NOT EXISTS device_gateway_groups " + gatewayGroupSchema,
 		`CREATE TABLE IF NOT EXISTS network_node_sync_seen (
 			network_key TEXT NOT NULL, peer_id TEXT NOT NULL, first_seen_at TEXT NOT NULL,
 			PRIMARY KEY(network_key,peer_id)
@@ -210,6 +204,9 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	if err := ensureGatewayGroupColumn(ctx, db, "gateway_device_id", "gateway_device_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, fmt.Errorf("迁移网关设备归属字段失败: %w", err)
 	}
+	if err := migrateGatewayGroupScope(ctx, db.db); err != nil {
+		return nil, fmt.Errorf("迁移网关组节点归属失败: %w", err)
+	}
 	// 旧版把网关设备也放在自己的网关组中；迁移后网关设备独立作为组所有者。
 	if _, err := db.db.ExecContext(ctx, "UPDATE device_gateway_groups SET gateway_device_id=(SELECT d.id FROM devices d WHERE d.gateway_group_id=device_gateway_groups.id AND d.is_gateway=1 ORDER BY d.created_at,d.id LIMIT 1) WHERE gateway_device_id=''"); err != nil {
 		return nil, fmt.Errorf("迁移历史网关组所有者失败: %w", err)
@@ -230,6 +227,9 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 	if _, err := db.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_devices_network_node"); err != nil {
 		return nil, fmt.Errorf("迁移节点设备唯一索引失败: %w", err)
 	}
+	if _, err := db.db.ExecContext(ctx, "DROP INDEX IF EXISTS idx_device_gateway_groups_scope_name"); err != nil {
+		return nil, err
+	}
 	for _, stmt := range []string{
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_devices_node_device_unique
 			ON devices(network_key,peer_id) WHERE is_node_device=1 AND network_key<>'' AND peer_id<>''`,
@@ -238,14 +238,31 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			WHERE is_node_device=1 AND network_key<>'' AND node_hostname<>''`,
 		`CREATE INDEX IF NOT EXISTS idx_devices_node_scope
 			ON devices(network_key,peer_id,is_node_device,gateway_group_id)`,
+		`CREATE INDEX IF NOT EXISTS idx_devices_hostname ON devices(node_hostname COLLATE NOCASE,is_node_device)`,
 		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_gateway_groups_gateway_device
 			ON device_gateway_groups(gateway_device_id) WHERE gateway_device_id<>''`,
-		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_gateway_groups_scope_name
-			ON device_gateway_groups(network_key,peer_id,name COLLATE NOCASE)`,
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_device_gateway_groups_legacy_scope_name
+			ON device_gateway_groups(network_key,peer_id,name COLLATE NOCASE) WHERE network_key<>'' AND peer_id<>''`,
 	} {
 		if _, err := db.db.ExecContext(ctx, stmt); err != nil {
 			return nil, fmt.Errorf("初始化节点设备层级索引失败: %w", err)
 		}
+	}
+	if _, err := db.db.ExecContext(ctx, `WITH named_nodes AS (
+		SELECT network_key,peer_id,node_hostname FROM devices
+		WHERE is_node_device=1 AND node_hostname<>'' AND network_key<>'' AND peer_id<>''
+	), unique_nodes AS (
+		SELECT n.* FROM named_nodes n WHERE NOT EXISTS (
+			SELECT 1 FROM named_nodes other WHERE other.node_hostname=n.node_hostname COLLATE NOCASE
+				AND (other.network_key<>n.network_key OR other.peer_id<>n.peer_id)
+		)
+	)
+	UPDATE devices AS d SET node_hostname=(
+		SELECT n.node_hostname FROM unique_nodes n WHERE n.network_key=d.network_key AND n.peer_id=d.peer_id
+	) WHERE d.node_hostname='' AND EXISTS (
+		SELECT 1 FROM unique_nodes n WHERE n.network_key=d.network_key AND n.peer_id=d.peer_id
+	)`); err != nil {
+		return nil, fmt.Errorf("回填可唯一确认的设备节点主机名失败: %w", err)
 	}
 	keyPath := filepath.Join(db.DataDir(), ".device-openwrt-sealing-key")
 	if _, statErr := os.Lstat(keyPath); errors.Is(statErr, os.ErrNotExist) {
@@ -296,6 +313,61 @@ func ensureDeviceColumn(ctx context.Context, db *Store, name, definition string)
 	}
 	_, err = db.db.ExecContext(ctx, "ALTER TABLE devices ADD COLUMN "+definition)
 	return err
+}
+
+const gatewayGroupSchema = `(
+	id TEXT PRIMARY KEY, name TEXT NOT NULL,
+	network_key TEXT NOT NULL, peer_id TEXT NOT NULL,
+	gateway_device_id TEXT NOT NULL DEFAULT '',
+	created_at TEXT NOT NULL, updated_at TEXT NOT NULL,
+	CHECK ((network_key='' AND peer_id='') OR (network_key<>'' AND peer_id<>''))
+)`
+
+// 旧表要求实时双字段必须非空。重建时保留组 ID，避免删除旧表触发外键清空成员。
+func migrateGatewayGroupScope(ctx context.Context, db *sql.DB) (err error) {
+	conn, err := db.Conn(ctx)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+	var schema string
+	if err := conn.QueryRowContext(ctx, "SELECT sql FROM sqlite_schema WHERE name='device_gateway_groups'").Scan(&schema); err != nil {
+		return err
+	}
+	if !strings.Contains(schema, "CHECK (network_key<>'' AND peer_id<>'')") {
+		return nil
+	}
+	if _, err := conn.ExecContext(ctx, "PRAGMA foreign_keys=OFF"); err != nil {
+		return err
+	}
+	defer func() {
+		_, restoreErr := conn.ExecContext(context.WithoutCancel(ctx), "PRAGMA foreign_keys=ON")
+		err = errors.Join(err, restoreErr)
+	}()
+	tx, err := conn.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	for _, stmt := range []string{
+		"CREATE TABLE device_gateway_groups_next " + gatewayGroupSchema,
+		`INSERT INTO device_gateway_groups_next(id,name,network_key,peer_id,gateway_device_id,created_at,updated_at)
+			SELECT id,name,network_key,peer_id,gateway_device_id,created_at,updated_at FROM device_gateway_groups`,
+		"DROP TABLE device_gateway_groups",
+		"ALTER TABLE device_gateway_groups_next RENAME TO device_gateway_groups",
+	} {
+		if _, err := tx.ExecContext(ctx, stmt); err != nil {
+			return err
+		}
+	}
+	var invalid int
+	if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM pragma_foreign_key_check('devices')").Scan(&invalid); err != nil {
+		return err
+	}
+	if invalid != 0 {
+		return fmt.Errorf("设备归属存在 %d 条无效外键", invalid)
+	}
+	return tx.Commit()
 }
 
 func ensureGatewayGroupColumn(ctx context.Context, db *Store, name, definition string) error {
@@ -439,18 +511,18 @@ func normalizeDevice(v *DeviceInput) error {
 		return ErrInvalidDevice
 	}
 	if v.CreateGatewayGroup {
-		if v.GatewayGroupID != "" || v.NetworkKey == "" || v.PeerID == "" {
+		if v.GatewayGroupID != "" || (v.NodeHostname == "" && (v.NetworkKey == "" || v.PeerID == "")) {
 			return ErrInvalidDevice
 		}
 		if v.GatewayGroupName != "" {
-			if _, err := normalizeGatewayGroup(v.GatewayGroupName, v.NetworkKey, v.PeerID); err != nil {
+			if _, err := normalizeGatewayGroupName(v.GatewayGroupName); err != nil {
 				return err
 			}
 		}
 	} else {
 		v.GatewayGroupName = ""
 	}
-	if v.IsGateway && (v.NetworkKey == "" || v.PeerID == "") {
+	if v.IsGateway && v.NodeHostname == "" && (v.NetworkKey == "" || v.PeerID == "") {
 		return ErrInvalidDevice
 	}
 	allowedKinds := map[string]bool{
@@ -493,7 +565,7 @@ func normalizeDevice(v *DeviceInput) error {
 			return ErrInvalidDevice
 		}
 	}
-	if (v.NetworkKey == "") != (v.PeerID == "") || (v.NetworkKey == "" && v.NodeHostname != "") || v.NodeHostname == "—" || strings.ContainsAny(v.NodeHostname, "\r\n") {
+	if (v.NetworkKey == "") != (v.PeerID == "") || v.NodeHostname == "—" || strings.ContainsAny(v.NodeHostname, "\r\n") {
 		return ErrInvalidDevice
 	}
 	if v.IPAddress != "" {
@@ -674,12 +746,21 @@ func (s *DeviceStore) ListDevicesForNode(ctx context.Context, networkKey, peerID
 	return s.listDevices(ctx, "WHERE d.network_key=? AND d.peer_id=?", networkKey, peerID)
 }
 
+const uniqueDeviceHostname = "(SELECT COUNT(*) FROM devices base WHERE base.is_node_device=1 AND base.node_hostname=? COLLATE NOCASE)<=1"
+
+func (s *DeviceStore) ListDevicesForHostname(ctx context.Context, hostname string) ([]Device, error) {
+	if strings.TrimSpace(hostname) == "" {
+		return nil, ErrInvalidDevice
+	}
+	return s.listDevices(ctx, "WHERE d.node_hostname=? COLLATE NOCASE AND "+uniqueDeviceHostname, strings.TrimSpace(hostname), strings.TrimSpace(hostname))
+}
+
 func (s *DeviceStore) ListNodeDevices(ctx context.Context) ([]Device, error) {
 	return s.listDevices(ctx, "WHERE d.is_node_device=1")
 }
 
 func (s *DeviceStore) ListUnassignedDevices(ctx context.Context) ([]Device, error) {
-	return s.listDevices(ctx, "WHERE d.network_key='' AND d.peer_id=''")
+	return s.listDevices(ctx, "WHERE d.node_hostname=''")
 }
 func (s *DeviceStore) Device(ctx context.Context, id string) (Device, error) {
 	v, err := scanDevice(s.store.db.QueryRowContext(ctx, deviceSelect+" WHERE d.id=?", id))
@@ -688,20 +769,25 @@ func (s *DeviceStore) Device(ctx context.Context, id string) (Device, error) {
 	}
 	return v, err
 }
-func validateGatewayGroupScopeTx(ctx context.Context, tx *sql.Tx, groupID, networkKey, peerID, deviceID string, allowUnowned bool) (string, error) {
+func validateGatewayGroupScopeTx(ctx context.Context, tx *sql.Tx, groupID, networkKey, peerID, hostname, deviceID string, allowUnowned bool) (string, error) {
 	if groupID == "" {
 		return "", nil
 	}
-	var groupNetworkKey, groupPeerID, gatewayDeviceID string
-	err := tx.QueryRowContext(ctx, "SELECT network_key,peer_id,gateway_device_id FROM device_gateway_groups WHERE id=?", groupID).
-		Scan(&groupNetworkKey, &groupPeerID, &gatewayDeviceID)
+	var groupNetworkKey, groupPeerID, groupHostname, gatewayDeviceID string
+	err := tx.QueryRowContext(ctx, `SELECT gg.network_key,gg.peer_id,COALESCE(owner.node_hostname,''),gg.gateway_device_id
+		FROM device_gateway_groups gg LEFT JOIN devices owner ON owner.id=gg.gateway_device_id WHERE gg.id=?`, groupID).
+		Scan(&groupNetworkKey, &groupPeerID, &groupHostname, &gatewayDeviceID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return "", ErrGatewayGroupNotFound
 	}
 	if err != nil {
 		return "", err
 	}
-	if networkKey == "" || peerID == "" || groupNetworkKey != networkKey || groupPeerID != peerID {
+	if groupHostname != "" {
+		if !strings.EqualFold(groupHostname, hostname) {
+			return "", ErrInvalidDevice
+		}
+	} else if networkKey == "" || peerID == "" || groupNetworkKey != networkKey || groupPeerID != peerID {
 		return "", ErrInvalidDevice
 	}
 	if gatewayDeviceID == "" {
@@ -744,8 +830,8 @@ func validateGatewayGroupScopeTx(ctx context.Context, tx *sql.Tx, groupID, netwo
 	return gatewayDeviceID, nil
 }
 
-func createOwnedGatewayGroupTx(ctx context.Context, tx *sql.Tx, deviceID, deviceName, requestedName, networkKey, peerID string) (string, error) {
-	if deviceID == "" || networkKey == "" || peerID == "" {
+func createOwnedGatewayGroupTx(ctx context.Context, tx *sql.Tx, deviceID, deviceName, requestedName, networkKey, peerID, hostname string) (string, error) {
+	if deviceID == "" || (hostname == "" && (networkKey == "" || peerID == "")) {
 		return "", ErrInvalidGatewayGroup
 	}
 	baseName := strings.TrimSpace(requestedName)
@@ -762,8 +848,10 @@ func createOwnedGatewayGroupTx(ctx context.Context, tx *sql.Tx, deviceID, device
 	name := baseName
 	for suffix := 2; ; suffix++ {
 		var count int
-		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM device_gateway_groups WHERE network_key=? AND peer_id=? AND name=? COLLATE NOCASE",
-			networkKey, peerID, name).Scan(&count); err != nil {
+		if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM device_gateway_groups gg LEFT JOIN devices owner ON owner.id=gg.gateway_device_id
+			WHERE gg.name=? COLLATE NOCASE AND ((?<>'' AND owner.node_hostname=? COLLATE NOCASE)
+				OR (?='' AND gg.network_key=? AND gg.peer_id=?))`,
+			name, hostname, hostname, hostname, networkKey, peerID).Scan(&count); err != nil {
 			return "", err
 		}
 		if count == 0 {
@@ -801,6 +889,20 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 		return ErrInvalidDevice
 	}
 	visited[groupID] = true
+	if nodeHostname != "" {
+		var duplicate bool
+		if err := tx.QueryRowContext(ctx, `SELECT EXISTS(
+			SELECT 1 FROM device_gateway_groups current
+			JOIN device_gateway_groups other ON other.name=current.name COLLATE NOCASE AND other.id<>current.id
+			JOIN devices owner ON owner.id=other.gateway_device_id
+			WHERE current.id=? AND owner.node_hostname=? COLLATE NOCASE
+		)`, groupID, nodeHostname).Scan(&duplicate); err != nil {
+			return err
+		}
+		if duplicate {
+			return ErrInvalidGatewayGroup
+		}
+	}
 	now := time.Now().UTC().Format(time.RFC3339)
 	if _, err := tx.ExecContext(ctx, "UPDATE device_gateway_groups SET network_key=?,peer_id=?,updated_at=? WHERE id=?",
 		networkKey, peerID, now, groupID); err != nil {
@@ -827,8 +929,8 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 		return err
 	}
 	for _, childID := range childIDs {
-		if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE id=?",
-			networkKey, peerID, nodeHostname, now, childID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE devices SET network_key=?,peer_id=?,network_ip=CASE WHEN node_hostname=? COLLATE NOCASE THEN network_ip ELSE '' END,node_hostname=?,updated_at=? WHERE id=?",
+			networkKey, peerID, nodeHostname, nodeHostname, now, childID); err != nil {
 			return err
 		}
 		var childGroupID string
@@ -849,10 +951,19 @@ func moveGatewayDescendantsTx(ctx context.Context, tx *sql.Tx, groupID, networkK
 // 所属节点的原始主机名优先取已登记的基础节点/手工属性；新节点可由当前实时选择明确传入。
 // 设备的可编辑名称不参与原主机名推断。
 func resolveDeviceNodeHostnameTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, supplied string) (string, error) {
-	if networkKey == "" || peerID == "" {
-		if supplied != "" {
-			return "", ErrInvalidDevice
+	if supplied != "" {
+		var count int
+		if err := tx.QueryRowContext(ctx, "SELECT COUNT(*) FROM devices WHERE is_node_device=1 AND node_hostname=? COLLATE NOCASE", supplied).Scan(&count); err != nil {
+			return "", err
 		}
+		if count > 1 {
+			return "", ErrDeviceNodeConflict
+		}
+		if networkKey == "" {
+			return supplied, nil
+		}
+	}
+	if networkKey == "" || peerID == "" {
 		return "", nil
 	}
 	known := ""
@@ -892,7 +1003,7 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 	if input.CreateGatewayGroup {
 		input.IsGateway = true
 	}
-	if input.IsGateway && (input.NetworkKey == "" || input.PeerID == "") {
+	if input.IsGateway && input.NodeHostname == "" && (input.NetworkKey == "" || input.PeerID == "") {
 		return Device{}, ErrInvalidDevice
 	}
 	id, err := uuid()
@@ -915,7 +1026,7 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 
 	adoptGroupID := ""
 	if input.GatewayGroupID != "" {
-		ownerID, err := validateGatewayGroupScopeTx(ctx, tx, input.GatewayGroupID, input.NetworkKey, input.PeerID, "", input.IsGateway)
+		ownerID, err := validateGatewayGroupScopeTx(ctx, tx, input.GatewayGroupID, input.NetworkKey, input.PeerID, input.NodeHostname, "", input.IsGateway)
 		if err != nil {
 			return Device{}, err
 		}
@@ -946,7 +1057,7 @@ func (s *DeviceStore) CreateDevice(ctx context.Context, input DeviceInput) (Devi
 			return Device{}, ErrGatewayDeviceConflict
 		}
 	} else if input.IsGateway {
-		if _, err := createOwnedGatewayGroupTx(ctx, tx, id, input.Name, input.GatewayGroupName, input.NetworkKey, input.PeerID); err != nil {
+		if _, err := createOwnedGatewayGroupTx(ctx, tx, id, input.Name, input.GatewayGroupName, input.NetworkKey, input.PeerID, input.NodeHostname); err != nil {
 			return Device{}, err
 		}
 	}
@@ -967,23 +1078,26 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	defer tx.Rollback()
 
 	var isNodeDevice bool
-	var currentNetworkKey, currentPeerID, currentOwnedGroupID string
-	err = tx.QueryRowContext(ctx, `SELECT d.is_node_device,d.network_key,d.peer_id,COALESCE(owned.id,'')
+	var currentNetworkKey, currentPeerID, currentHostname, currentOwnedGroupID string
+	err = tx.QueryRowContext(ctx, `SELECT d.is_node_device,d.network_key,d.peer_id,d.node_hostname,COALESCE(owned.id,'')
 		FROM devices d LEFT JOIN device_gateway_groups owned ON owned.gateway_device_id=d.id WHERE d.id=?`, id).
-		Scan(&isNodeDevice, &currentNetworkKey, &currentPeerID, &currentOwnedGroupID)
+		Scan(&isNodeDevice, &currentNetworkKey, &currentPeerID, &currentHostname, &currentOwnedGroupID)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return Device{}, ErrDeviceNotFound
 		}
 		return Device{}, err
 	}
+	if input.NodeHostname != "" && strings.EqualFold(input.NodeHostname, currentHostname) && input.NetworkKey == "" {
+		input.NetworkKey, input.PeerID = currentNetworkKey, currentPeerID
+	}
 	if isNodeDevice {
 		// 允许基础节点设备转移到新的网络节点，仍须保持基础设备的直属层级。
-		if input.NetworkKey == "" || input.PeerID == "" {
+		if input.NodeHostname == "" && (input.NetworkKey == "" || input.PeerID == "") {
 			return Device{}, ErrInvalidDevice
 		}
 		input.GatewayGroupID = ""
-		if currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID {
+		if input.NodeHostname == "" && (currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID) {
 			var conflicting int
 			if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
 				WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?`,
@@ -1002,8 +1116,8 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	if isNodeDevice && input.NodeHostname != "" {
 		var duplicate int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM devices
-			WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE AND id<>?`,
-			input.NetworkKey, input.NodeHostname, id).Scan(&duplicate); err != nil {
+			WHERE is_node_device=1 AND node_hostname=? COLLATE NOCASE AND id<>?`,
+			input.NodeHostname, id).Scan(&duplicate); err != nil {
 			return Device{}, err
 		}
 		if duplicate > 0 {
@@ -1013,13 +1127,13 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	if input.CreateGatewayGroup {
 		input.IsGateway = true
 	}
-	if input.IsGateway && (input.NetworkKey == "" || input.PeerID == "") {
+	if input.IsGateway && input.NodeHostname == "" && (input.NetworkKey == "" || input.PeerID == "") {
 		return Device{}, ErrInvalidDevice
 	}
 
 	adoptGroupID := ""
 	if input.GatewayGroupID != "" {
-		ownerID, err := validateGatewayGroupScopeTx(ctx, tx, input.GatewayGroupID, input.NetworkKey, input.PeerID, id, input.IsGateway)
+		ownerID, err := validateGatewayGroupScopeTx(ctx, tx, input.GatewayGroupID, input.NetworkKey, input.PeerID, input.NodeHostname, id, input.IsGateway)
 		if err != nil {
 			return Device{}, err
 		}
@@ -1038,8 +1152,8 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	now := time.Now().UTC().Format(time.RFC3339)
 
 	if currentOwnedGroupID != "" && !input.IsGateway {
-		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE gateway_group_id=?",
-			nullIfEmpty(input.GatewayGroupID), input.NetworkKey, input.PeerID, input.NodeHostname, now, currentOwnedGroupID); err != nil {
+		if _, err := tx.ExecContext(ctx, "UPDATE devices SET gateway_group_id=?,network_key=?,peer_id=?,network_ip=CASE WHEN node_hostname=? COLLATE NOCASE THEN network_ip ELSE '' END,node_hostname=?,updated_at=? WHERE gateway_group_id=?",
+			nullIfEmpty(input.GatewayGroupID), input.NetworkKey, input.PeerID, input.NodeHostname, input.NodeHostname, now, currentOwnedGroupID); err != nil {
 			return Device{}, err
 		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM device_gateway_groups WHERE id=?", currentOwnedGroupID); err != nil {
@@ -1060,19 +1174,19 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 			}
 			currentOwnedGroupID = adoptGroupID
 		case currentOwnedGroupID == "":
-			currentOwnedGroupID, err = createOwnedGatewayGroupTx(ctx, tx, id, input.Name, input.GatewayGroupName, input.NetworkKey, input.PeerID)
+			currentOwnedGroupID, err = createOwnedGatewayGroupTx(ctx, tx, id, input.Name, input.GatewayGroupName, input.NetworkKey, input.PeerID, input.NodeHostname)
 			if err != nil {
 				return Device{}, err
 			}
-		case currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID:
+		case !strings.EqualFold(currentHostname, input.NodeHostname), currentHostname == "" && (currentNetworkKey != input.NetworkKey || currentPeerID != input.PeerID):
 			if err := moveGatewayDescendantsTx(ctx, tx, currentOwnedGroupID, input.NetworkKey, input.PeerID, input.NodeHostname, make(map[string]bool)); err != nil {
 				return Device{}, err
 			}
 		}
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,node_hostname=?,updated_at=? WHERE id=?`,
+	result, err := tx.ExecContext(ctx, `UPDATE devices SET name=?,group_id=?,gateway_group_id=?,device_type=?,semantic_kinds=?,is_gateway=?,manufacturer=?,model=?,ip_address=?,mac_address=?,note=?,is_openwrt=?,network_key=?,peer_id=?,network_ip=CASE WHEN node_hostname=? COLLATE NOCASE THEN network_ip ELSE '' END,node_hostname=?,updated_at=? WHERE id=?`,
 		input.Name, nullIfEmpty(input.GroupID), nullIfEmpty(input.GatewayGroupID), input.DeviceType, string(semanticKinds), input.IsGateway,
-		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, input.NodeHostname, now, id)
+		input.Manufacturer, input.Model, input.IPAddress, input.MACAddress, input.Note, hasSemanticKind(input.SemanticKinds, "openwrt"), input.NetworkKey, input.PeerID, input.NodeHostname, input.NodeHostname, now, id)
 	if err != nil {
 		return Device{}, err
 	}
@@ -1090,14 +1204,16 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	}
 	if isNodeDevice {
 		// 人工改绑到曾被删除的自动节点后，解除该位置的同步抑制。
-		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE network_key=?
-			AND (peer_id=? OR (hostname<>'' AND hostname=? COLLATE NOCASE))`,
+		if _, err = tx.ExecContext(ctx, `DELETE FROM network_node_sync_deleted WHERE (hostname='' AND network_key=? AND peer_id=?)
+			OR (hostname<>'' AND hostname=? COLLATE NOCASE)`,
 			input.NetworkKey, input.PeerID, input.NodeHostname); err != nil {
 			return Device{}, err
 		}
-		if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at)
-			VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil {
-			return Device{}, err
+		if input.NetworkKey != "" {
+			if _, err = tx.ExecContext(ctx, `INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at)
+				VALUES(?,?,?)`, input.NetworkKey, input.PeerID, now); err != nil {
+				return Device{}, err
+			}
 		}
 	}
 	if err = tx.Commit(); err != nil {
@@ -1106,17 +1222,32 @@ func (s *DeviceStore) UpdateDevice(ctx context.Context, id string, input DeviceI
 	return s.Device(ctx, id)
 }
 
+func (s *DeviceStore) ListAllGatewayGroups(ctx context.Context) ([]GatewayGroup, error) {
+	return s.listGatewayGroups(ctx, "1=1")
+}
+
+func (s *DeviceStore) ListGatewayGroupsForHostname(ctx context.Context, hostname string) ([]GatewayGroup, error) {
+	if strings.TrimSpace(hostname) == "" {
+		return nil, ErrInvalidGatewayGroup
+	}
+	return s.listGatewayGroups(ctx, "owner.node_hostname=? COLLATE NOCASE AND "+uniqueDeviceHostname, strings.TrimSpace(hostname), strings.TrimSpace(hostname))
+}
+
 func (s *DeviceStore) ListGatewayGroups(ctx context.Context, networkKey, peerID string) ([]GatewayGroup, error) {
 	if strings.TrimSpace(networkKey) == "" || strings.TrimSpace(peerID) == "" {
 		return nil, ErrInvalidGatewayGroup
 	}
+	return s.listGatewayGroups(ctx, "gg.network_key=? AND gg.peer_id=?", networkKey, peerID)
+}
+
+func (s *DeviceStore) listGatewayGroups(ctx context.Context, where string, args ...any) ([]GatewayGroup, error) {
 	rows, err := s.store.db.QueryContext(ctx, `SELECT gg.id,gg.name,gg.network_key,gg.peer_id,COUNT(d.id),
 		COALESCE(gg.gateway_device_id,''),COALESCE(owner.name,''),
 		gg.created_at,gg.updated_at
 		FROM device_gateway_groups gg
 		LEFT JOIN devices d ON d.gateway_group_id=gg.id
 		LEFT JOIN devices owner ON owner.id=gg.gateway_device_id
-		WHERE gg.network_key=? AND gg.peer_id=? GROUP BY gg.id ORDER BY gg.name COLLATE NOCASE,gg.id`, networkKey, peerID)
+		WHERE `+where+` GROUP BY gg.id ORDER BY gg.name COLLATE NOCASE,gg.id`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1133,15 +1264,21 @@ func (s *DeviceStore) ListGatewayGroups(ctx context.Context, networkKey, peerID 
 	return result, rows.Err()
 }
 
-func normalizeGatewayGroup(name, networkKey, peerID string) (string, error) {
+func normalizeGatewayGroupName(name string) (string, error) {
 	name = strings.TrimSpace(name)
-	networkKey = strings.TrimSpace(networkKey)
-	peerID = strings.TrimSpace(peerID)
-	if name == "" || len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\x00") ||
-		networkKey == "" || peerID == "" || len(networkKey) > 256 || len(peerID) > 128 {
+	if name == "" || len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\x00") {
 		return "", ErrInvalidGatewayGroup
 	}
 	return name, nil
+}
+
+func normalizeGatewayGroup(name, networkKey, peerID string) (string, error) {
+	networkKey = strings.TrimSpace(networkKey)
+	peerID = strings.TrimSpace(peerID)
+	if networkKey == "" || peerID == "" || len(networkKey) > 256 || len(peerID) > 128 {
+		return "", ErrInvalidGatewayGroup
+	}
+	return normalizeGatewayGroupName(name)
 }
 
 func createGatewayGroupTx(ctx context.Context, tx *sql.Tx, name, networkKey, peerID string) (string, error) {
@@ -1196,24 +1333,28 @@ func (s *DeviceStore) CreateGatewayGroup(ctx context.Context, name, networkKey, 
 }
 
 func (s *DeviceStore) UpdateGatewayGroup(ctx context.Context, id, name string) (GatewayGroup, error) {
-	name = strings.TrimSpace(name)
-	if id == "" || name == "" || len([]rune(name)) > 100 || strings.ContainsAny(name, "\r\n\x00") {
+	name, err := normalizeGatewayGroupName(name)
+	if id == "" || err != nil {
 		return GatewayGroup{}, ErrInvalidGatewayGroup
 	}
 	now := time.Now().UTC().Format(time.RFC3339)
-	result, err := s.store.db.ExecContext(ctx, "UPDATE device_gateway_groups SET name=?,updated_at=? WHERE id=?", name, now, id)
+	result, err := s.store.db.ExecContext(ctx, `UPDATE device_gateway_groups AS target SET name=?,updated_at=? WHERE id=?
+		AND NOT EXISTS (
+			SELECT 1 FROM device_gateway_groups other
+			JOIN devices owner ON owner.id=other.gateway_device_id AND owner.node_hostname<>''
+			JOIN devices target_owner ON target_owner.id=target.gateway_device_id
+			WHERE other.id<>target.id AND other.name=? COLLATE NOCASE
+				AND owner.node_hostname=target_owner.node_hostname COLLATE NOCASE
+		)`, name, now, id, name)
 	if err != nil {
 		if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
 			return GatewayGroup{}, ErrInvalidGatewayGroup
 		}
 		return GatewayGroup{}, err
 	}
-	n, err := result.RowsAffected()
+	changed, err := result.RowsAffected()
 	if err != nil {
 		return GatewayGroup{}, err
-	}
-	if n == 0 {
-		return GatewayGroup{}, ErrGatewayGroupNotFound
 	}
 	var group GatewayGroup
 	err = s.store.db.QueryRowContext(ctx, `SELECT gg.id,gg.name,gg.network_key,gg.peer_id,COUNT(d.id),
@@ -1225,6 +1366,9 @@ func (s *DeviceStore) UpdateGatewayGroup(ctx context.Context, id, name string) (
 		&group.GatewayDeviceID, &group.GatewayDeviceName, &group.CreatedAt, &group.UpdatedAt)
 	if errors.Is(err, sql.ErrNoRows) {
 		return GatewayGroup{}, ErrGatewayGroupNotFound
+	}
+	if err == nil && changed == 0 {
+		return GatewayGroup{}, ErrInvalidGatewayGroup
 	}
 	return group, err
 }
@@ -1305,16 +1449,12 @@ func (s *DeviceStore) SyncNetworkNodeDevicesIfEnabled(ctx context.Context, nodes
 
 // 运行时 Peer ID 轮换时迁移节点作用域；主键 ID、网关所有者与 OpenWrt 凭据保持不变。
 func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID, newPeerID, nodeDeviceID, hostname, now string) error {
-	if _, err := tx.ExecContext(ctx, `UPDATE devices SET peer_id=?,updated_at=?
-		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
-		return err
-	}
-	if _, err := tx.ExecContext(ctx, `UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?`,
-		hostname, now, nodeDeviceID); err != nil {
+	if _, err := tx.ExecContext(ctx, `UPDATE devices SET peer_id=?,node_hostname=?,updated_at=?
+		WHERE network_key=? AND peer_id=? AND (node_hostname='' OR id=?)`, newPeerID, hostname, now, networkKey, oldPeerID, nodeDeviceID); err != nil {
 		return err
 	}
 	if _, err := tx.ExecContext(ctx, `UPDATE device_gateway_groups SET peer_id=?,updated_at=?
-		WHERE network_key=? AND peer_id=?`, newPeerID, now, networkKey, oldPeerID); err != nil {
+		WHERE network_key=? AND peer_id=? AND gateway_device_id=?`, newPeerID, now, networkKey, oldPeerID, nodeDeviceID); err != nil {
 		return err
 	}
 	// 老版本的手工属性可能没有保存 hostname；换绑时补齐持久身份。
@@ -1334,10 +1474,11 @@ func rebindNetworkNodeTx(ctx context.Context, tx *sql.Tx, networkKey, oldPeerID,
 	return err
 }
 
-// 历史版本未保存原始主机名，只允许唯一且名称完全一致的旧节点继承身份。
+// 历史设备缺少主机名时，只从已保存的节点原始属性核对身份。
 func uniqueLegacyNodeTx(ctx context.Context, tx *sql.Tx, networkKey, hostname, excludeID string) (string, string, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT id,peer_id FROM devices
-		WHERE is_node_device=1 AND network_key=? AND node_hostname='' AND name=? COLLATE NOCASE AND id<>?
+	rows, err := tx.QueryContext(ctx, `SELECT d.id,d.peer_id FROM devices d
+		JOIN network_node_attributes a ON a.network_key=d.network_key AND a.peer_id=d.peer_id
+		WHERE d.is_node_device=1 AND d.network_key=? AND d.node_hostname='' AND a.hostname=? COLLATE NOCASE AND d.id<>?
 		LIMIT 2`, networkKey, hostname, excludeID)
 	if err != nil {
 		return "", "", err
@@ -1411,21 +1552,23 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 	}
 	result := NetworkNodeSyncResult{Enabled: true}
 	now := time.Now().UTC().Format(time.RFC3339)
-	// 同一网络中原主机名应唯一，若一次观测出现不同 Peer ID，不自动合并两个真实设备。
-	incomingHosts := make(map[string]string, len(nodes))
+	// 入口和 Peer ID 仅用于识别同名观测是否来自多个实时节点。
+	incomingHosts := make(map[string][2]string, len(nodes))
+	conflictingHosts := make(map[string]bool)
 	for _, node := range nodes {
 		hostname := strings.TrimSpace(node.Hostname)
 		if len([]rune(hostname)) > 100 || strings.ContainsAny(hostname, "\r\n\x00") || hostname == "—" {
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
 		if hostname == "" {
-			continue // 兼容旧版客户端，但不会使用展示名称推断主机身份
+			continue
 		}
-		key := strings.TrimSpace(node.NetworkKey) + "\x00" + strings.ToLower(hostname)
-		if otherPeer, exists := incomingHosts[key]; exists && otherPeer != strings.TrimSpace(node.PeerID) {
-			return NetworkNodeSyncResult{}, ErrInvalidDevice
+		host := strings.ToLower(hostname)
+		identity := [2]string{strings.TrimSpace(node.NetworkKey), strings.TrimSpace(node.PeerID)}
+		if previous, exists := incomingHosts[host]; exists && previous != identity {
+			conflictingHosts[host] = true
 		}
-		incomingHosts[key] = strings.TrimSpace(node.PeerID)
+		incomingHosts[host] = identity
 	}
 	for _, node := range nodes {
 		input := DeviceInput{Name: node.Name, DeviceType: "通用设备", NetworkKey: node.NetworkKey, PeerID: node.PeerID}
@@ -1436,10 +1579,14 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			return NetworkNodeSyncResult{}, ErrInvalidDevice
 		}
 		hostname := strings.TrimSpace(node.Hostname)
+		if conflictingHosts[strings.ToLower(hostname)] {
+			result.Skipped++
+			continue
+		}
 		var deleted int
 		if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM network_node_sync_deleted
-			WHERE network_key=? AND ((hostname<>'' AND hostname=? COLLATE NOCASE)
-			OR (hostname='' AND peer_id=?))`, input.NetworkKey, hostname, input.PeerID).Scan(&deleted); err != nil {
+			WHERE (hostname<>'' AND hostname=? COLLATE NOCASE)
+			OR (hostname='' AND network_key=? AND peer_id=?)`, hostname, input.NetworkKey, input.PeerID).Scan(&deleted); err != nil {
 			return NetworkNodeSyncResult{}, err
 		}
 		if deleted > 0 {
@@ -1455,6 +1602,35 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 				)`, hostname, input.NetworkKey, input.PeerID,
 				input.NetworkKey, hostname, input.PeerID); err != nil {
 				return NetworkNodeSyncResult{}, err
+			}
+		}
+		if hostname != "" {
+			var count int
+			var namedID, previousScope string
+			if err := tx.QueryRowContext(ctx, `SELECT COUNT(*),COALESCE(MIN(id),''),COALESCE(MIN(network_key),'')
+				FROM devices WHERE is_node_device=1 AND node_hostname=? COLLATE NOCASE`, hostname).
+				Scan(&count, &namedID, &previousScope); err != nil {
+				return NetworkNodeSyncResult{}, err
+			}
+			if count > 1 {
+				result.Skipped++
+				continue
+			}
+			if count == 1 && previousScope != input.NetworkKey {
+				written, err := tx.ExecContext(ctx, `UPDATE devices SET network_key=?,peer_id=?,updated_at=? WHERE id=?
+					AND NOT EXISTS (SELECT 1 FROM devices WHERE is_node_device=1 AND network_key=? AND peer_id=? AND id<>?)`,
+					input.NetworkKey, input.PeerID, now, namedID, input.NetworkKey, input.PeerID, namedID)
+				if err != nil {
+					return NetworkNodeSyncResult{}, err
+				}
+				if changed, err := written.RowsAffected(); err != nil {
+					return NetworkNodeSyncResult{}, err
+				} else if changed == 0 {
+					result.Skipped++
+				} else {
+					result.Rebound++
+				}
+				continue
 			}
 		}
 		var existingID, oldHostname string
@@ -1487,7 +1663,9 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 			if hostname == "" {
 				hostname = oldHostname
 			}
-			if _, err = tx.ExecContext(ctx, "UPDATE devices SET node_hostname=?,updated_at=? WHERE id=?", hostname, now, existingID); err != nil {
+			if _, err = tx.ExecContext(ctx, `UPDATE devices SET node_hostname=?,updated_at=?
+				WHERE id=? OR (?<>'' AND node_hostname='' AND network_key=? AND peer_id=?)`,
+				hostname, now, existingID, hostname, input.NetworkKey, input.PeerID); err != nil {
 				return NetworkNodeSyncResult{}, err
 			}
 			if _, err = tx.ExecContext(ctx, "INSERT OR IGNORE INTO network_node_sync_seen(network_key,peer_id,first_seen_at) VALUES(?,?,?)", input.NetworkKey, input.PeerID, now); err != nil {
@@ -1499,36 +1677,16 @@ func (s *DeviceStore) syncNetworkNodeDevices(ctx context.Context, nodes []Networ
 		if !errors.Is(err, sql.ErrNoRows) {
 			return NetworkNodeSyncResult{}, err
 		}
-		// 优先使用上次记录的原始 hostname；历史版本没有此字段时，仅允许名称完全匹配的唯一旧节点接管。
+		// 优先使用已记录的原始主机名；历史记录可用原始节点属性补齐。
 		var previousID, previousPeerID string
 		if hostname != "" {
 			err = tx.QueryRowContext(ctx, `SELECT id,peer_id FROM devices
 				WHERE is_node_device=1 AND network_key=? AND node_hostname=? COLLATE NOCASE`,
 				input.NetworkKey, hostname).Scan(&previousID, &previousPeerID)
 			if errors.Is(err, sql.ErrNoRows) {
-				rows, lookupErr := tx.QueryContext(ctx, `SELECT id,peer_id FROM devices
-					WHERE is_node_device=1 AND network_key=? AND node_hostname='' AND name=? COLLATE NOCASE LIMIT 2`,
-					input.NetworkKey, hostname)
-				if lookupErr != nil {
-					return NetworkNodeSyncResult{}, lookupErr
-				}
-				count := 0
-				for rows.Next() {
-					count++
-					if scanErr := rows.Scan(&previousID, &previousPeerID); scanErr != nil {
-						rows.Close()
-						return NetworkNodeSyncResult{}, scanErr
-					}
-				}
-				lookupErr = rows.Err()
-				rows.Close()
-				if lookupErr != nil {
-					return NetworkNodeSyncResult{}, lookupErr
-				}
-				if count != 1 {
-					previousID, previousPeerID = "", ""
-				}
-			} else if err != nil {
+				previousID, previousPeerID, err = uniqueLegacyNodeTx(ctx, tx, input.NetworkKey, hostname, "")
+			}
+			if err != nil {
 				return NetworkNodeSyncResult{}, err
 			}
 		}

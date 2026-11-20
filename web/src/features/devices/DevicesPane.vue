@@ -99,8 +99,7 @@ const nodesQuery = useQuery({
         ? networkNodeIdentityKey(node.networkKey, '', node.row.id) : identity
       if (!unique.has(key)) unique.set(key, { ...node, identityKey: key })
     }
-    return { nodes: [...unique.values()], errors,
-      conflicts: [...peersByIdentity.values()].filter(peers => peers.size > 1).length }
+    return { nodes: [...unique.values()], errors }
   },
   enabled: computed(() => networkEntries.value.length > 0),
   retry: 0,
@@ -114,12 +113,9 @@ const attributesByHostname = computed(() => new Map<string, NodeAttributes>(
   (attributesQuery.data.value?.attributes || []).filter(attr => attr.hostname)
     .map(attr => [attr.network_key + '|' + attr.hostname!.toLocaleLowerCase(), attr])
 ))
-function nodeValue(node: Pick<NodeOption, 'networkKey' | 'peerId' | 'hostname' | 'identityKey'>): string {
-  return node.identityKey || networkNodeIdentityKey(node.networkKey, node.hostname, node.peerId)
-}
-// 设备 API 与 EasyTier 拓扑请求继续使用实时 Peer ID；持久页面 key 不再用它。
-function peerScopeValue(networkKey: string, peerId: string): string {
-  return JSON.stringify([networkKey, peerId])
+function nodeValue(node: { hostname: string }): string {
+  const hostname = node.hostname.trim().toLowerCase()
+  return hostname ? 'hostname:' + hostname : ''
 }
 const liveNodeOptions = computed<LiveNodeOption[]>(() => (nodesQuery.data.value?.nodes || []).map(node => {
   const hostname = node.row.rawHostname || ''
@@ -137,29 +133,45 @@ const liveNodeOptions = computed<LiveNodeOption[]>(() => (nodesQuery.data.value?
 function originalNodeHostname(node: NodeOption): string {
   return node.hostname || attributesByKey.value.get(node.networkKey + '|' + node.peerId)?.hostname || ''
 }
-const nodeOptions = computed<NodeOption[]>(() => {
-  const result: NodeOption[] = [...liveNodeOptions.value]
-  const seen = new Set(result.map(nodeValue))
-  const seenPeers = new Set(result.map(node => peerScopeValue(node.networkKey, node.peerId)))
+const liveNodesByHostname = computed(() => {
+  const groups = new Map<string, LiveNodeOption[]>()
+  for (const node of liveNodeOptions.value) {
+    const key = nodeValue(node)
+    if (key) groups.set(key, [...(groups.get(key) || []), node])
+  }
+  return groups
+})
+const conflictingNodeNames = computed(() => {
+  const conflicts = new Set([...liveNodesByHostname.value].filter(([, nodes]) => nodes.length > 1).map(([key]) => key))
+  const seen = new Set<string>()
   for (const device of nodeDevicesQuery.data.value || []) {
-    if (!device.network_key || !device.peer_id) continue
+    const key = nodeValue({ hostname: device.node_hostname || '' })
+    if (!key) continue
+    if (seen.has(key)) conflicts.add(key)
+    seen.add(key)
+  }
+  return conflicts
+})
+const nodeOptions = computed<NodeOption[]>(() => {
+  const options = liveNodeOptions.value.filter(node => nodeValue(node) && !conflictingNodeNames.value.has(nodeValue(node)))
+  const result: NodeOption[] = [...options]
+  const seen = new Set(result.map(nodeValue))
+  for (const device of nodeDevicesQuery.data.value || []) {
     const option: NodeOption = {
-      networkKey: device.network_key, peerId: device.peer_id,
+      networkKey: device.network_key || '', peerId: device.peer_id || '',
       hostname: device.node_hostname || '', label: device.name, instance: '', ip: '', isOnline: false
     }
-    const identity = nodeValue(option)
-    if (seen.has(identity) || seenPeers.has(peerScopeValue(option.networkKey, option.peerId))) continue
-    seen.add(identity)
+    const key = nodeValue(option)
+    if (!key || seen.has(key) || conflictingNodeNames.value.has(key)) continue
+    seen.add(key)
     result.push(option)
   }
   return result
 })
-// 组网 IP 只用当前实时节点数据，不拿设备管理地址冒充。
-const networkIPs = computed(() => new Map(liveNodeOptions.value.map(node =>
-  [peerScopeValue(node.networkKey, node.peerId), node.ip])))
 function deviceNetworkIP(device: Device) {
-  if (!device.network_key || !device.peer_id) return ''
-  return networkIPs.value.get(peerScopeValue(device.network_key, device.peer_id)) || ''
+  const key = nodeValue({ hostname: device.node_hostname || '' })
+  if (!key || conflictingNodeNames.value.has(key)) return ''
+  return liveNodesByHostname.value.get(key)?.[0]?.ip || ''
 }
 const selectedNodeKey = ref(typeof route.query.node === 'string' && route.query.node !== '__unassigned__' ? route.query.node : ALL_SCOPE)
 const selectedNode = computed(() => nodeOptions.value.find(node => nodeValue(node) === selectedNodeKey.value))
@@ -172,8 +184,9 @@ watch(
     // 旧 URL 使用 [network_key,peer_id]；打开后升级为基于主机名的稳定选择键。
     try {
       const legacy = JSON.parse(selectedNodeKey.value)
-      if (Array.isArray(legacy) && legacy.length === 2) {
-        const matched = items.find(node => node.networkKey === legacy[0] && node.peerId === legacy[1])
+      if (Array.isArray(legacy) && (legacy.length === 2 || legacy.length === 3)) {
+        const matched = items.find(node => node.networkKey === legacy[0] &&
+          (legacy[1] === 'hostname' ? node.hostname.toLowerCase() === legacy[2] : node.peerId === legacy.at(-1)))
         if (matched) { selectedNodeKey.value = nodeValue(matched); return }
       }
     } catch { /* 非旧格式，使用默认筛选 */ }
@@ -196,33 +209,21 @@ const devicesQuery = useQuery({
   queryFn: () => isAllScope.value
     ? getDevices()
     : selectedNode.value
-      ? getDevices({ networkKey: selectedNode.value.networkKey, peerId: selectedNode.value.peerId })
+      ? getDevices({ hostname: selectedNode.value.hostname })
       : Promise.resolve([] as Device[]),
   enabled: computed(() => isAllScope.value || !!selectedNode.value),
   retry: 0
 })
 const devices = computed(() => devicesQuery.data.value || [])
-const gatewayScopes = computed(() => {
-  if (selectedNode.value) return [{ networkKey: selectedNode.value.networkKey, peerId: selectedNode.value.peerId }]
-  const scopes = new Map<string, { networkKey: string; peerId: string }>()
-  for (const device of devices.value) {
-    if (device.network_key && device.peer_id) {
-      const scope = { networkKey: device.network_key, peerId: device.peer_id }
-      scopes.set(peerScopeValue(scope.networkKey, scope.peerId), scope)
-    }
-  }
-  return [...scopes.values()]
-})
 const gatewayGroupsQuery = useQuery({
-  queryKey: computed(() => ['gateway-groups', selectedNodeKey.value, gatewayScopes.value]),
-  queryFn: async () => (await Promise.all(gatewayScopes.value.map(scope =>
-    getGatewayGroups(scope.networkKey, scope.peerId)))).flat(),
+  queryKey: computed(() => ['gateway-groups', selectedNodeKey.value]),
+  queryFn: () => getGatewayGroups(selectedNode.value?.hostname),
   enabled: computed(() => isAllScope.value || !!selectedNode.value),
   retry: 0
 })
 const gatewayGroups = computed(() => gatewayGroupsQuery.data.value || [])
 const nodeErrors = computed(() => nodesQuery.data.value?.errors || 0)
-const nodeConflicts = computed(() => nodesQuery.data.value?.conflicts || 0)
+const nodeConflicts = computed(() => conflictingNodeNames.value.size)
 const search = ref('')
 const selectedDeviceIds = ref<string[]>([])
 watch([search, selectedNodeKey], () => { selectedDeviceIds.value = [] })
@@ -326,7 +327,7 @@ function fillGatewayIPIfNeeded() {
 }
 watch(
   [() => deviceDraft.value.is_gateway, () => deviceDraft.value.gateway_group_id,
-    () => deviceDraft.value.network_key, () => deviceDraft.value.peer_id, nodeOptions],
+    () => deviceDraft.value.node_hostname, nodeOptions],
   fillGatewayIPIfNeeded
 )
 watch(deviceDialogOpen, open => { if (!open) gatewayIPAutofillPending.value = false })
@@ -334,37 +335,27 @@ function emptyDevice(): DeviceInput {
   return {
     name: '', group_id: '', gateway_group_id: '', semantic_kinds: [],
     is_gateway: false, manufacturer: '', model: '', ip_address: '', mac_address: '',
-    note: '', network_key: '', peer_id: '', node_hostname: ''
+    note: '', node_hostname: ''
   }
 }
 const editingDevice = computed(() => devices.value.find(item => item.id === editingDeviceId.value))
 const isNodeDeviceEditing = computed(() => editingDevice.value?.is_node_device === true)
 const deviceDialogGatewayGroupsQuery = useQuery({
-  queryKey: computed(() => ['device-dialog-gateway-groups', deviceDraft.value.network_key, deviceDraft.value.peer_id]),
-  queryFn: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
-    ? getGatewayGroups(deviceDraft.value.network_key, deviceDraft.value.peer_id)
+  queryKey: computed(() => ['device-dialog-gateway-groups', deviceDraft.value.node_hostname]),
+  queryFn: () => deviceDraft.value.node_hostname
+    ? getGatewayGroups(deviceDraft.value.node_hostname)
     : Promise.resolve([] as GatewayGroup[]),
-  enabled: computed(() => deviceDialogOpen.value && !!deviceDraft.value.network_key && !!deviceDraft.value.peer_id),
+  enabled: computed(() => deviceDialogOpen.value && !!deviceDraft.value.node_hostname),
   retry: 0
 })
 const deviceDialogGatewayGroupOptions = computed(() =>
   (deviceDialogGatewayGroupsQuery.data.value || []).filter(group => group.gateway_device_id !== editingDeviceId.value))
 const deviceDraftNodeKey = computed({
-  get: () => deviceDraft.value.network_key && deviceDraft.value.peer_id
-    ? nodeValue(nodeOptions.value.find(node => node.networkKey === deviceDraft.value.network_key &&
-      node.peerId === deviceDraft.value.peer_id) || {
-      networkKey: deviceDraft.value.network_key, peerId: deviceDraft.value.peer_id, hostname: ''
-    }) : '',
+  get: () => nodeValue({ hostname: deviceDraft.value.node_hostname || '' }),
   set: (value: string) => {
     const node = nodeOptions.value.find(item => nodeValue(item) === value)
-    const networkKey = node?.networkKey || ''
-    const peerId = node?.peerId || ''
-    if (networkKey !== deviceDraft.value.network_key || peerId !== deviceDraft.value.peer_id) {
-      deviceDraft.value.gateway_group_id = ''
-    }
-    deviceDraft.value.network_key = networkKey
-    deviceDraft.value.peer_id = peerId
-    deviceDraft.value.node_hostname = node ? originalNodeHostname(node) : ''
+    if (value !== deviceDraftNodeKey.value) deviceDraft.value.gateway_group_id = ''
+    deviceDraft.value.node_hostname = node?.hostname || ''
   }
 })
 function openCreateDevice(gatewayDevice: Device) {
@@ -377,8 +368,6 @@ function openCreateDevice(gatewayDevice: Device) {
   deviceDraft.value = {
     ...emptyDevice(),
     gateway_group_id: gatewayDevice.owned_gateway_group_id,
-    network_key: gatewayDevice.network_key || '',
-    peer_id: gatewayDevice.peer_id || '',
     node_hostname: gatewayDevice.node_hostname || ''
   }
   deviceDialogOpen.value = true
@@ -392,7 +381,6 @@ function openEditDevice(device: Device) {
     manufacturer: device.manufacturer || '', model: device.model || '',
     ip_address: device.ip_address || '', mac_address: device.mac_address || '',
     note: device.note || '',
-    network_key: device.network_key || '', peer_id: device.peer_id || '',
     node_hostname: device.node_hostname || ''
   }
   deviceDialogOpen.value = true
@@ -405,14 +393,17 @@ async function saveDeviceRecord() {
   if (previous?.is_node_device) {
     // 基础设备可以改绑到新的所属网络节点，但必须保持节点直属层级。
     draft.gateway_group_id = ''
-    const changedNode = draft.network_key !== previous.network_key || draft.peer_id !== previous.peer_id
-    if (!draft.network_key || !draft.peer_id || (changedNode && !draft.node_hostname)) {
+    if (!draft.node_hostname) {
       ElMessage.warning('请为节点基础设备选择包含原始主机名的所属网络节点')
       return
     }
   }
-  if (draft.is_gateway && (!draft.network_key || !draft.peer_id)) {
+  if (draft.is_gateway && !draft.node_hostname) {
     ElMessage.warning('网关设备必须归属于一个网络节点')
+    return
+  }
+  if (draft.node_hostname && conflictingNodeNames.value.has(nodeValue({ hostname: draft.node_hostname }))) {
+    ElMessage.warning('原始主机名有冲突，请为节点改名或选择其他节点')
     return
   }
   if (!draft.name.trim()) { ElMessage.warning('请填写设备名称'); return }
@@ -441,8 +432,7 @@ async function saveDeviceRecord() {
     await queryClient.invalidateQueries({ queryKey: ['devices'] })
     await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
     await queryClient.invalidateQueries({ queryKey: ['device-node-devices'] })
-    const targetNode = nodeOptions.value.find(node => node.networkKey === draft.network_key && node.peerId === draft.peer_id)
-    const targetScope = targetNode ? nodeValue(targetNode) : ALL_SCOPE
+    const targetScope = draft.node_hostname ? nodeValue({ hostname: draft.node_hostname }) : ALL_SCOPE
     deviceDialogOpen.value = false
     if (!isAllScope.value && targetScope !== selectedNodeKey.value) selectedNodeKey.value = targetScope
     ElMessage.success(editingDeviceId.value ? '设备资料已更新' : '设备已添加')
@@ -561,7 +551,7 @@ const initializingDevices = ref(false)
 const canInitializeNetworkNodes = computed(() =>
   !initializingDevices.value && networkEntries.value.length > 0 &&
   nodesQuery.isSuccess.value && !nodesQuery.isError.value &&
-  !attributesQuery.isPending.value && liveNodeOptions.value.length > 0
+  !attributesQuery.isPending.value && !nodeErrors.value && networkNodeDeviceInputs().length > 0
 )
 function truncateDeviceName(value: string, length: number): string {
   return Array.from(value).slice(0, length).join('')
@@ -586,7 +576,7 @@ function uniqueNodeDeviceName(node: LiveNodeOption, used: Set<string>): string {
 }
 function networkNodeDeviceInputs(): NetworkNodeDeviceInput[] {
   const used = new Set((nodeDevicesQuery.data.value || []).map(device => device.name.toLocaleLowerCase()))
-  return liveNodeOptions.value.map(node => ({
+  return liveNodeOptions.value.filter(node => nodeValue(node) && !conflictingNodeNames.value.has(nodeValue(node))).map(node => ({
     name: uniqueNodeDeviceName(node, used),
     network_key: node.networkKey,
     peer_id: node.peerId,
@@ -594,6 +584,10 @@ function networkNodeDeviceInputs(): NetworkNodeDeviceInput[] {
   }))
 }
 async function runNetworkNodeSync(showMessage: boolean) {
+  if (nodeErrors.value > 0) {
+    if (showMessage) ElMessage.warning('部分组网入口不可用，暂不能确认节点主机名唯一')
+    return
+  }
   const inputs = networkNodeDeviceInputs()
   if (!inputs.length) {
     if (showMessage) ElMessage.warning('没有可同步的有效网络节点')
@@ -702,7 +696,7 @@ watch(
       title="实时网络节点暂时无法读取；已登记的历史节点和设备仍可管理。" type="warning" :closable="false" show-icon />
     <el-alert v-else-if="nodeErrors" :title="nodeErrors + ' 个组网入口暂时不可用，已显示其他入口可读取的节点。'"
       type="warning" :closable="false" show-icon />
-    <el-alert v-if="nodeConflicts" :title="nodeConflicts + ' 组同网络原始主机名冲突；为避免关联错误，暂按 Peer ID 区分这些节点。'"
+    <el-alert v-if="nodeConflicts" :title="nodeConflicts + ' 组 EasyTier 原始主机名冲突，已暂停这些节点的设备关联。'"
       type="warning" :closable="false" show-icon />
     <el-alert v-if="!networkEntries.length && !nodeOptions.length"
       title="尚未设置组网入口；可以先查看全部设备，设置入口后即可选择网络节点。" type="info" :closable="false" />
@@ -760,7 +754,7 @@ watch(
                   <span v-if="[section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).length">
                     {{ [section.gatewayDevice.manufacturer, section.gatewayDevice.model].filter(Boolean).join(' · ') }}
                   </span>
-                  <span v-if="section.gatewayDevice.network_key && section.gatewayDevice.peer_id" class="device-network-ip">
+                  <span v-if="section.gatewayDevice.node_hostname" class="device-network-ip">
                     组网 IP：{{ deviceNetworkIP(section.gatewayDevice) || '暂不可用' }}
                   </span>
                   <span v-if="section.gatewayDevice.ip_address">管理 IP：{{ section.gatewayDevice.ip_address }}</span>
@@ -913,7 +907,7 @@ watch(
             <div class="field-hint">不选择上级网关时，设备直接归属于网络节点；也可以将普通设备或另一台网关设备挂到现有网关下面。</div>
           </el-form-item>
           <el-form-item label="设备角色" class="span-two">
-            <el-checkbox v-model="deviceDraft.is_gateway" :disabled="!deviceDraft.network_key || !deviceDraft.peer_id">
+            <el-checkbox v-model="deviceDraft.is_gateway" :disabled="!deviceDraft.node_hostname">
               这是网关设备
             </el-checkbox>
             <div class="field-hint">任何已归属网络节点的设备都可以独立设置网关属性。网关设备卡片会提供「新增设备」入口；关闭网关属性后，其下挂设备会提升为同级设备。</div>
