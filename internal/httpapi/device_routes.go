@@ -312,6 +312,21 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 			methodNotAllowed(w, "GET, POST, DELETE")
 		}
 	})
+	mux.HandleFunc("/api/v1/device-services/navigation", func(w http.ResponseWriter, r *http.Request) {
+		if !authorize(w, r) {
+			return
+		}
+		if r.Method != http.MethodGet {
+			methodNotAllowed(w, "GET")
+			return
+		}
+		services, err := devices.ListNavigationServices(r.Context())
+		if err != nil {
+			mapError(w, err)
+			return
+		}
+		reply(w, http.StatusOK, map[string]any{"services": services})
+	})
 	mux.HandleFunc("/api/v1/devices/", func(w http.ResponseWriter, r *http.Request) {
 		if !authorize(w, r) {
 			return
@@ -472,6 +487,32 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 				return
 			}
 			action := parts[3]
+			if action == "navigation" {
+				if r.Method != http.MethodPut {
+					methodNotAllowed(w, "PUT")
+					return
+				}
+				if !mutation(w, r) {
+					return
+				}
+				var input struct {
+					Enabled *bool `json:"enabled"`
+				}
+				if !decode(w, r, &input) {
+					return
+				}
+				if input.Enabled == nil {
+					http.Error(w, "请选择是否开启导航", http.StatusBadRequest)
+					return
+				}
+				service, err := devices.SetDeviceServiceNavigation(r.Context(), parts[0], parts[2], *input.Enabled)
+				if err != nil {
+					mapError(w, err)
+					return
+				}
+				reply(w, http.StatusOK, service)
+				return
+			}
 			if action == "check-forward" && r.Method != http.MethodPost {
 				methodNotAllowed(w, "POST")
 				return

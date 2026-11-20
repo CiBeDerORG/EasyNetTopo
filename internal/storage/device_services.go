@@ -30,18 +30,19 @@ const deviceServiceSchema = `CREATE TABLE IF NOT EXISTS device_services (
 	icon TEXT NOT NULL DEFAULT '',
 	note TEXT NOT NULL DEFAULT '',
 	created_at TEXT NOT NULL,
-	forward_config TEXT NOT NULL DEFAULT ''
+	forward_config TEXT NOT NULL DEFAULT '',
+	navigation_enabled INTEGER NOT NULL DEFAULT 0
 )`
 
-func ensureDeviceServiceForwardColumn(ctx context.Context, db *Store) error {
+func ensureDeviceServiceColumn(ctx context.Context, db *Store, name, definition string) error {
 	var exists bool
-	if err := db.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('device_services') WHERE name='forward_config')`).Scan(&exists); err != nil {
+	if err := db.db.QueryRowContext(ctx, `SELECT EXISTS(SELECT 1 FROM pragma_table_info('device_services') WHERE name=?)`, name).Scan(&exists); err != nil {
 		return err
 	}
 	if exists {
 		return nil
 	}
-	_, err := db.db.ExecContext(ctx, `ALTER TABLE device_services ADD COLUMN forward_config TEXT NOT NULL DEFAULT ''`)
+	_, err := db.db.ExecContext(ctx, "ALTER TABLE device_services ADD COLUMN "+definition)
 	return err
 }
 
@@ -67,8 +68,9 @@ type DeviceService struct {
 	ID       string `json:"id"`
 	DeviceID string `json:"device_id"`
 	DeviceServiceInput
-	CreatedAt string                `json:"created_at"`
-	Forward   *DeviceServiceForward `json:"forward,omitempty"`
+	CreatedAt         string                `json:"created_at"`
+	NavigationEnabled bool                  `json:"navigation_enabled"`
+	Forward           *DeviceServiceForward `json:"forward,omitempty"`
 }
 
 func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
@@ -115,14 +117,14 @@ func normalizeDeviceService(input *DeviceServiceInput) (string, error) {
 	}
 }
 
-const deviceServiceColumns = `COALESCE(ds.id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
-	COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,''),COALESCE(ds.forward_config,'')`
+const deviceServiceColumns = `COALESCE(ds.id,''),COALESCE(ds.device_id,''),COALESCE(ds.name,''),COALESCE(ds.protocol,''),COALESCE(ds.port,0),
+	COALESCE(ds.access_url,''),COALESCE(ds.icon,''),COALESCE(ds.note,''),COALESCE(ds.created_at,''),COALESCE(ds.forward_config,''),COALESCE(ds.navigation_enabled,0)`
 
-func scanDeviceService(row interface{ Scan(...any) error }, deviceID string) (DeviceService, error) {
-	service := DeviceService{DeviceID: deviceID}
+func scanDeviceService(row interface{ Scan(...any) error }) (DeviceService, error) {
+	var service DeviceService
 	var protocol, forward string
-	if err := row.Scan(&service.ID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon,
-		&service.Note, &service.CreatedAt, &forward); err != nil {
+	if err := row.Scan(&service.ID, &service.DeviceID, &service.Name, &protocol, &service.Port, &service.AccessURL, &service.Icon,
+		&service.Note, &service.CreatedAt, &forward, &service.NavigationEnabled); err != nil {
 		return DeviceService{}, err
 	}
 	if service.ID != "" {
@@ -138,7 +140,7 @@ func scanDeviceService(row interface{ Scan(...any) error }, deviceID string) (De
 
 func (s *DeviceStore) DeviceService(ctx context.Context, deviceID, serviceID string) (DeviceService, error) {
 	row := s.store.db.QueryRowContext(ctx, "SELECT "+deviceServiceColumns+" FROM device_services ds WHERE ds.device_id=? AND ds.id=?", deviceID, serviceID)
-	service, err := scanDeviceService(row, deviceID)
+	service, err := scanDeviceService(row)
 	if errors.Is(err, sql.ErrNoRows) {
 		return DeviceService{}, ErrDeviceServiceNotFound
 	}
@@ -205,7 +207,7 @@ func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) (
 	exists := false
 	for rows.Next() {
 		exists = true
-		service, err := scanDeviceService(rows, deviceID)
+		service, err := scanDeviceService(rows)
 		if err != nil {
 			return nil, err
 		}
@@ -220,6 +222,31 @@ func (s *DeviceStore) ListDeviceServices(ctx context.Context, deviceID string) (
 		return nil, ErrDeviceNotFound
 	}
 	return items, nil
+}
+
+func (s *DeviceStore) SetDeviceServiceNavigation(ctx context.Context, deviceID, serviceID string, enabled bool) (DeviceService, error) {
+	if _, err := s.store.db.ExecContext(ctx, "UPDATE device_services SET navigation_enabled=? WHERE device_id=? AND id=?", enabled, deviceID, serviceID); err != nil {
+		return DeviceService{}, err
+	}
+	return s.DeviceService(ctx, deviceID, serviceID)
+}
+
+func (s *DeviceStore) ListNavigationServices(ctx context.Context) ([]DeviceService, error) {
+	rows, err := s.store.db.QueryContext(ctx, "SELECT "+deviceServiceColumns+` FROM device_services ds
+		WHERE ds.navigation_enabled=1 ORDER BY ds.name COLLATE NOCASE,ds.id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := make([]DeviceService, 0)
+	for rows.Next() {
+		service, err := scanDeviceService(rows)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, service)
+	}
+	return items, rows.Err()
 }
 
 func (s *DeviceStore) CreateDeviceService(ctx context.Context, deviceID string, input DeviceServiceInput) (DeviceService, error) {

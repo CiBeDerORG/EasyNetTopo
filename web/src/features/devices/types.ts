@@ -29,6 +29,7 @@ export type DeviceService = DeviceServiceInput & {
   id: string
   device_id: string
   created_at: string
+  navigation_enabled: boolean
   forward?: DeviceServiceForward
 }
 

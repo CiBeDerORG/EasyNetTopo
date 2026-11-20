@@ -3,6 +3,7 @@ import HostStorePage from '../features/host-store/views/HostStorePage.vue'
 
 const routes: RouteRecordRaw[] = [
   { path: '/', redirect: '/host-store' },
+  { path: '/navigation', name: 'navigation', component: HostStorePage },
   { path: '/network-nodes', name: 'network-nodes', component: HostStorePage },
   { path: '/devices', name: 'devices', component: HostStorePage },
   { path: '/network-map', name: 'network-map', component: HostStorePage },

@@ -67,6 +67,12 @@
 - API 永不返回明文密钥。修改 RPCD 地址参数或用户名时，必须重新输入密钥；相同参数下留空表示保留原密钥。
 - 取消 OpenWrt 语义标签或删除设备时，级联清除该设备的 RPCD 配置。
 
+## 服务导航
+
+- 左侧菜单第一项是「导航」。在设备的服务列表开启「开启导航」后，服务会出现在导航页，并可按设备筛选。
+- 导航状态随服务保存，已有及新建服务默认关闭。关闭导航只隐藏卡片，公网转发继续按原配置运行。
+- 导航卡片沿用服务列表的地址规则，使用组网地址和服务端口生成组网入口，使用已开启转发的公网入口地址和外部端口生成公网入口。
+
 ## API
 
 - GET/POST `/api/v1/device-groups`（旧版通用设备分组接口，保留兼容）
@@ -76,6 +82,8 @@
 - GET/POST `/api/v1/devices`
 - GET/POST `/api/v1/devices/{id}/services`（按设备 ID 读取或新增已登记的服务）
 - PATCH/DELETE `/api/v1/devices/{id}/services/{service_id}`（编辑或删除服务，开启转发时须先成功关闭）
+- GET `/api/v1/device-services/navigation`（读取已开启导航的服务）
+- PUT `/api/v1/devices/{id}/services/{service_id}/navigation`（保存导航状态，JSON 请求体为 `{"enabled":true}` 或 `{"enabled":false}`）
 - PUT `/api/v1/devices/{id}/services/{service_id}/forward`（执行端口转发开启或关闭）
 - POST `/api/v1/devices/{id}/services/{service_id}/check-forward`（编辑打开时回读规则，按校验结果更新本地状态）
 - PATCH/DELETE `/api/v1/devices/{id}`

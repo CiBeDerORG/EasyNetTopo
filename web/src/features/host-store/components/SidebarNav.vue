@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ArrowLeft, HomeFilled, Connection, Monitor, Location } from '@element-plus/icons-vue'
+import { ArrowLeft, HomeFilled, Connection, Monitor, Location, Compass } from '@element-plus/icons-vue'
 
 defineProps<{ collapsed: boolean }>()
 import { useRoute, useRouter } from 'vue-router'
@@ -49,6 +49,11 @@ defineEmits<{ toggle: [] }>()
     </div>
 
     <nav class="sidebar-menu">
+      <el-tooltip content="导航" placement="right" :disabled="!collapsed">
+        <button class="nav-item" type="button" aria-label="导航" :aria-current="route.path === '/navigation' ? 'page' : undefined" @click="router.push('/navigation')">
+          <el-icon><Compass /></el-icon><span>导航</span>
+        </button>
+      </el-tooltip>
       <el-tooltip content="主机商店" placement="right" :disabled="!collapsed">
         <button class="nav-item" type="button" :aria-current="route.path === '/host-store' ? 'page' : undefined" @click="router.push('/host-store')">
           <el-icon><HomeFilled /></el-icon>

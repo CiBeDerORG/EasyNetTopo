@@ -163,11 +163,41 @@ func TestDeviceManagementAPIAndOpenWrtDeviceGuard(t *testing.T) {
 	if got := request(http.MethodGet, "/api/v1/devices/"+normalDevice.ID+"/services", "", true, false); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"services":[]`) {
 		t.Fatalf("其他设备不应读取到该服务: %d %s", got.Code, got.Body.String())
 	}
+	const navigationList = "/api/v1/device-services/navigation"
+	navigationPath := servicePath + "/" + service.ID + "/navigation"
+	otherDevicePath := "/api/v1/devices/" + normalDevice.ID + "/services/" + service.ID + "/navigation"
+	for _, check := range []struct {
+		method, path, body string
+		auth, csrf         bool
+		status             int
+		contains           string
+	}{
+		{http.MethodGet, navigationList, "", false, false, http.StatusUnauthorized, ""},
+		{http.MethodGet, navigationList, "", true, false, http.StatusOK, `"services":[]`},
+		{http.MethodPut, navigationPath, `{"enabled":true}`, true, false, http.StatusForbidden, ""},
+		{http.MethodPut, navigationPath, `{}`, true, true, http.StatusBadRequest, ""},
+		{http.MethodPut, otherDevicePath, `{"enabled":true}`, true, true, http.StatusNotFound, ""},
+		{http.MethodPut, navigationPath, `{"enabled":true}`, true, true, http.StatusOK, `"navigation_enabled":true`},
+		{http.MethodPut, navigationPath, `{"enabled":true}`, true, true, http.StatusOK, `"navigation_enabled":true`},
+		{http.MethodGet, navigationList, "", true, false, http.StatusOK, service.ID},
+		{http.MethodGet, servicePath, "", true, false, http.StatusOK, `"navigation_enabled":true`},
+		{http.MethodPut, navigationPath, `{"enabled":false}`, true, true, http.StatusOK, `"navigation_enabled":false`},
+		{http.MethodGet, navigationList, "", true, false, http.StatusOK, `"services":[]`},
+		{http.MethodPut, navigationPath, `{"enabled":true}`, true, true, http.StatusOK, `"navigation_enabled":true`},
+	} {
+		got := request(check.method, check.path, check.body, check.auth, check.csrf)
+		if got.Code != check.status || !strings.Contains(got.Body.String(), check.contains) {
+			t.Fatalf("导航请求 %s %s 返回异常: %d %s", check.method, check.path, got.Code, got.Body.String())
+		}
+	}
 	if got := request(http.MethodDelete, "/api/v1/devices/"+device.ID, "", true, true); got.Code != http.StatusNoContent {
 		t.Fatalf("关联服务不应阻止设备删除: %d %s", got.Code, got.Body.String())
 	}
 	if got := request(http.MethodGet, servicePath, "", true, false); got.Code != http.StatusNotFound {
 		t.Fatalf("已删除的设备服务路径应返回不存在: %d", got.Code)
+	}
+	if got := request(http.MethodGet, navigationList, "", true, false); got.Code != http.StatusOK || !strings.Contains(got.Body.String(), `"services":[]`) {
+		t.Fatalf("已删除设备的服务仍留在导航中: %d %s", got.Code, got.Body.String())
 	}
 
 }

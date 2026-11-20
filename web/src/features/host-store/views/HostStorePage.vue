@@ -1,13 +1,14 @@
 <script setup lang="ts">
 import { useRoute } from 'vue-router'
 import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
+import ServiceNavigationPane from '../../devices/ServiceNavigationPane.vue'
 import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { CircleCheck, Delete, SwitchButton } from '@element-plus/icons-vue'
 import { formatApiError } from '../../../lib/api-client'
-import { clearDeviceData as clearDeviceDataApi } from '../../devices/api'
+import { clearDeviceData as clearDeviceDataApi, navigationServicesKey } from '../../devices/api'
 import { clearNodeAttributes } from '../../network-nodes/attributes'
 import { useHostStoreUiStore } from '../../../stores/ui'
 import { queryClient as appQueryClient } from '../../../app/query-client'
@@ -82,9 +83,12 @@ const NetworkMapPane = defineAsyncComponent({
 
 const route = useRoute()
 const isNetworkPage = computed(() => route.path === '/network-nodes')
+const isNavigationPage = computed(() => route.path === '/navigation')
 const isDevicesPage = computed(() => route.path === '/devices')
 const isMapPage = computed(() => route.path === '/network-map')
-const isStorePage = computed(() => !isNetworkPage.value && !isDevicesPage.value && !isMapPage.value)
+const pageTitle = computed(() => isNavigationPage.value ? '导航' : isNetworkPage.value ? '网络节点'
+  : isDevicesPage.value ? '设备列表' : isMapPage.value ? '网络地图' : '主机商店')
+const isStorePage = computed(() => route.path === '/host-store')
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
 const authQuery = useQuery({
@@ -792,7 +796,8 @@ async function clearAllDeviceData() {
       queryClient.invalidateQueries({ queryKey: ['device-node-devices'] }),
       queryClient.invalidateQueries({ queryKey: ['device-network-node-sync'] }),
       queryClient.invalidateQueries({ queryKey: ['device-groups'] }),
-      queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
+      queryClient.invalidateQueries({ queryKey: ['gateway-groups'] }),
+      queryClient.invalidateQueries({ queryKey: navigationServicesKey })
     ])
     dataManagementDialogOpen.value = false
     ElMessage.success('EasyNetTopo 设备数据已全部清除；需要时可重新初始化网络节点。')
@@ -873,8 +878,8 @@ async function logout() {
     <main class="workspace">
       <header class="topbar">
         <div>
-          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : isMapPage ? '网络地图' : '主机商店' }}</div>
-          <div class="page-title"><span class="title-square"></span><h1>{{ isNetworkPage ? '网络节点' : isDevicesPage ? '设备列表' : isMapPage ? '网络地图' : '主机商店' }}</h1></div>
+          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ pageTitle }}</div>
+          <div class="page-title"><span class="title-square"></span><h1>{{ pageTitle }}</h1></div>
         </div>
         <div class="topbar-actions">
           <el-select class="theme-switcher" aria-label="页面主题" :model-value="ui.themeMode"
@@ -897,7 +902,8 @@ async function logout() {
         </div>
       </header>
 
-      <NetworkNodesPane v-if="isNetworkPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
+      <ServiceNavigationPane v-if="isNavigationPage" :hosts="hosts" />
+      <NetworkNodesPane v-else-if="isNetworkPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
       <DevicesPane v-else-if="isDevicesPage" :hosts="hosts" />
       <NetworkMapPane v-else-if="isMapPage" :hosts="hosts" :hosts-loading="data.hostsQuery.isPending.value" :hosts-error="data.hostsQuery.error.value ? errorMessage(data.hostsQuery.error.value) : ''" />
       <div v-else class="main-layout">

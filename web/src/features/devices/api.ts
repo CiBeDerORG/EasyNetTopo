@@ -34,6 +34,13 @@ export async function getDeviceServices(deviceId: string, signal?: AbortSignal) 
   return result.services || []
 }
 
+export const navigationServicesKey = ['navigation-services'] as const
+
+export async function getNavigationServices(signal?: AbortSignal) {
+  const result = await apiRequest<{ services: DeviceService[] }>('/api/v1/device-services/navigation', { signal })
+  return result.services || []
+}
+
 export function createDeviceService(deviceId: string, body: DeviceServiceInput) {
   return apiRequest<DeviceService>('/api/v1/devices/' + encodeURIComponent(deviceId) + '/services', { method: 'POST', body })
 }
@@ -48,6 +55,10 @@ export function updateDeviceService(deviceId: string, serviceId: string, body: D
 
 export function deleteDeviceService(deviceId: string, serviceId: string) {
   return apiRequest<void>(deviceServicePath(deviceId, serviceId), { method: 'DELETE', timeoutMs: 45_000 })
+}
+
+export function setDeviceServiceNavigation(deviceId: string, serviceId: string, enabled: boolean) {
+  return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId) + '/navigation', { method: 'PUT', body: { enabled } })
 }
 
 export function checkDeviceServiceForward(deviceId: string, serviceId: string) {

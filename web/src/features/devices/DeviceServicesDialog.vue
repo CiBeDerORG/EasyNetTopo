@@ -2,12 +2,13 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Box, Connection, Delete, Edit, Link, Plus, VideoPlay } from '@element-plus/icons-vue'
+import { Delete, Edit, Plus } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import { instances, list, publicIPv4Candidate, record } from '../network-nodes/data'
 import type { Host } from '../host-store/types'
-import { checkDeviceServiceForward, createDeviceService, deleteDeviceService, getDeviceServices, setDeviceServiceForward, updateDeviceService } from './api'
+import { checkDeviceServiceForward, createDeviceService, deleteDeviceService, getDeviceServices, navigationServicesKey, setDeviceServiceForward, setDeviceServiceNavigation, updateDeviceService } from './api'
 import type { Device, DeviceService, DeviceServiceInput } from './types'
+import { activePublicURL, publicAccessURL, serviceIcon, serviceIcons, serviceURL } from './service-access'
 
 const props = defineProps<{
   device: Device
@@ -22,23 +23,14 @@ const { data: services, isPending: loading, isError: loadFailed, error: loadErro
   queryKey, enabled: open, retry: 0,
   queryFn: ({ signal }) => getDeviceServices(props.device.id, signal)
 })
-const icons = [
-  { value: 'web', label: '网页', component: Link },
-  { value: 'storage', label: '存储', component: Box },
-  { value: 'terminal', label: '远程连接', component: Connection },
-  { value: 'media', label: '影音', component: VideoPlay }
-]
-function serviceIcon(value: string) {
-  return icons.find(icon => icon.value === value)?.component || Connection
-}
-
 const adding = ref(false)
 const editing = ref<DeviceService | null>(null)
 const saving = ref(false)
 const checking = ref(false)
 const switching = ref('')
 const deleting = ref('')
-const busy = computed(() => saving.value || checking.value || !!switching.value || !!deleting.value)
+const savingNavigation = ref('')
+const busy = computed(() => saving.value || checking.value || !!switching.value || !!deleting.value || !!savingNavigation.value)
 const errorMessage = ref('')
 const checkMessage = ref('')
 const form = reactive<Omit<DeviceServiceInput, 'port'> & { port: number | undefined }>({
@@ -56,38 +48,9 @@ const { data: routes, isFetching: loadingInstances, isError: instancesFailed, re
     return instances(value.data).filter(item => /^[0-9a-f]{8}(-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(item.id))
   }
 })
-function serviceURL(ip: string, port: number | undefined, existing: string) {
-  if (!ip || port == null || !Number.isInteger(port) || port < 1 || port > 65535) return ''
-  const validIPv4 = /^\d{1,3}(?:\.\d{1,3}){3}$/.test(ip) && ip.split('.').every(octet => Number(octet) <= 255)
-  if (!validIPv4 && !/^[0-9a-f:.]+:[0-9a-f:.]+$/i.test(ip)) return ''
-  const host = validIPv4 ? ip : '[' + ip + ']'
-  const scheme = /^https:\/\//i.test(existing) ? 'https' : 'http'
-  try {
-    const normalized = new URL(scheme + '://' + host).hostname
-    if (['0.0.0.0', '[::]'].includes(normalized)) return ''
-    return scheme + '://' + normalized + ':' + port
-  } catch {
-    return ''
-  }
-}
-
-function publicAccessURL(ip: string, listen: string, existing: string) {
-  const colon = listen.lastIndexOf(':')
-  if (colon < 0) return ''
-  const bind = listen.slice(0, colon).replace(/^\[|\]$/g, '')
-  if (bind === '::1' || bind.startsWith('127.')) return ''
-  return serviceURL(publicIPv4Candidate(bind) || ip, Number(listen.slice(colon + 1)), existing)
-}
-
-function activePublicURL(service: DeviceService | null, existing = service?.access_url ?? '') {
-  const cfg = service?.forward
-  if (!cfg?.enabled) return ''
-  return publicAccessURL(props.entryPublicIps[cfg.host_id]?.[cfg.instance_id] || '', cfg.listen, existing)
-}
-
 const draftNetworkURL = computed(() => serviceURL(props.networkIp, form.port, form.access_url))
 const draftPublicURL = computed(() => {
-  if (editing.value?.forward) return activePublicURL(editing.value, form.access_url)
+  if (editing.value?.forward) return activePublicURL(editing.value, props.entryPublicIps, form.access_url)
   if (!enableForward.value || !forward.host_id || !forward.instance_id) return ''
   const selected = routes.value?.find(item => item.id === forward.instance_id)
   const candidates = new Set(list(record(record(selected?.result.node_info).stun_info).public_ip).map(publicIPv4Candidate).filter(Boolean))
@@ -115,6 +78,7 @@ function updateList(service: DeviceService) {
   client.setQueryData<DeviceService[]>(queryKey.value, previous => previous?.some(item => item.id === service.id)
     ? previous.map(item => item.id === service.id ? service : item)
     : [...(previous ?? []), service])
+  void client.invalidateQueries({ queryKey: navigationServicesKey })
 }
 
 async function checkForward() {
@@ -164,6 +128,18 @@ async function toggleListForward(service: DeviceService, enabled: boolean) {
   }
 }
 
+async function toggleNavigation(service: DeviceService, enabled: boolean) {
+  if (busy.value) return
+  savingNavigation.value = service.id
+  try {
+    updateList(await setDeviceServiceNavigation(props.device.id, service.id, enabled))
+  } catch (error) {
+    ElMessage.error(formatApiError(error))
+  } finally {
+    savingNavigation.value = ''
+  }
+}
+
 async function removeService(service: DeviceService) {
   if (busy.value) return
   deleting.value = service.id
@@ -178,6 +154,7 @@ async function removeService(service: DeviceService) {
     }
     await deleteDeviceService(props.device.id, service.id)
     client.setQueryData<DeviceService[]>(queryKey.value, items => items?.filter(item => item.id !== service.id))
+    await client.invalidateQueries({ queryKey: navigationServicesKey })
     await client.invalidateQueries({ queryKey: queryKey.value })
     ElMessage.success('服务已删除')
   } catch (error) {
@@ -281,7 +258,7 @@ async function saveService() {
       </el-form-item>
       <el-form-item label="图标（可选）">
         <el-select v-model="form.icon" clearable placeholder="默认服务图标" :disabled="saving">
-          <el-option v-for="icon in icons" :key="icon.value" :label="icon.label" :value="icon.value">
+          <el-option v-for="icon in serviceIcons" :key="icon.value" :label="icon.label" :value="icon.value">
             <el-icon><component :is="icon.component" /></el-icon> {{ icon.label }}
           </el-option>
         </el-select>
@@ -347,7 +324,7 @@ async function saveService() {
             <el-tag v-if="service.forward?.enabled" size="small" type="success" effect="plain">转发已开启</el-tag>
             <div v-for="link in [
               { label: '组网访问', url: serviceURL(networkIp, service.port, service.access_url) },
-              { label: '公网访问', url: activePublicURL(service) },
+              { label: '公网访问', url: activePublicURL(service, entryPublicIps) },
               { label: '自定义访问', url: service.access_url }
             ].filter(item => item.url)" :key="link.label" class="service-link">
               <span>{{ link.label }}：</span>
@@ -356,6 +333,14 @@ async function saveService() {
             <p v-if="service.note">{{ service.note }}</p>
           </div>
           <div class="service-actions">
+            <div class="navigation-switch">
+              <el-switch
+                :model-value="service.navigation_enabled" :loading="savingNavigation === service.id"
+                :disabled="busy" :aria-label="'开启导航：' + service.name"
+                @update:model-value="toggleNavigation(service, $event === true)"
+              />
+              <span aria-hidden="true">开启导航</span>
+            </div>
             <el-switch
               :model-value="service.forward?.enabled === true" :loading="switching === service.id"
               :disabled="busy" :aria-label="'公网转发：' + service.name" active-text="公网转发"
@@ -388,12 +373,13 @@ async function saveService() {
 .service-forward { border-block-start:1px solid var(--ent-line); margin-block:12px; padding-block:12px; }
 .service-forward h3 { margin:0 0 8px; font-size:14px; }
 .service-forward p { color:var(--ent-muted); overflow-wrap:anywhere; }
-.service-actions { display:flex; align-items:center; gap:4px; margin-left:auto; flex:none; }
+.navigation-switch { display:flex; align-items:center; gap:6px; margin-right:8px; color:var(--ent-muted); white-space:nowrap; }
+.service-actions { display:flex; flex-wrap:wrap; align-items:center; gap:4px; margin-left:auto; flex:none; }
 .service-details { display:flex; min-width:0; align-items:flex-start; flex-wrap:wrap; gap:6px 10px; overflow-wrap:anywhere; }
 .service-link, .service-details p { flex-basis:100%; }
 .service-details a { color:var(--ent-data-highlight); }
 .service-details p { margin:0; white-space:pre-wrap; }
-@media (max-width:440px) {
+@media (max-width:560px) {
   .service-form-grid { grid-template-columns:1fr; gap:0; }
   .service-list li { flex-wrap:wrap; }
   .service-details { flex:1; }

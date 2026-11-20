@@ -203,8 +203,13 @@ func NewDeviceStore(ctx context.Context, db *Store) (*DeviceStore, error) {
 			return nil, fmt.Errorf("迁移设备字段 %s 失败: %w", column.name, err)
 		}
 	}
-	if err := ensureDeviceServiceForwardColumn(ctx, db); err != nil {
-		return nil, fmt.Errorf("迁移设备服务转发配置失败: %w", err)
+	for _, column := range []struct{ name, definition string }{
+		{"forward_config", "forward_config TEXT NOT NULL DEFAULT ''"},
+		{"navigation_enabled", "navigation_enabled INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureDeviceServiceColumn(ctx, db, column.name, column.definition); err != nil {
+			return nil, fmt.Errorf("迁移设备服务字段 %s 失败: %w", column.name, err)
+		}
 	}
 	if err := ensureGatewayGroupColumn(ctx, db, "gateway_device_id", "gateway_device_id TEXT NOT NULL DEFAULT ''"); err != nil {
 		return nil, fmt.Errorf("迁移网关设备归属字段失败: %w", err)
