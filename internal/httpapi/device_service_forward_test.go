@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"net/http"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -21,11 +22,12 @@ const (
 )
 
 type testForwardAgent struct {
-	selected string
-	all      string
-	commands []string
-	failUDP  bool
-	readErr  bool
+	selected   string
+	all        string
+	commands   []string
+	failUDP    bool
+	failDelete bool
+	readErr    bool
 }
 
 func (a *testForwardAgent) NetworkData(context.Context, string, string) (json.RawMessage, error) {
@@ -44,7 +46,7 @@ func (a *testForwardAgent) EasyTierPortForwards(_ context.Context, _, method, in
 		return json.RawMessage(`{"data":{"cfgs":[` + rules + `]}}`), nil
 	}
 	a.commands = append(a.commands, method+" "+change.Protocol+" "+change.Listen+" "+change.Destination)
-	if a.failUDP && method == http.MethodPost && change.Protocol == "udp" {
+	if (a.failUDP && method == http.MethodPost && change.Protocol == "udp") || (a.failDelete && method == http.MethodDelete) {
 		return nil, errors.New("监听失败")
 	}
 	return json.RawMessage(`{"applied":true}`), nil
@@ -141,5 +143,58 @@ func TestDeviceServiceForwardCanBeTurnedOffAndReenabled(t *testing.T) {
 	cleared, err := updateDeviceServiceForward(ctx, agent, device, service, serviceForwardInput{})
 	if err != nil || cleared != nil {
 		t.Fatalf("手动移除配置应清空已保存配置: %+v %v", cleared, err)
+	}
+}
+
+func TestDeleteDeviceServiceWaitsForForwardShutdown(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		enabled, fail bool
+		wantCommands  int
+	}{
+		{"已关闭直接删除，不操作原规则", false, false, 0},
+		{"先关闭转发再删除", true, false, 1},
+		{"关闭命令失败保留服务和开关", true, true, 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			devices, err := storage.NewDeviceStore(ctx, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			device, err := devices.CreateDevice(ctx, storage.DeviceInput{Name: "设备"})
+			if err != nil {
+				t.Fatal(err)
+			}
+			service, err := devices.CreateDeviceService(ctx, device.ID, storage.DeviceServiceInput{
+				Name: "服务", Protocols: []string{"tcp"}, Port: 7017,
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			cfg := &storage.DeviceServiceForward{Enabled: tc.enabled, HostID: testForwardHost, InstanceID: testForwardInstance,
+				Listen: "0.0.0.0:7017", Destination: "10.10.30.162:7017", Protocols: []string{"tcp"}}
+			if _, err := devices.SaveDeviceServiceForward(ctx, device.ID, service.ID, cfg); err != nil {
+				t.Fatal(err)
+			}
+			agent := &testForwardAgent{selected: testForwardTCP, failDelete: tc.fail}
+			err = deleteDeviceService(ctx, agent, devices, device.ID, service.ID)
+			if len(agent.commands) != tc.wantCommands {
+				t.Fatalf("实际远端写入次数不符: %v", agent.commands)
+			}
+			remaining, lookupErr := devices.DeviceService(ctx, device.ID, service.ID)
+			if tc.fail {
+				if !errors.Is(err, errServiceForwardClose) || lookupErr != nil || remaining.Forward == nil || !remaining.Forward.Enabled {
+					t.Fatalf("关闭失败时服务或开关被改写: %+v %v %v", remaining, err, lookupErr)
+				}
+			} else if err != nil || !errors.Is(lookupErr, storage.ErrDeviceServiceNotFound) {
+				t.Fatalf("服务未删除: %v %v", err, lookupErr)
+			}
+		})
 	}
 }

@@ -428,11 +428,33 @@ func deviceRoutes(mux *http.ServeMux, db *storage.Store, devices *storage.Device
 		}
 		if len(parts) >= 3 && len(parts) <= 4 && parts[0] != "" && parts[1] == "services" && parts[2] != "" {
 			if len(parts) == 3 {
-				if r.Method != http.MethodPatch {
-					methodNotAllowed(w, "PATCH")
+				if r.Method != http.MethodPatch && r.Method != http.MethodDelete {
+					methodNotAllowed(w, "PATCH, DELETE")
 					return
 				}
 				if !mutation(w, r) {
+					return
+				}
+				if r.Method == http.MethodDelete {
+					serviceForwardMu.Lock()
+					defer serviceForwardMu.Unlock()
+					ctx, cancel := context.WithTimeout(r.Context(), 35*time.Second)
+					defer cancel()
+					var agent serviceForwardAgent
+					if hostSvc != nil {
+						agent = hostSvc
+					}
+					err := deleteDeviceService(ctx, agent, devices, parts[0], parts[2])
+					if errors.Is(err, errServiceForwardClose) {
+						reply(w, http.StatusBadGateway, map[string]string{"code": "service_forward_close_failed", "message": err.Error()})
+						return
+					}
+					if err != nil {
+						mapError(w, err)
+						return
+					}
+					w.Header().Set("Cache-Control", "no-store")
+					w.WriteHeader(http.StatusNoContent)
 					return
 				}
 				var input storage.DeviceServiceInput

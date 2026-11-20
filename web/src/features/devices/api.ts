@@ -46,6 +46,10 @@ export function updateDeviceService(deviceId: string, serviceId: string, body: D
   return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId), { method: 'PATCH', body })
 }
 
+export function deleteDeviceService(deviceId: string, serviceId: string) {
+  return apiRequest<void>(deviceServicePath(deviceId, serviceId), { method: 'DELETE', timeoutMs: 45_000 })
+}
+
 export function checkDeviceServiceForward(deviceId: string, serviceId: string) {
   return apiRequest<DeviceService>(deviceServicePath(deviceId, serviceId) + '/check-forward', { method: 'POST' })
 }

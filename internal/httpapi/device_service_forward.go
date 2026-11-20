@@ -284,22 +284,51 @@ func checkDeviceServiceForward(ctx context.Context, agent serviceForwardAgent, d
 	return &updated, nil
 }
 
+func disableDeviceServiceForward(ctx context.Context, agent serviceForwardAgent, cfg storage.DeviceServiceForward) error {
+	rules, err := readDeviceForwardRules(ctx, agent, cfg.HostID, cfg.InstanceID)
+	if err != nil {
+		return err
+	}
+	for _, protocol := range cfg.Protocols {
+		if slices.ContainsFunc(rules, func(rule liveDeviceForward) bool { return rule.matches(cfg, protocol) }) {
+			if err := sendDeviceForward(ctx, agent, http.MethodDelete, protocol, cfg); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
+}
+
+var errServiceForwardClose = errors.New("未能关闭公网转发，服务未删除")
+
+func deleteDeviceService(ctx context.Context, agent serviceForwardAgent, devices *storage.DeviceStore, deviceID, serviceID string) error {
+	service, err := devices.DeviceService(ctx, deviceID, serviceID)
+	if err != nil {
+		return err
+	}
+	if service.Forward != nil && service.Forward.Enabled {
+		if agent == nil {
+			return fmt.Errorf("%w：%w", errServiceForwardClose, errForwardNotReady)
+		}
+		if err := disableDeviceServiceForward(ctx, agent, *service.Forward); err != nil {
+			return fmt.Errorf("%w：%w", errServiceForwardClose, err)
+		}
+		// 远端规则已关闭，浏览器断开也需要完成本地删除。
+		deleteCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		return devices.DeleteDeviceService(deleteCtx, deviceID, serviceID)
+	}
+	return devices.DeleteDeviceService(ctx, deviceID, serviceID)
+}
+
 func updateDeviceServiceForward(ctx context.Context, agent serviceForwardAgent, device storage.Device, service storage.DeviceService, input serviceForwardInput) (*storage.DeviceServiceForward, error) {
 	if !input.Enabled {
 		if service.Forward == nil {
 			return nil, nil
 		}
 		cfg := *service.Forward
-		rules, err := readDeviceForwardRules(ctx, agent, cfg.HostID, cfg.InstanceID)
-		if err != nil {
+		if err := disableDeviceServiceForward(ctx, agent, cfg); err != nil {
 			return nil, err
-		}
-		for _, protocol := range cfg.Protocols {
-			if slices.ContainsFunc(rules, func(rule liveDeviceForward) bool { return rule.matches(cfg, protocol) }) {
-				if err := sendDeviceForward(ctx, agent, http.MethodDelete, protocol, cfg); err != nil {
-					return nil, err
-				}
-			}
 		}
 		if !input.RetainConfig {
 			return nil, nil

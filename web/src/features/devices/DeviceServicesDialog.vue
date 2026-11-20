@@ -1,12 +1,12 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { ElMessage } from 'element-plus'
-import { Box, Connection, Edit, Link, Plus, VideoPlay } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Box, Connection, Delete, Edit, Link, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import { instances, list, publicIPv4Candidate, record } from '../network-nodes/data'
 import type { Host } from '../host-store/types'
-import { checkDeviceServiceForward, createDeviceService, getDeviceServices, setDeviceServiceForward, updateDeviceService } from './api'
+import { checkDeviceServiceForward, createDeviceService, deleteDeviceService, getDeviceServices, setDeviceServiceForward, updateDeviceService } from './api'
 import type { Device, DeviceService, DeviceServiceInput } from './types'
 
 const props = defineProps<{
@@ -37,7 +37,8 @@ const editing = ref<DeviceService | null>(null)
 const saving = ref(false)
 const checking = ref(false)
 const switching = ref('')
-const busy = computed(() => saving.value || checking.value || !!switching.value)
+const deleting = ref('')
+const busy = computed(() => saving.value || checking.value || !!switching.value || !!deleting.value)
 const errorMessage = ref('')
 const checkMessage = ref('')
 const form = reactive<Omit<DeviceServiceInput, 'port'> & { port: number | undefined }>({
@@ -160,6 +161,29 @@ async function toggleListForward(service: DeviceService, enabled: boolean) {
     ElMessage.error(formatApiError(error))
   } finally {
     switching.value = ''
+  }
+}
+
+async function removeService(service: DeviceService) {
+  if (busy.value) return
+  deleting.value = service.id
+  try {
+    try {
+      await ElMessageBox.confirm(
+        '确定删除「' + service.name + '」？' + (service.forward?.enabled ? '系统会先关闭它的公网转发。' : ''),
+        '删除服务', { type: 'warning', confirmButtonText: '删除', cancelButtonText: '取消' }
+      )
+    } catch {
+      return
+    }
+    await deleteDeviceService(props.device.id, service.id)
+    client.setQueryData<DeviceService[]>(queryKey.value, items => items?.filter(item => item.id !== service.id))
+    await client.invalidateQueries({ queryKey: queryKey.value })
+    ElMessage.success('服务已删除')
+  } catch (error) {
+    ElMessage.error(formatApiError(error))
+  } finally {
+    deleting.value = ''
   }
 }
 
@@ -308,7 +332,7 @@ async function saveService() {
     </el-form>
     <template v-else>
       <div class="service-list-actions">
-        <el-button type="primary" @click="startForm()"><el-icon><Plus /></el-icon>新增服务</el-button>
+        <el-button type="primary" :disabled="busy" @click="startForm()"><el-icon><Plus /></el-icon>新增服务</el-button>
       </div>
       <el-skeleton v-if="loading" :rows="3" animated />
       <el-alert v-else-if="loadFailed" type="error" :title="formatApiError(loadError)" :closable="false" show-icon>
@@ -339,6 +363,10 @@ async function saveService() {
             />
             <el-button text circle aria-label="编辑服务" title="编辑服务" :disabled="busy" @click="editService(service)">
               <el-icon><Edit /></el-icon>
+            </el-button>
+            <el-button text circle type="danger" aria-label="删除服务" title="删除服务"
+              :disabled="busy" :loading="deleting === service.id" @click="removeService(service)">
+              <el-icon><Delete /></el-icon>
             </el-button>
           </div>
         </li>

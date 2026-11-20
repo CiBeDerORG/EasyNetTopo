@@ -164,6 +164,21 @@ func (s *DeviceStore) UpdateDeviceService(ctx context.Context, deviceID, service
 	return s.DeviceService(ctx, deviceID, serviceID)
 }
 
+func (s *DeviceStore) DeleteDeviceService(ctx context.Context, deviceID, serviceID string) error {
+	result, err := s.store.db.ExecContext(ctx, "DELETE FROM device_services WHERE device_id=? AND id=?", deviceID, serviceID)
+	if err != nil {
+		return err
+	}
+	count, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if count == 0 {
+		return ErrDeviceServiceNotFound
+	}
+	return nil
+}
+
 func (s *DeviceStore) SaveDeviceServiceForward(ctx context.Context, deviceID, serviceID string, forward *DeviceServiceForward) (DeviceService, error) {
 	value := ""
 	if forward != nil {
