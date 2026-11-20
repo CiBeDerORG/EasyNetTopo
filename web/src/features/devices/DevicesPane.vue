@@ -237,10 +237,14 @@ const filteredDevices = computed(() => {
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
 const nodeDevices = computed(() => filteredDevices.value.filter(device => device.is_node_device))
+const discoveryStatusOrder: Record<Device['discovery_status'], number> = { online: 0, offline: 1, unknown: 2 }
 const gatewayGroupSections = computed(() => gatewayGroups.value
   .filter(group => !!group.gateway_device_id)
   .map(group => {
-    const items = filteredDevices.value.filter(device => device.gateway_group_id === group.id)
+    const items = filteredDevices.value
+      .filter(device => device.gateway_group_id === group.id)
+      .sort((a, b) => (discoveryStatusOrder[a.discovery_status] ?? discoveryStatusOrder.unknown) -
+        (discoveryStatusOrder[b.discovery_status] ?? discoveryStatusOrder.unknown))
     const gatewayDevice = devices.value.find(device => device.id === group.gateway_device_id)
     const gatewayMatchesSearch = !!gatewayDevice && filteredDevices.value.some(device => device.id === gatewayDevice.id)
     return { ...group, items, gatewayDevice, gatewayMatchesSearch }
