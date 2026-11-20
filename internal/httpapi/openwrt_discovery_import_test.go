@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -315,5 +316,75 @@ func TestOpenWrtDiscoveryScanReturnsDetailedDiagnostics(t *testing.T) {
 		device.NetworkIPMappingStatus != "mapped" ||
 		!device.AddressFieldsUpdated || !device.DatabaseUpdated || !device.DiscoveryStatusUpdated {
 		t.Fatalf("逐设备数据库写入诊断不准确: %+v", device)
+	}
+}
+
+func TestOpenWrtDiscoveryInfersMappingFromUniqueScanNetwork(t *testing.T) {
+	const routes = `{"data":[{"instance_id":"yun","result":{
+		"node_info":{"hostname":"yun","peer_id":3445883661},
+		"peer_routes":[{"route":{"hostname":"OWRT","peer_id":3392423724,"proxy_cidrs":%s}}]
+	}}]}`
+	const lan = `[{"name":"lan","iface":"br-lan","ipv4":[{"address":"192.168.10.1","mask":24}]}]`
+	const snapshot = `{"status":"ok","has_snapshot":true,"networks":%s,"devices":[
+		{"name":"电脑","ipv4":["192.168.10.124"],"network":"lan","iface":"%s"}
+	]}`
+	for _, tc := range []struct {
+		name, rules, networks, iface, want, source string
+	}{
+		{"唯一可回退", `["10.10.30.0/24"]`, lan, "br-lan", "10.10.30.124", "lan_fallback"},
+		{"多条远端代理网段", `["10.10.30.0/24","10.10.40.0/24"]`, lan, "br-lan", "", ""},
+		{"无效显式规则不回退", `["10.10.30.0/24","192.168.10.0/24->10.10.20.0/23"]`, lan, "br-lan", "", ""},
+		{"缺少快照网段", `["10.10.30.0/24"]`, "[]", "br-lan", "", "peer_routes"},
+		{"掩码不一致", `["10.10.30.0/25"]`, lan, "br-lan", "", "peer_routes"},
+		{"不属于扫描接口", `["10.10.30.0/24"]`, lan, "br-guest", "", "lan_fallback"},
+		{"多个扫描网段", `["10.10.30.0/24"]`, `[{"name":"lan","iface":"br-lan","ipv4":[{"address":"192.168.10.1","mask":24}]},{"name":"guest","iface":"br-guest","ipv4":[{"address":"192.168.20.1","mask":24}]}]`, "br-lan", "", "peer_routes"},
+		{"完整映射优先", `["10.10.30.0/24","192.168.10.0/24->10.10.40.0/24"]`, lan, "br-lan", "10.10.40.124", "peer_routes"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctx := context.Background()
+			db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer db.Close()
+			store, err := storage.NewDeviceStore(ctx, db)
+			if err != nil {
+				t.Fatal(err)
+			}
+			gateway, err := store.CreateDevice(ctx, storage.DeviceInput{
+				Name: "上海-OWRT", NodeHostname: "OWRT", IsGateway: true, IPAddress: "10.10.10.3",
+				SemanticKinds: []string{"openwrt"},
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			results := make(chan openWrtRouteQueryResult, 1)
+			mapper, found, diagnostic := findOpenWrtNetworkIPMapper(json.RawMessage(fmt.Sprintf(routes, tc.rules)), gateway.NodeHostname, "yun")
+			results <- openWrtRouteQueryResult{diagnostic: diagnostic, mapper: mapper, found: found}
+			close(results)
+			mapper, route := summarizeOpenWrtRouteQueries(results, openWrtNetworkIPDiagnostics{})
+			body, callErr := importOpenWrtDiscoverySnapshotWithDiagnostics(ctx, store, gateway, "devices", json.RawMessage(fmt.Sprintf(snapshot, tc.networks, tc.iface)), mapper, route)
+			if callErr != nil {
+				t.Fatal(callErr)
+			}
+			devices, err := store.ListDevicesForHostname(ctx, gateway.NodeHostname)
+			if err != nil || len(devices) != 2 {
+				t.Fatalf("应保留网关并登记设备: %+v %v", devices, err)
+			}
+			for _, device := range devices {
+				if device.ID != gateway.ID && device.NetworkIP != tc.want {
+					t.Fatalf("组网 IP 为 %q，预期 %q", device.NetworkIP, tc.want)
+				}
+			}
+			var result struct {
+				Diagnostics openWrtDiscoveryDiagnostics `json:"diagnostics"`
+			}
+			if err := json.Unmarshal(body, &result); err != nil {
+				t.Fatal(err)
+			}
+			if route := result.Diagnostics.Route; route.HostsMatched != 1 || route.MatchLocation != tc.source {
+				t.Fatalf("匹配节点数或规则来源不正确: %+v", route)
+			}
+		})
 	}
 }

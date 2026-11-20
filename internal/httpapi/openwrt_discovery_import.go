@@ -25,6 +25,43 @@ type openWrtDiscoveryRecord struct {
 	Host        string   `json:"host"`
 	Address     string   `json:"address"`
 	Observation string   `json:"observation"`
+	Network     string   `json:"network"`
+	Interface   string   `json:"iface"`
+}
+
+type openWrtDiscoveryNetwork struct {
+	Name      string `json:"name"`
+	Interface string `json:"iface"`
+	IPv4      []struct {
+		Address string `json:"address"`
+		Mask    int    `json:"mask"`
+	} `json:"ipv4"`
+}
+
+func inferOpenWrtProxyMapping(raw json.RawMessage, target netip.Prefix) (proxyIPv4Mapping, openWrtDiscoveryNetwork, bool) {
+	var networks []openWrtDiscoveryNetwork
+	if !target.IsValid() || json.Unmarshal(raw, &networks) != nil {
+		return proxyIPv4Mapping{}, openWrtDiscoveryNetwork{}, false
+	}
+	var source netip.Prefix
+	var scope openWrtDiscoveryNetwork
+	for _, network := range networks {
+		for _, entry := range network.IPv4 {
+			address, err := netip.ParseAddr(entry.Address)
+			if err != nil || !address.Is4() || entry.Mask < 1 || entry.Mask > 32 || network.Name == "" || network.Interface == "" {
+				return proxyIPv4Mapping{}, openWrtDiscoveryNetwork{}, false
+			}
+			prefix := netip.PrefixFrom(address, entry.Mask).Masked()
+			if source.IsValid() && (source != prefix || scope.Name != network.Name || scope.Interface != network.Interface) {
+				return proxyIPv4Mapping{}, openWrtDiscoveryNetwork{}, false
+			}
+			source, scope = prefix, network
+		}
+	}
+	if !source.IsValid() || source.Bits() != target.Bits() {
+		return proxyIPv4Mapping{}, openWrtDiscoveryNetwork{}, false
+	}
+	return proxyIPv4Mapping{source: source, target: target}, scope, true
 }
 
 func firstDiscoveryIP(candidates ...string) string {
@@ -107,6 +144,7 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 		Count       int                      `json:"count"`
 		Message     string                   `json:"message"`
 		Devices     []openWrtDiscoveryRecord `json:"devices"`
+		Networks    json.RawMessage          `json:"networks"`
 	}
 	if err := json.Unmarshal(raw, &snapshot); err != nil {
 		return nil, discoveryError(http.StatusBadGateway, "openwrt_discovery_invalid_response", "发现返回的设备数据结构无效")
@@ -156,6 +194,21 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 		}
 		return updated, nil
 	}
+	var fallbackScope openWrtDiscoveryNetwork
+	var fallback openWrtNetworkIPMapper
+	if !mapper.available && mapper.fallbackTarget.IsValid() {
+		route := &diagnostics.Route
+		if rule, scope, ok := inferOpenWrtProxyMapping(snapshot.Networks, mapper.fallbackTarget); ok {
+			fallback = openWrtNetworkIPMapper{available: true, mappings: []proxyIPv4Mapping{rule}}
+			fallbackScope = scope
+			route.Available = true
+			route.MatchLocation = "lan_fallback"
+			route.MappingRules = mappingRuleLabels(fallback)
+			route.Reason = "由唯一 OpenWrt 扫描网段与 EasyTier 通告网段推导"
+		} else {
+			route.Reason = "无法回退转换：OpenWrt 扫描网段不唯一、缺少掩码或与通告网段掩码不一致"
+		}
+	}
 	items := make([]storage.DiscoveredDeviceInput, 0, len(snapshot.Devices))
 	for _, record := range snapshot.Devices {
 		candidate := storage.DiscoveredDeviceInput{Source: kind, Observation: record.Observation}
@@ -176,8 +229,16 @@ func importOpenWrtDiscoverySnapshotInternal(ctx context.Context, devices *storag
 			candidate.Manufacturer = record.Vendor
 			candidate.Model = record.Model
 		}
-		candidate.NetworkIP, candidate.NetworkIPKnown = mapper.mapAddress(candidate.IPAddress)
-		candidate.NetworkIPStatus = mapper.diagnosticStatus(candidate.IPAddress, candidate.NetworkIP, candidate.NetworkIPKnown)
+		deviceMapper := mapper
+		if fallback.available && record.Network == fallbackScope.Name && record.Interface == fallbackScope.Interface {
+			deviceMapper = fallback
+		}
+		candidate.NetworkIP, candidate.NetworkIPKnown = deviceMapper.mapAddress(candidate.IPAddress)
+		candidate.NetworkIPStatus = deviceMapper.diagnosticStatus(candidate.IPAddress, candidate.NetworkIP, candidate.NetworkIPKnown)
+		if fallback.available && !mapper.available {
+			// 推导规则只确认成功转换的地址，避免将未命中的历史值误当成应清空。
+			candidate.NetworkIPKnown = candidate.NetworkIP != ""
+		}
 		// 忽略广播和组播 MAC；只有真实可定位的 MAC/IP 才允许自动登记。
 		if candidate.MACAddress != "" {
 			mac, err := net.ParseMAC(candidate.MACAddress)

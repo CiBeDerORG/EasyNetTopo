@@ -22,8 +22,9 @@ type proxyIPv4Mapping struct {
 }
 
 type openWrtNetworkIPMapper struct {
-	available bool
-	mappings  []proxyIPv4Mapping
+	available      bool
+	mappings       []proxyIPv4Mapping
+	fallbackTarget netip.Prefix
 }
 
 type openWrtNetworkIPHostDiagnostic struct {
@@ -42,6 +43,7 @@ type openWrtNetworkIPHostDiagnostic struct {
 	MatchLocation            string   `json:"match_location,omitempty"`
 	MappingRules             []string `json:"mapping_rules,omitempty"`
 	matchedNodes             map[string]struct{}
+	remoteTarget             proxyFallbackTarget
 }
 
 type openWrtNetworkIPDiagnostics struct {
@@ -340,7 +342,9 @@ func findOpenWrtNetworkIPMapper(raw json.RawMessage, hostname, entryID string) (
 			diagnostic.MatchingPeerRoutes++
 			diagnostic.ProxyCIDRCount += rawProxyCIDRCount(route["proxy_cidrs"])
 			// 远端通告的单段只表示可达网段，无法确定网关上的原始网段。
-			remote.add(slices.DeleteFunc(proxyIPv4Mappings(route["proxy_cidrs"]), func(rule proxyIPv4Mapping) bool {
+			rules := route["proxy_cidrs"]
+			diagnostic.remoteTarget.add(singleAnnouncedIPv4Prefix(rules))
+			remote.add(slices.DeleteFunc(proxyIPv4Mappings(rules), func(rule proxyIPv4Mapping) bool {
 				return !rule.explicit
 			}))
 		}
@@ -363,7 +367,12 @@ func findOpenWrtNetworkIPMapper(raw json.RawMessage, hostname, entryID string) (
 	if !evidence.mapper.available {
 		diagnostic.Message = "未找到原始主机名对应的节点"
 		if len(diagnostic.matchedNodes) == 1 {
+			diagnostic.Status = "matched_no_rule"
 			diagnostic.Message = "已找到节点，但没有完整的代理网段映射"
+			if diagnostic.remoteTarget.prefix.IsValid() && diagnostic.MatchingNetworkInstances == 0 {
+				diagnostic.MatchLocation = "peer_routes"
+				diagnostic.Message = "已找到节点，远端通告的代理网段：" + diagnostic.remoteTarget.prefix.String()
+			}
 		}
 		return openWrtNetworkIPMapper{}, false, diagnostic
 	}
@@ -373,6 +382,48 @@ func findOpenWrtNetworkIPMapper(raw json.RawMessage, hostname, entryID string) (
 	diagnostic.ValidMappingCount = len(evidence.mapper.mappings)
 	diagnostic.Message = "已找到目标节点代理网段"
 	return evidence.mapper, true, diagnostic
+}
+
+// 仅接受同一节点所有远端观测一致给出的单个 IPv4 网段。
+type proxyFallbackTarget struct {
+	seen   bool
+	prefix netip.Prefix
+}
+
+func (e *proxyFallbackTarget) add(prefix netip.Prefix) {
+	if e.seen && e.prefix != prefix {
+		e.prefix = netip.Prefix{}
+		return
+	}
+	e.seen = true
+	e.prefix = prefix
+}
+
+func singleAnnouncedIPv4Prefix(raw json.RawMessage) netip.Prefix {
+	var values []string
+	if json.Unmarshal(raw, &values) != nil {
+		var value string
+		if json.Unmarshal(raw, &value) != nil {
+			return netip.Prefix{}
+		}
+		values = []string{value}
+	}
+	var result netip.Prefix
+	for _, value := range values {
+		prefix, err := netip.ParsePrefix(strings.TrimSpace(value))
+		if err != nil || prefix.Bits() == 0 {
+			return netip.Prefix{}
+		}
+		if !prefix.Addr().Is4() {
+			continue
+		}
+		prefix = prefix.Masked()
+		if result.IsValid() && result != prefix {
+			return netip.Prefix{}
+		}
+		result = prefix
+	}
+	return result
 }
 
 type networkIPMappingEvidence struct {
@@ -427,6 +478,13 @@ func safeOpenWrtDiagnosticError(err error) string {
 		return "route 数据请求失败（详细错误已隐藏）"
 	}
 }
+
+type openWrtRouteQueryResult struct {
+	diagnostic openWrtNetworkIPHostDiagnostic
+	mapper     openWrtNetworkIPMapper
+	found      bool
+}
+
 func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *hosts.Service, device storage.Device) (openWrtNetworkIPMapper, openWrtNetworkIPDiagnostics) {
 	diagnostics := openWrtNetworkIPDiagnostics{
 		TargetNetworkKey: device.NetworkKey,
@@ -461,12 +519,7 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
 
-	type queryResult struct {
-		diagnostic openWrtNetworkIPHostDiagnostic
-		mapper     openWrtNetworkIPMapper
-		found      bool
-	}
-	results := make(chan queryResult, len(networkEntries))
+	results := make(chan openWrtRouteQueryResult, len(networkEntries))
 	semaphore := make(chan struct{}, 4)
 	var wait sync.WaitGroup
 	for _, entry := range networkEntries {
@@ -483,7 +536,7 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 			case <-ctx.Done():
 				hostDiagnostic.Status = "cancelled"
 				hostDiagnostic.Message = "扫描上下文已取消，未发起路由查询"
-				results <- queryResult{diagnostic: hostDiagnostic}
+				results <- openWrtRouteQueryResult{diagnostic: hostDiagnostic}
 				return
 			}
 			defer func() { <-semaphore }()
@@ -493,7 +546,7 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 			raw, queryErr := hostSvc.NetworkData(queryCtx, entry.ID, "route")
 			if queryErr != nil {
 				hostDiagnostic.Message = safeOpenWrtDiagnosticError(queryErr)
-				results <- queryResult{diagnostic: hostDiagnostic}
+				results <- openWrtRouteQueryResult{diagnostic: hostDiagnostic}
 				return
 			}
 			mapper, found, parsed := findOpenWrtNetworkIPMapper(raw, device.NodeHostname, entry.ID)
@@ -501,25 +554,37 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 			parsed.HostName = entry.Name
 			if found {
 				parsed.Status = "matched"
-				results <- queryResult{diagnostic: parsed, mapper: mapper, found: true}
+				results <- openWrtRouteQueryResult{diagnostic: parsed, mapper: mapper, found: true}
 				return
 			}
 			if parsed.Status == "" {
 				parsed.Status = "no_match"
 			}
-			results <- queryResult{diagnostic: parsed}
+			results <- openWrtRouteQueryResult{diagnostic: parsed}
 		}(entry)
 	}
 	wait.Wait()
 	close(results)
+	return summarizeOpenWrtRouteQueries(results, diagnostics)
+}
 
+func summarizeOpenWrtRouteQueries(results <-chan openWrtRouteQueryResult, diagnostics openWrtNetworkIPDiagnostics) (openWrtNetworkIPMapper, openWrtNetworkIPDiagnostics) {
 	var local, remote networkIPMappingEvidence
 	matchedNodes := make(map[string]struct{})
+	var remoteTarget proxyFallbackTarget
+	localNodeObserved := false
 	for item := range results {
 		for identity := range item.diagnostic.matchedNodes {
 			matchedNodes[identity] = struct{}{}
 		}
 		diagnostics.Hosts = append(diagnostics.Hosts, item.diagnostic)
+		if len(item.diagnostic.matchedNodes) != 0 {
+			diagnostics.HostsMatched++
+		}
+		if item.diagnostic.remoteTarget.seen {
+			remoteTarget.add(item.diagnostic.remoteTarget.prefix)
+		}
+		localNodeObserved = localNodeObserved || item.diagnostic.MatchingNetworkInstances > 0
 		switch item.diagnostic.Status {
 		case "failed", "cancelled":
 			diagnostics.HostsFailed++
@@ -534,7 +599,6 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 			evidence.conflict = true
 		}
 		if item.found {
-			diagnostics.HostsMatched++
 			evidence.add(item.mapper.mappings)
 		}
 	}
@@ -561,6 +625,10 @@ func resolveOpenWrtNetworkIPMapperWithDiagnostics(ctx context.Context, hostSvc *
 	}
 	if !evidence.mapper.available {
 		diagnostics.Reason = "未找到目标原始主机名对应的完整代理网段"
+		if len(matchedNodes) == 1 && !localNodeObserved && remoteTarget.prefix.IsValid() {
+			diagnostics.MatchLocation = "peer_routes"
+			return openWrtNetworkIPMapper{fallbackTarget: remoteTarget.prefix}, diagnostics
+		}
 		return openWrtNetworkIPMapper{}, diagnostics
 	}
 	diagnostics.Available = true
