@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed, ref } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { Compass, Connection, Link, Search, Setting, TopRight } from '@element-plus/icons-vue'
+import { Compass, Connection, House, Link, Search, Setting, TopRight } from '@element-plus/icons-vue'
 import { formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { getDevices, getNavigationServices, navigationServicesKey } from './api'
@@ -26,6 +26,7 @@ const cards = computed(() => {
     const device = byID.get(service.device_id)
     if (!device) return []
     const links = [
+      { label: '内网访问', url: serviceURL(device.ip_address || '', service.port, service.access_url), icon: House, unavailable: '暂无内网地址' },
       { label: '组网访问', url: serviceURL(serviceDeviceNetworkIP(device), service.port, service.access_url), icon: Connection, unavailable: '暂无组网地址' },
       { label: '公网访问', url: activePublicURL(service, serviceEntryPublicIPs.value), icon: Link,
         unavailable: service.forward?.enabled ? '暂无公网地址' : '未开启转发' }
