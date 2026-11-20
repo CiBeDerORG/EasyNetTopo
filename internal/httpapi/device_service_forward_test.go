@@ -111,3 +111,35 @@ func TestEditServiceChecksActualDestination(t *testing.T) {
 		})
 	}
 }
+
+func TestDeviceServiceForwardCanBeTurnedOffAndReenabled(t *testing.T) {
+	device := storage.Device{NodeHostname: "OWRT", NetworkIP: "10.10.30.162"}
+	service := storage.DeviceService{
+		DeviceServiceInput: storage.DeviceServiceInput{Port: 7017, Protocols: []string{"tcp"}},
+		Forward: &storage.DeviceServiceForward{Enabled: true, HostID: testForwardHost, InstanceID: testForwardInstance,
+			Listen: "0.0.0.0:7017", Destination: "10.10.30.162:7017", Protocols: []string{"tcp"}},
+	}
+	agent := &testForwardAgent{selected: testForwardTCP}
+	ctx := context.Background()
+	closed, err := updateDeviceServiceForward(ctx, agent, device, service, serviceForwardInput{RetainConfig: true})
+	if err != nil || closed == nil || closed.Enabled || closed.Listen != service.Forward.Listen ||
+		!reflect.DeepEqual(agent.commands, []string{"DELETE tcp 0.0.0.0:7017 10.10.30.162:7017"}) {
+		t.Fatalf("关闭后应移除规则并保留配置: %+v %v %v", closed, err, agent.commands)
+	}
+	service.Forward = closed
+	agent.selected = ""
+	device.NetworkIP = "10.10.30.163"
+	opened, err := updateDeviceServiceForward(ctx, agent, device, service, serviceForwardInput{
+		Enabled: true, HostID: closed.HostID, InstanceID: closed.InstanceID, Listen: closed.Listen, AllowPublicBind: true,
+	})
+	if err != nil || opened == nil || !opened.Enabled || opened.Destination != "10.10.30.163:7017" ||
+		!reflect.DeepEqual(agent.commands[1:], []string{"POST tcp 0.0.0.0:7017 10.10.30.163:7017"}) {
+		t.Fatalf("应复用监听并重新读取设备组网 IP: %+v %v %v", opened, err, agent.commands)
+	}
+	agent.selected = strings.Replace(testForwardTCP, "168435362", "168435363", 1)
+	service.Forward = opened
+	cleared, err := updateDeviceServiceForward(ctx, agent, device, service, serviceForwardInput{})
+	if err != nil || cleared != nil {
+		t.Fatalf("手动移除配置应清空已保存配置: %+v %v", cleared, err)
+	}
+}

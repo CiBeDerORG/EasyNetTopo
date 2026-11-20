@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
+import { ElMessage } from 'element-plus'
 import { Box, Connection, Edit, Link, Plus, VideoPlay } from '@element-plus/icons-vue'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import { instances, list, publicIPv4Candidate, record } from '../network-nodes/data'
@@ -35,7 +36,8 @@ const adding = ref(false)
 const editing = ref<DeviceService | null>(null)
 const saving = ref(false)
 const checking = ref(false)
-const busy = computed(() => saving.value || checking.value)
+const switching = ref('')
+const busy = computed(() => saving.value || checking.value || !!switching.value)
 const errorMessage = ref('')
 const checkMessage = ref('')
 const form = reactive<Omit<DeviceServiceInput, 'port'> & { port: number | undefined }>({
@@ -134,6 +136,31 @@ async function checkForward() {
 async function editService(service: DeviceService) {
   startForm(service)
   await checkForward()
+}
+
+async function toggleListForward(service: DeviceService, enabled: boolean) {
+  if (busy.value) return
+  const cfg = service.forward
+  if (!cfg) {
+    if (enabled) {
+      startForm(service)
+      enableForward.value = true
+    }
+    return
+  }
+
+  switching.value = service.id
+  try {
+    const updated = await setDeviceServiceForward(props.device.id, service.id, enabled ? {
+      enabled: true, host_id: cfg.host_id, instance_id: cfg.instance_id,
+      listen: cfg.listen, allow_public_bind: true
+    } : { enabled: false, retain_config: true })
+    updateList(updated)
+  } catch (error) {
+    ElMessage.error(formatApiError(error))
+  } finally {
+    switching.value = ''
+  }
 }
 
 async function removeForward() {
@@ -245,7 +272,7 @@ async function saveService() {
         <template v-if="editing?.forward">
           <p>{{ editing.forward.enabled ? '已开启' : '已关闭' }} · {{ editing.forward.listen }} → {{ editing.forward.destination }}</p>
           <el-button v-if="editing.forward.enabled" :disabled="busy" @click="checkForward">重新校验</el-button>
-          <el-button :disabled="busy" @click="removeForward">{{ editing.forward.enabled ? '关闭转发' : '移除原规则' }}</el-button>
+          <el-button :disabled="busy" @click="removeForward">{{ editing.forward.enabled ? '移除转发配置' : '移除原规则和配置' }}</el-button>
         </template>
         <template v-else>
           <el-checkbox v-model="enableForward" :disabled="busy">保存并开启公网转发</el-checkbox>
@@ -304,9 +331,16 @@ async function saveService() {
             </div>
             <p v-if="service.note">{{ service.note }}</p>
           </div>
-          <el-button class="service-edit" text circle aria-label="编辑服务" title="编辑服务" @click="editService(service)">
-            <el-icon><Edit /></el-icon>
-          </el-button>
+          <div class="service-actions">
+            <el-switch
+              :model-value="service.forward?.enabled === true" :loading="switching === service.id"
+              :disabled="busy" :aria-label="'公网转发：' + service.name" active-text="公网转发"
+              @update:model-value="toggleListForward(service, $event === true)"
+            />
+            <el-button text circle aria-label="编辑服务" title="编辑服务" :disabled="busy" @click="editService(service)">
+              <el-icon><Edit /></el-icon>
+            </el-button>
+          </div>
         </li>
       </ul>
       <el-empty v-else description="该设备还没有登记服务" :image-size="84" />
@@ -326,10 +360,15 @@ async function saveService() {
 .service-forward { border-block-start:1px solid var(--ent-line); margin-block:12px; padding-block:12px; }
 .service-forward h3 { margin:0 0 8px; font-size:14px; }
 .service-forward p { color:var(--ent-muted); overflow-wrap:anywhere; }
-.service-edit { margin-left:auto; flex:none; }
+.service-actions { display:flex; align-items:center; gap:4px; margin-left:auto; flex:none; }
 .service-details { display:flex; min-width:0; align-items:flex-start; flex-wrap:wrap; gap:6px 10px; overflow-wrap:anywhere; }
 .service-link, .service-details p { flex-basis:100%; }
 .service-details a { color:var(--ent-data-highlight); }
 .service-details p { margin:0; white-space:pre-wrap; }
-@media (max-width:440px) { .service-form-grid { grid-template-columns:1fr; gap:0; } }
+@media (max-width:440px) {
+  .service-form-grid { grid-template-columns:1fr; gap:0; }
+  .service-list li { flex-wrap:wrap; }
+  .service-details { flex:1; }
+  .service-actions { flex-basis:100%; justify-content:flex-end; }
+}
 </style>

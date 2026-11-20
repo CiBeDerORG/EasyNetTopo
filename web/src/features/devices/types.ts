@@ -18,6 +18,7 @@ export type DeviceServiceForward = {
 
 export type DeviceServiceForwardInput = {
   enabled: boolean
+  retain_config?: boolean
   host_id?: string
   instance_id?: string
   listen?: string

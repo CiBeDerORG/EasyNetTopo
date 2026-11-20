@@ -24,6 +24,7 @@ type serviceForwardAgent interface {
 
 type serviceForwardInput struct {
 	Enabled         bool   `json:"enabled"`
+	RetainConfig    bool   `json:"retain_config,omitempty"`
 	HostID          string `json:"host_id"`
 	InstanceID      string `json:"instance_id"`
 	Listen          string `json:"listen"`
@@ -300,14 +301,18 @@ func updateDeviceServiceForward(ctx context.Context, agent serviceForwardAgent, 
 				}
 			}
 		}
-		return nil, nil
+		if !input.RetainConfig {
+			return nil, nil
+		}
+		cfg.Enabled = false
+		return &cfg, nil
 	}
 
 	listen, err := netip.ParseAddrPort(strings.TrimSpace(input.Listen))
 	if err == nil {
 		listen = netip.AddrPortFrom(listen.Addr().Unmap(), listen.Port())
 	}
-	if err != nil || !serviceForwardUUID.MatchString(input.HostID) || !serviceForwardUUID.MatchString(input.InstanceID) ||
+	if err != nil || input.RetainConfig || !serviceForwardUUID.MatchString(input.HostID) || !serviceForwardUUID.MatchString(input.InstanceID) ||
 		listen.Port() == 0 || listen.Addr().Zone() != "" || listen.Addr().IsMulticast() ||
 		(listen.Addr().IsUnspecified() && !input.AllowPublicBind) {
 		return nil, errForwardInput
@@ -322,9 +327,10 @@ func updateDeviceServiceForward(ctx context.Context, agent serviceForwardAgent, 
 	}
 	cfg.Destination = netip.AddrPortFrom(ip, uint16(service.Port)).String()
 	previous := service.Forward
-	sameEndpoint := previous != nil && previous.HostID == cfg.HostID && strings.EqualFold(previous.InstanceID, cfg.InstanceID) &&
-		previous.Listen == cfg.Listen && previous.Destination == cfg.Destination
-	if previous != nil && !sameEndpoint {
+	sameListener := previous != nil && previous.HostID == cfg.HostID && strings.EqualFold(previous.InstanceID, cfg.InstanceID) &&
+		previous.Listen == cfg.Listen
+	sameEndpoint := sameListener && previous.Destination == cfg.Destination
+	if previous != nil && (!sameListener || (previous.Enabled && !sameEndpoint)) {
 		return nil, errors.New("请先移除原转发，再更换公网入口、监听地址或目标地址")
 	}
 	var owned []liveDeviceForward
