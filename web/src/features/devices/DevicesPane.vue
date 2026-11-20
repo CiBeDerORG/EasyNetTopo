@@ -993,7 +993,9 @@ watch(
 </template>
 
 <style scoped>
-.devices-pane { display:flex; min-width:0; min-height:0; flex:1; flex-direction:column; gap:18px; overflow:auto; padding:24px 28px 36px; }
+.devices-pane { display:flex; min-width:0; min-height:0; flex:1; flex-direction:column; gap:18px; overflow:auto; padding:24px 28px 36px; container:devices / inline-size; }
+/* 设备面板负责纵向滚动，列表项保留内容高度，避免被压缩后裁切。 */
+.devices-pane > * { flex-shrink:0; }
 .devices-intro { display:flex; align-items:flex-start; justify-content:space-between; gap:16px; flex-wrap:wrap; }
 .devices-intro h2 { margin:0; color:var(--ent-text); font-size:20px; font-weight:760; }
 .devices-intro p { margin:7px 0 0; color:var(--ent-muted); font-size:12px; }
@@ -1013,13 +1015,14 @@ watch(
 .gateway-heading-title { display:flex; min-width:0; align-items:center; flex-wrap:wrap; gap:4px 11px; color:var(--ent-muted); font-size:11px; }
 .device-network-ip { color:var(--ent-text); font-variant-numeric:tabular-nums; }
 .gateway-heading-title strong { color:var(--ent-text); font-size:14px; }
+.gateway-heading-title > :is(strong, span), .device-subtitle, .device-meta { min-width:0; overflow-wrap:anywhere; }
 .gateway-discovery-state { display:inline-flex; align-items:center; gap:4px; }
 .gateway-discovery-state::before { width:6px; height:6px; border-radius:50%; background:currentColor; content:""; }
 .gateway-discovery-state.online { color:var(--el-color-success); }
 .gateway-discovery-state.offline { color:var(--ent-dim); }
 .gateway-heading-rpcd { display:flex; align-items:center; flex-wrap:wrap; gap:5px; color:var(--ent-data-highlight); font-size:10px; }
 .gateway-heading-rpcd > span { color:var(--ent-muted); }
-.gateway-heading-actions { display:flex; flex:none; align-items:center; gap:1px; }
+.gateway-heading-actions { display:flex; flex:none; align-items:center; flex-wrap:wrap; gap:1px; }
 .gateway-heading-actions :deep(.el-button) { margin-left:0; color:var(--ent-muted); }
 .group-chevron { display:inline-block; color:var(--ent-cyan); font-size:18px; transition:transform .15s; }
 .group-chevron.collapsed { transform:rotate(-90deg); }
@@ -1057,15 +1060,8 @@ watch(
 .rpcd-preview { margin:14px 0; padding:10px 12px; border:1px solid var(--ent-line); border-radius:8px; background:var(--ent-panel-2); color:var(--ent-data-highlight); font-size:12px; overflow-wrap:anywhere; }
 @media(max-width:760px) {
   .devices-pane { padding:17px 14px 28px; gap:14px; }
-  .devices-toolbar { align-items:stretch; flex-direction:column; }
-  .devices-toolbar :deep(.el-input) { max-width:none; }
-  .device-grid { grid-template-columns:1fr; padding:10px; }
-  .group-heading { align-items:flex-start; flex-wrap:wrap; }
-  .gateway-heading-main { width:100%; }
-  .gateway-heading-actions { margin-left:auto; }
   .form-grid { grid-template-columns:1fr; }
   .span-two { grid-column:auto; }
-  .device-actions { gap:0; }
 }
 
 .node-scope-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:13px 15px; border:1px solid var(--ent-line); border-radius:12px; background:var(--ent-panel); }
@@ -1080,11 +1076,33 @@ watch(
 .node-option-meta { flex:none; max-width:40%; overflow:hidden; margin-left:auto; color:var(--ent-dim); font-size:11px; text-overflow:ellipsis; white-space:nowrap; }
 :global(.device-node-dropdown .el-select-dropdown__item) { display:flex; align-items:center; min-height:42px; height:auto; line-height:normal; }
 .gateway-group-summary { display:flex; align-items:center; flex-wrap:wrap; gap:12px; padding:10px 15px; border-bottom:1px solid var(--ent-line-soft); color:var(--ent-muted); font-size:11px; background:var(--ent-panel); }
-@media(max-width:760px) {
+@container devices (max-width: 640px) {
+  .devices-toolbar { align-items:stretch; flex-direction:column; gap:8px; }
+  .devices-toolbar :deep(.el-input) { max-width:none; }
+  .devices-summary { align-items:center; flex-wrap:wrap; gap:4px 12px; white-space:normal; }
   .node-scope-toolbar { align-items:stretch; flex-direction:column; }
   .node-scope-select { width:100%; }
   .node-scope-meta { align-items:flex-start; }
-  .devices-summary { align-items:flex-start; flex-wrap:wrap; white-space:normal; }
+  .device-grid { grid-template-columns:minmax(0,1fr); padding:10px; }
+  .group-heading { flex-wrap:wrap; gap:4px 8px; padding-inline:12px; }
+  .group-heading:has(.gateway-heading-actions > :nth-child(3)) .gateway-heading-main { flex-basis:100%; }
+  .gateway-heading-actions { max-width:100%; justify-content:flex-end; margin-left:auto; }
   .group-actions { flex-wrap:wrap; justify-content:flex-end; }
+}
+
+@container devices (max-width: 400px) {
+  .group-heading, .device-card { padding-inline:9px; }
+  .gateway-heading-main, .group-toggle, .device-card-head { gap:6px; }
+  .gateway-heading-avatar, .device-avatar { width:32px; height:32px; font-size:16px; }
+  .group-heading:has(.gateway-heading-actions > :nth-child(2)) .gateway-heading-main { flex-basis:100%; }
+  .gateway-heading-actions :deep(.el-button), .device-actions :deep(.el-button) {
+    min-width:44px;
+    min-height:44px;
+    margin-left:0;
+  }
+  .device-card-head { flex-wrap:wrap; }
+  .device-actions { flex-wrap:wrap; justify-content:flex-end; max-width:100%; }
+  .device-card-head:has(.device-actions > :nth-child(2)) .device-actions { flex-basis:100%; }
+  .openwrt-status { flex-wrap:wrap; overflow-wrap:anywhere; }
 }
 </style>
