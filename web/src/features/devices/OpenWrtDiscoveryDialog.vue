@@ -107,6 +107,7 @@ function diagnosticTime(value?: string) {
 function routeStatusLabel(value?: string) {
   const labels: Record<string, string> = {
     matched: '匹配成功',
+    matched_no_rule: '已找到节点',
     no_match: '未匹配',
     failed: '查询失败',
     cancelled: '已取消',
@@ -147,6 +148,7 @@ function networkIPMappingStatusLabel(value?: string) {
 function matchLocationLabel(value?: string) {
   if (value === 'node_info') return 'node_info'
   if (value === 'peer_routes') return 'peer_routes'
+  if (value === 'lan_fallback') return '扫描网段推导'
   return value || '—'
 }
 </script>
