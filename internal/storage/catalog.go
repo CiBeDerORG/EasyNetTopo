@@ -31,6 +31,7 @@ type CatalogApp struct {
 	ManifestSHA256 string `json:"manifest_sha256"`
 	ManifestPath   string `json:"-"`
 	CatalogOnly    bool   `json:"catalog_only,omitempty"`
+	NativeInstall  string `json:"native_install,omitempty"`
 }
 
 var ErrSourceNotFound = errors.New("Git 应用源不存在")
@@ -46,15 +47,15 @@ func (s *Store) EnsureCatalogSchema(ctx context.Context) error {
 	defer tx.Rollback()
 	for _, query := range []string{
 		"CREATE TABLE IF NOT EXISTS catalog_sources(id TEXT PRIMARY KEY,name TEXT NOT NULL,url TEXT NOT NULL,branch TEXT NOT NULL,current_revision TEXT NOT NULL DEFAULT '',last_error TEXT NOT NULL DEFAULT '',updated_at TEXT NOT NULL DEFAULT '',UNIQUE(url,branch))",
-		"CREATE TABLE IF NOT EXISTS catalog_apps(source_id TEXT NOT NULL REFERENCES catalog_sources(id),app_id TEXT NOT NULL,name TEXT NOT NULL,summary TEXT NOT NULL,category TEXT NOT NULL,revision TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,manifest_path TEXT NOT NULL DEFAULT '',catalog_only INTEGER NOT NULL DEFAULT 0,PRIMARY KEY(source_id,app_id))",
+		"CREATE TABLE IF NOT EXISTS catalog_apps(source_id TEXT NOT NULL REFERENCES catalog_sources(id),app_id TEXT NOT NULL,name TEXT NOT NULL,summary TEXT NOT NULL,category TEXT NOT NULL,revision TEXT NOT NULL,manifest_sha256 TEXT NOT NULL,manifest_path TEXT NOT NULL DEFAULT '',catalog_only INTEGER NOT NULL DEFAULT 0,native_install TEXT NOT NULL DEFAULT '',PRIMARY KEY(source_id,app_id))",
 	} {
 		if _, err := tx.ExecContext(ctx, query); err != nil {
 			return fmt.Errorf("初始化应用目录失败: %w", err)
 		}
 	}
-	var hasPath, hasCatalogOnly bool
+	var hasPath, hasCatalogOnly, hasNativeInstall bool
 	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE name='manifest_path'),
-		COUNT(*) FILTER (WHERE name='catalog_only') FROM pragma_table_info('catalog_apps')`).Scan(&hasPath, &hasCatalogOnly); err != nil {
+		COUNT(*) FILTER (WHERE name='catalog_only'), COUNT(*) FILTER (WHERE name='native_install') FROM pragma_table_info('catalog_apps')`).Scan(&hasPath, &hasCatalogOnly, &hasNativeInstall); err != nil {
 		return err
 	}
 	if !hasPath {
@@ -68,6 +69,11 @@ func (s *Store) EnsureCatalogSchema(ctx context.Context) error {
 	}
 	if !hasCatalogOnly {
 		if _, err := tx.ExecContext(ctx, "ALTER TABLE catalog_apps ADD COLUMN catalog_only INTEGER NOT NULL DEFAULT 0"); err != nil {
+			return err
+		}
+	}
+	if !hasNativeInstall {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE catalog_apps ADD COLUMN native_install TEXT NOT NULL DEFAULT ''"); err != nil {
 			return err
 		}
 	}
@@ -135,11 +141,11 @@ func (s *Store) DeleteCatalogSource(ctx context.Context, id string) error {
 	return tx.Commit()
 }
 
-const selectCatalogApps = "SELECT source_id,app_id,name,summary,category,revision,manifest_sha256,manifest_path,catalog_only FROM catalog_apps"
+const selectCatalogApps = "SELECT source_id,app_id,name,summary,category,revision,manifest_sha256,manifest_path,catalog_only,native_install FROM catalog_apps"
 
 func scanCatalogApp(row interface{ Scan(...any) error }) (CatalogApp, error) {
 	var app CatalogApp
-	err := row.Scan(&app.SourceID, &app.AppID, &app.Name, &app.Summary, &app.Category, &app.Revision, &app.ManifestSHA256, &app.ManifestPath, &app.CatalogOnly)
+	err := row.Scan(&app.SourceID, &app.AppID, &app.Name, &app.Summary, &app.Category, &app.Revision, &app.ManifestSHA256, &app.ManifestPath, &app.CatalogOnly, &app.NativeInstall)
 	return app, err
 }
 
@@ -201,8 +207,8 @@ func (s *Store) SaveCatalogSnapshot(ctx context.Context, id, revision string, ap
 		if v.ManifestPath == "" {
 			v.ManifestPath = v.AppID + "/app.yaml"
 		}
-		if _, err := tx.ExecContext(ctx, "INSERT INTO catalog_apps(source_id,app_id,name,summary,category,revision,manifest_sha256,manifest_path,catalog_only) VALUES(?,?,?,?,?,?,?,?,?)",
-			id, v.AppID, v.Name, v.Summary, v.Category, revision, v.ManifestSHA256, v.ManifestPath, v.CatalogOnly); err != nil {
+		if _, err := tx.ExecContext(ctx, "INSERT INTO catalog_apps(source_id,app_id,name,summary,category,revision,manifest_sha256,manifest_path,catalog_only,native_install) VALUES(?,?,?,?,?,?,?,?,?,?)",
+			id, v.AppID, v.Name, v.Summary, v.Category, revision, v.ManifestSHA256, v.ManifestPath, v.CatalogOnly, v.NativeInstall); err != nil {
 			return err
 		}
 	}

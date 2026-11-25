@@ -46,6 +46,10 @@ func (s *Service) Create(ctx context.Context, name, remote, branch string) (stor
 func (s *Service) Sources(ctx context.Context) ([]storage.CatalogSource, error) {
 	return s.store.CatalogSources(ctx)
 }
+func (s *Service) App(ctx context.Context, sourceID, applicationID string) (storage.CatalogApp, error) {
+	return s.store.CatalogAppByID(ctx, sourceID, applicationID)
+}
+
 func (s *Service) Apps(ctx context.Context) ([]storage.CatalogApp, error) {
 	apps, err := s.store.CatalogApps(ctx)
 	for i := range apps {
@@ -130,10 +134,16 @@ func readCatalogApps(ctx context.Context, sourceID string, repo *gitRepository) 
 		if !m.IsEnabled() {
 			continue
 		}
+		// 原生安装只选择 Agent 内置的固定动作，来源清单不能指定命令或配方。
+		nativeInstall := ""
+		if !m.CatalogOnly && m.Version == 0 && m.ID == "maestro" && m.NativeInstall == "macos_homebrew" {
+			nativeInstall = m.NativeInstall
+		}
 		apps = append(apps, storage.CatalogApp{
 			SourceID: sourceID, AppID: m.ID, Name: m.Name, Summary: m.Summary, Category: m.Category,
 			Revision: repo.revision, ManifestSHA256: manifestDigest(raw), ManifestPath: name,
-			CatalogOnly: m.CatalogOnly || (m.Version != 1 && m.Version != 2),
+			NativeInstall: nativeInstall,
+			CatalogOnly:   m.CatalogOnly || (nativeInstall == "" && m.Version != 1 && m.Version != 2),
 		})
 	}
 	if len(seen) == 0 {

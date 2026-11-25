@@ -1,4 +1,5 @@
 import { apiRequest } from '../../lib/api-client'
+import { appKey, normalizeNativeStatus } from './rules'
 import type { AppAction, AppActionResponse, ExecutionTask, AppConfig, AppRef, AppStatus, AuthStatus, CatalogApp, CatalogSource, ControllerInfo, DockerInventory, Host, HostSnapshot, AdapterTypesResponse } from './types'
 
 export function getAuthStatus() {
@@ -75,7 +76,8 @@ export function getAppConfig(app: AppRef) {
       encodeURIComponent(app.app_id) + '/config'
   )
 }
-export async function getAppStatuses(hostId: string, apps: AppRef[]) {
+export async function getAppStatuses(hostId: string, apps: CatalogApp[]) {
+  const nativeKeys = new Set(apps.filter(app => app.native_install === 'macos_homebrew').map(appKey))
   const refs = apps.map(app => ({ source_id: app.source_id, app_id: app.app_id }))
   const result: AppStatus[] = []
   const total = Math.max(refs.length, 1)
@@ -84,7 +86,7 @@ export async function getAppStatuses(hostId: string, apps: AppRef[]) {
       '/api/v1/hosts/' + encodeURIComponent(hostId) + '/apps/status',
       { method: 'POST', body: { apps: refs.slice(start, start + 256), include_managed: start === 0 } }
     )
-    result.push(...(response.apps || []))
+    result.push(...(response.apps || []).map(row => normalizeNativeStatus(row, nativeKeys)))
   }
   return result
 }

@@ -178,7 +178,7 @@ const snapshotError = computed(() =>
 const statusError = computed(() =>
   data.statusQuery.isError.value ? errorMessage(data.statusQuery.error.value) : ''
 )
-const marketLoading = computed(() => data.statusQuery.isFetching.value || data.statusQuery.isPending.value)
+const marketLoading = computed(() => data.appsQuery.isLoading.value || data.statusQuery.isLoading.value)
 const dockerInventory = computed(() => data.dockerQuery.data.value)
 const dockerLoading = computed(() => data.dockerQuery.isFetching.value)
 const dockerError = computed(() =>
@@ -329,7 +329,7 @@ watch(() => data.statusQuery.data.value, async rows => {
     for (const row of candidates) {
       if (selectedHostId.value !== host.id) break
       const app = apps.get(appKey(row))
-      if (!app?.revision) continue
+      if (!app?.revision || app.native_install) continue
       const key = host.id + ':' + appKey(app) + ':' + app.revision
       if (autoLinkAttempts.has(key)) continue
       autoLinkAttempts.add(key)
@@ -363,7 +363,9 @@ watch(selectedHostId, () => {
   configDialogOpen.value = false
 })
 
-watch(() => data.statusQuery.data.value, async result => {
+// 即使连续重试返回相同的失败记录，也要在新一轮状态查询完成后解除等待。
+watch(() => data.statusQuery.dataUpdatedAt.value, async () => {
+  const result = data.statusQuery.data.value
   const job = pendingAction.value
   if (!job || job.hostId !== selectedHostId.value || !result) return
   const row = result.find(item => appKey(item) === job.appKey)
@@ -371,8 +373,8 @@ watch(() => data.statusQuery.data.value, async result => {
   if (!row || row.action !== expectedAction || !row.result || row.result === 'running') return
 
   pendingAction.value = null
-  // 安装/更新脚本执行结束后重新采集 Docker 端口映射，供卡片和资源抽屉共用。
-  void data.dockerQuery.refetch()
+  const nativeInstall = row.mode === 'macos_homebrew'
+  if (!nativeInstall) void data.dockerQuery.refetch()
   if (row.result === 'failed') {
     const app = data.catalogApps.value.find(item => appKey(item) === job.appKey)
     const restored = job.action === 'uninstall' && app
@@ -384,7 +386,7 @@ watch(() => data.statusQuery.data.value, async result => {
   } else if (row.result === 'unknown') {
     ElMessage.warning(job.appName + ' 操作结果未知，请核对目标主机实际状态')
   } else if (row.result === 'succeeded' &&
-    (job.action === 'uninstall' ? row.state === 'not_installed' : row.state === 'running')) {
+    (job.action === 'uninstall' ? row.state === 'not_installed' : row.state === (nativeInstall ? 'installed' : 'running'))) {
     ElMessage.success(job.appName + ' ' + actionName(job.action) + '成功')
   } else {
     ElMessage.warning(job.appName + ' 脚本执行完成，但当前状态为「' + stateName(row.state) + '」，请核查')
@@ -410,6 +412,7 @@ function actionName(action: AppAction) {
 function stateName(state: string) {
   return ({
     running: '运行中',
+    installed: '已安装',
     stopped: '已停止',
     partial: '部分运行',
     not_installed: '未安装',
@@ -642,11 +645,12 @@ async function openInstallConfig(app: CatalogApp) {
 }
 
 function permissionsFor(app: CatalogApp) {
-  return getAppPermissions(app, data.statusByKey.value[appKey(app)], snapshot.value?.platform)
+  return getAppPermissions(app, data.statusByKey.value[appKey(app)], snapshot.value?.platform, !!selectedHost.value?.agent_id)
 }
 
 async function handleAppAction(app: CatalogApp, action: AppAction) {
   const permissions = permissionsFor(app)
+  if (action === 'install' && (!app.native_install || !permissions.canInstall)) return
   if (action === 'update' && !permissions.canUpdate) return
   if (action === 'uninstall' && !permissions.canUninstall) return
   if (action === 'adopt' && !permissions.canAdopt) return
@@ -695,7 +699,7 @@ async function runAppAction(
   try {
     const payload = action === 'install' && install
       ? { source_id: app.source_id, app_id: app.app_id, revision: install.revision, config: install.config }
-      : action === 'update' || action === 'adopt' || action === 'force_update'
+      : action === 'install' || action === 'update' || action === 'adopt' || action === 'force_update'
         ? { source_id: app.source_id, app_id: app.app_id, revision: app.revision }
         : { source_id: app.source_id, app_id: app.app_id }
     const accepted = await executeAppAction(host.id, action, payload)
@@ -715,13 +719,15 @@ async function runAppAction(
     if (accepted.result === 'running') {
       pendingAction.value = { hostId: host.id, appKey: key, action, appName: app.name, errors: 0 }
       ElMessage.info(app.name + ' ' + actionName(action) + '请求已受理，正在等待 Agent 执行结果。')
+    } else if (accepted.result === 'failed') {
+      ElMessage.error(app.name + ' ' + actionName(action) + '失败：' + (accepted.message || '请检查目标主机状态'))
     } else if (accepted.result === 'succeeded') {
       ElMessage.success(app.name + ' ' + actionName(action) + '已完成。')
     } else {
       ElMessage.warning(app.name + ' 已受理，但最终结果尚未确认，请刷新状态核对。')
     }
     await data.statusQuery.refetch()
-    if (accepted.result === 'succeeded') await data.dockerQuery.refetch()
+    if (accepted.result === 'succeeded' && !app.native_install) await data.dockerQuery.refetch()
   } catch (error) {
     const restored = action === 'uninstall' && await recoverFailedUninstall(host.id, app)
     if (restored) ElMessage.warning(app.name + ' 卸载指令失败，但远端已确认无应用资源；卡片已恢复待安装')

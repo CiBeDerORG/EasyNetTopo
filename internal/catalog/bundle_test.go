@@ -70,7 +70,11 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 	manifestPath := "catalog/packages/app.yml"
 	write(manifestPath, manifestRaw)
 	nativePath := "macOS/开发工具/app.yaml"
-	write(nativePath, []byte("id: maestro\nname: Maestro\nenabled: true\ncatalog_only: true\ncategory: developer\nsummary: Mac 原生工具\nicon: assets/missing.svg\n"))
+	nativeMode := "catalog_only: true"
+	if independent {
+		nativeMode = "native_install: macos_homebrew"
+	}
+	write(nativePath, []byte("id: maestro\nname: Maestro\nenabled: true\n"+nativeMode+"\ncategory: developer\nsummary: Mac 原生工具\nicon: assets/missing.svg\n"))
 	write("hidden/app.yml", []byte("id: hidden-tool\nname: 已停用\nenabled: false\n"))
 	write("broken-package/app.yaml", []byte("id: incomplete\nname: 缺少包资源的应用\nschema_version: 2\nruntime: {kind: docker_compose}\n"))
 	if independent {
@@ -104,7 +108,7 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 		t.Fatal(err)
 	}
 	native, err := db.CatalogAppByID(ctx, source.ID, "maestro")
-	if err != nil || !native.CatalogOnly || native.ManifestPath != nativePath {
+	if err != nil || native.CatalogOnly == independent || (native.NativeInstall == "macos_homebrew") != independent || native.ManifestPath != nativePath {
 		t.Fatalf("原生工具未按配置 ID 和实际路径上架：%+v, %v", native, err)
 	}
 	if _, _, err := service.Icon(ctx, source.ID, "maestro", revision); err == nil {

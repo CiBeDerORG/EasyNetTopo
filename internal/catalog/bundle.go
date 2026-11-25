@@ -86,8 +86,8 @@ func (s *Service) BuildUpdateBundle(ctx context.Context, sourceID, applicationID
 	if err != nil || app.Revision != source.CurrentRevision {
 		return packagebuilder.Artifact{}, errors.New("应用与来源快照版本不匹配")
 	}
-	if app.CatalogOnly {
-		return packagebuilder.Artifact{}, errors.New("此应用仅提供商店展示，未声明远程部署包")
+	if app.CatalogOnly || app.NativeInstall != "" {
+		return packagebuilder.Artifact{}, errors.New("此应用未声明 Compose 部署包")
 	}
 	appRevision := app.Revision
 	if requestedRevision != "" {

@@ -90,6 +90,7 @@ func TestCatalogSchemaMigratesLegacySnapshot(t *testing.T) {
 	for _, query := range []string{
 		"ALTER TABLE catalog_apps DROP COLUMN manifest_path",
 		"ALTER TABLE catalog_apps DROP COLUMN catalog_only",
+		"ALTER TABLE catalog_apps DROP COLUMN native_install",
 	} {
 		if _, err := s.db.ExecContext(ctx, query); err != nil {
 			t.Fatal(err)

@@ -42,7 +42,7 @@ export function useHostStoreData(
     hosts.value.find(host => host.id === selectedHostId.value) || null
   )
   const deployableApps = computed(() => catalogApps.value.filter(app => !app.catalog_only))
-  const appSignature = computed(() => deployableApps.value.map(appKey).join('|'))
+  const appSignature = computed(() => deployableApps.value.map(app => appKey(app) + ':' + (app.native_install || '')).join('|'))
 
   const snapshotQuery = useQuery({
     queryKey: computed(() => ['host-snapshot', selectedHostId.value]),

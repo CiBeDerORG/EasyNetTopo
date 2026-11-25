@@ -102,6 +102,7 @@ Git 同步失败仅记录安全的通用错误，并**保留上次成功的 SQLi
 - 快照清单只包含展示字段、来源 Commit 和 Manifest SHA-256，不含真实用户部署密钥。
 - 同步读取 Git 中任意目录的普通文件 `app.yaml` 或 `app.yml`。应用身份取自清单的 `id`，`enabled: true` 上架，`enabled: false` 下架，缺省沿用启用。全部停用会清空该源的商店列表。同一来源的多个清单声明相同 ID 时，同步失败并保留上次快照。
 - 卡片展示直接读取清单的名称、摘要和分类。原生 CLI 等仅展示条目声明 `catalog_only: true`。同步不读取安装脚本、Compose 资源或图标内容。请求图标时按清单所在目录定位并校验，读取失败则使用文字占位。
+- Maestro 的清单通过 `native_install: macos_homebrew` 启用一键安装。已配对的 Mac Agent 在登录用户的 Homebrew 下安装官方配方并验证 CLI 和 ADB，商店回显结果与版本。请先更新 EasyHostAgent、刷新 Deploy 应用源。该入口只提供安装和失败重试。
 - 构建候选包时校验固定 Commit 的 Deploy Schema、包文件、配置定义和跨文件语义。仅展示条目不会创建远程安装或更新包。
 
 ## 4. 当前验收与限制

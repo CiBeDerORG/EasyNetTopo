@@ -134,6 +134,29 @@ func appAction(w http.ResponseWriter, r *http.Request, hostID, name string, serv
 			http.Error(w, "EasyNetTopo 仅支持更新", http.StatusForbidden)
 			return
 		}
+		if name == "install" {
+			app, err := source.App(ctx, req.Source, req.App)
+			if err != nil {
+				http.Error(w, "应用已下架或来源快照不可用，请刷新应用商店", http.StatusUnprocessableEntity)
+				return
+			}
+			if app.NativeInstall != "" {
+				if app.Revision != req.Revision {
+					http.Error(w, "来源版本已变化，请刷新应用商店并重新操作", http.StatusConflict)
+					return
+				}
+				if len(req.Config) != 0 {
+					http.Error(w, "此原生安装器不接受自定义参数", http.StatusUnprocessableEntity)
+					return
+				}
+				if err := service.RequireNativeInstaller(ctx, hostID, app.AppID); err != nil {
+					http.Error(w, err.Error(), http.StatusUnprocessableEntity)
+					return
+				}
+				body = map[string]string{"source_id": req.Source, "app_id": app.AppID, "native_installer": app.AppID}
+				break
+			}
+		}
 		pkg, err := source.BuildCandidateBundle(ctx, req.Source, req.App)
 		if err != nil {
 			http.Error(w, "安装包未通过清单校验", 422)

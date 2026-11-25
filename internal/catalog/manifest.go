@@ -16,14 +16,15 @@ var appID = regexp.MustCompile("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 var safeFile = regexp.MustCompile("^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
 type catalogMetadata struct {
-	CatalogOnly bool   `yaml:"catalog_only"`
-	Enabled     *bool  `yaml:"enabled"`
-	Icon        string `yaml:"icon"`
-	Version     int    `yaml:"schema_version"`
-	ID          string `yaml:"id"`
-	Name        string `yaml:"name"`
-	Summary     string `yaml:"summary"`
-	Category    string `yaml:"category"`
+	CatalogOnly   bool   `yaml:"catalog_only"`
+	NativeInstall string `yaml:"native_install"`
+	Enabled       *bool  `yaml:"enabled"`
+	Icon          string `yaml:"icon"`
+	Version       int    `yaml:"schema_version"`
+	ID            string `yaml:"id"`
+	Name          string `yaml:"name"`
+	Summary       string `yaml:"summary"`
+	Category      string `yaml:"category"`
 }
 
 type appManifest struct {

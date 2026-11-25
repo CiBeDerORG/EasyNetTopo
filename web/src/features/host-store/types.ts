@@ -66,6 +66,7 @@ export type CatalogSource = {
   updated_at?: string
 }
 export type CatalogApp = {
+  native_install?: 'macos_homebrew'
   catalog_only?: boolean
   icon_url?: string
   source_id: string
@@ -84,6 +85,7 @@ export type AppStatus = AppRef & {
   adoptable?: boolean
   force_updatable?: boolean
   mode?: string
+  version?: string
   blocked_reason?: string
   state: string
   action?: string

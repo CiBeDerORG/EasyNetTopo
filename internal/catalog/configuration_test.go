@@ -116,9 +116,9 @@ func TestDeployRepositoryV2Contract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			if metadata.CatalogOnly {
+			if metadata.CatalogOnly || metadata.NativeInstall != "" {
 				if ValidateManifestSchema(raw) == nil {
-					t.Fatal("仅展示清单不应通过部署包契约校验")
+					t.Fatal("轻量清单不应通过 Compose 部署包校验")
 				}
 				return
 			}

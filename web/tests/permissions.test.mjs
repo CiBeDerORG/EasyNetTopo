@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { canRecoverFailedUninstall, getAppPermissions, recoveredUninstallStatus } from '../src/features/host-store/rules.ts'
+import { canRecoverFailedUninstall, getAppPermissions, isInstalledStatus, normalizeNativeStatus, recoveredUninstallStatus } from '../src/features/host-store/rules.ts'
 
 const easynettopo = {
   source_id: 'source', app_id: 'easynettopo', name: 'EasyNetTopo',
@@ -99,4 +99,53 @@ test('卸载失败仅在完整的远端 Docker 清单确认资源不存在时恢
   assert.equal(canRecoverFailedUninstall(failed, { ...inventory, resources: [
     { kind: 'compose_project', name: 'demo', resource_id: 'x', state: 'stopped', managed: true }
   ] }, 'demo'), false)
+})
+
+test('macOS 原生工具只在 Agent 确认未安装且允许时开放安装', () => {
+  const app = { ...easynettopo, app_id: 'maestro', native_install: 'macos_homebrew' }
+  const ready = { ...row, app_id: 'maestro', state: 'not_installed', managed: false, mode: 'macos_homebrew' }
+  const perms = getAppPermissions(app, ready, 'macos')
+  assert.equal(perms.showInstall, true)
+  assert.equal(perms.canInstall, true)
+  for (const action of ['Update', 'Uninstall', 'ForceUpdate', 'Adopt']) {
+    assert.equal(perms['show' + action], false)
+    assert.equal(perms['can' + action], false)
+  }
+  assert.equal(getAppPermissions(app, { ...ready, result: 'running', action: 'install' }, 'macos').canInstall, false)
+  assert.equal(getAppPermissions(app, { ...ready, managed: true, result: 'failed' }, 'macos').canInstall, true)
+  const unpaired = getAppPermissions(app, ready, 'macos', false)
+  assert.equal(unpaired.canInstall, false)
+  assert.match(unpaired.blockReason, /配对/)
+  assert.equal(getAppPermissions(app, { ...ready, state: 'installed', version: '1.40.0' }, 'macos').showInstall, false)
+  const unavailable = getAppPermissions(app, { ...ready, allowed: false, state: 'unknown', message: '未找到 Homebrew' }, 'macos')
+  assert.equal(unavailable.canInstall, false)
+  assert.equal(unavailable.blockReason, '未找到 Homebrew')
+  assert.equal(getAppPermissions({ ...app, revision: '' }, ready, 'macos').canInstall, false)
+  assert.match(getAppPermissions(app, ready, 'linux').blockReason, /macOS/)
+  assert.equal(getAppPermissions(app, ready, 'linux').canInstall, false)
+})
+
+test('旧 Agent 同名 Docker 状态不能充当原生已安装或安装许可', () => {
+  const app = { ...easynettopo, app_id: 'maestro', native_install: 'macos_homebrew' }
+  const legacy = { ...row, app_id: 'maestro', state: 'running', mode: 'compose' }
+  const nativeKeys = new Set(['source/maestro'])
+  const status = normalizeNativeStatus(legacy, nativeKeys)
+  assert.equal(status.state, 'unknown')
+  assert.equal(status.managed, false)
+  const perms = getAppPermissions(app, status, 'macos')
+  assert.equal(perms.showInstall, true)
+  assert.equal(perms.canInstall, false)
+  assert.match(perms.blockReason, /更新.*EasyHostAgent/)
+  const good = { ...legacy, mode: 'macos_homebrew', state: 'installed', version: '1.40.0' }
+  assert.equal(normalizeNativeStatus(good, nativeKeys), good)
+  assert.equal(normalizeNativeStatus(row, nativeKeys), row)
+})
+
+test('原生安装受理记录不计作已安装，成功的手工安装可计入', () => {
+  const pending = { ...row, mode: 'macos_homebrew', state: 'not_installed', managed: true }
+  for (const result of ['running', 'failed', 'unknown']) {
+    assert.equal(isInstalledStatus({ ...pending, result }), false)
+  }
+  assert.equal(isInstalledStatus({ ...pending, managed: false, state: 'installed' }), true)
+  assert.equal(isInstalledStatus(row), true)
 })

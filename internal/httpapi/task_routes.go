@@ -243,8 +243,8 @@ func resolveTargets(req []hookTarget, registered []storage.Host, apps []storage.
 		if appCount != 1 {
 			return nil, errors.New("目标服务不存在或名称重复: " + item.ServiceName)
 		}
-		if app.CatalogOnly {
-			return nil, errors.New("应用仅供展示，无法创建更新任务: " + item.ServiceName)
+		if app.CatalogOnly || app.NativeInstall != "" {
+			return nil, errors.New("此应用未声明远程更新动作: " + item.ServiceName)
 		}
 		targets = append(targets, storage.TaskTarget{
 			HostID: host.ID, SourceID: app.SourceID, AppID: app.AppID, Action: "update",
@@ -284,8 +284,8 @@ func enqueueManualUpdate(w http.ResponseWriter, r *http.Request, hostID string, 
 	valid := false
 	for _, app := range apps {
 		if app.SourceID == req.Source && app.AppID == req.App {
-			if app.CatalogOnly {
-				http.Error(w, "应用仅供展示，无法创建更新任务", http.StatusUnprocessableEntity)
+			if app.CatalogOnly || app.NativeInstall != "" {
+				http.Error(w, "此应用未声明远程更新动作", http.StatusUnprocessableEntity)
 				return
 			}
 			valid = app.Revision == req.Revision

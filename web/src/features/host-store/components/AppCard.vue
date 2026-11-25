@@ -39,6 +39,7 @@ const statusLabel = computed(() => {
   if (!props.status) return '状态待获取'
   return ({
     running: '运行中',
+    installed: '已安装',
     stopped: '已停止',
     partial: '部分运行',
     not_installed: '未安装',
@@ -49,7 +50,7 @@ const statusLabel = computed(() => {
 })
 const statusType = computed(() => {
   if (installing.value) return 'warning'
-  if (props.status?.state === 'running') return 'success'
+  if (props.status?.state === 'running' || props.status?.state === 'installed') return 'success'
   if (props.status?.state === 'stopped' || props.status?.state === 'partial') return 'warning'
   if (props.status?.state === 'unknown' || props.status?.state === 'missing') return 'danger'
   return 'info'
@@ -86,11 +87,13 @@ const resultLabel = computed(() => {
 
     <div class="product-meta">
       <el-tag v-if="app.catalog_only && !status?.managed" size="small" type="info">仅展示</el-tag>
-      <el-tag v-else-if="installing || status?.state !== 'not_installed'" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
-      <span v-if="app.revision" class="revision">版本 {{ app.revision.slice(0, 12) }}</span>
+      <el-tag v-else-if="app.native_install || installing || status?.state !== 'not_installed'" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+      <span v-if="app.native_install && status?.state === 'installed' && status.version" class="revision">已安装版本 {{ status.version }}</span>
+      <span v-else-if="app.native_install" class="revision">macOS · Homebrew</span>
+      <span v-else-if="app.revision" class="revision">版本 {{ app.revision.slice(0, 12) }}</span>
       <span v-else class="revision">本机保留记录</span>
       <el-tooltip
-        v-if="permissions.blockReason"
+        v-if="permissions.blockReason && !app.native_install"
         :content="permissions.blockReason"
         :popper-style="{ maxWidth: '300px', whiteSpace: 'normal', overflowWrap: 'anywhere' }"
         placement="top"
@@ -105,6 +108,7 @@ const resultLabel = computed(() => {
         {{ formatPublishedPort(port) }}
       </el-tag>
     </div>
+    <p v-if="app.native_install && permissions.blockReason" class="result-label" role="status">{{ permissions.blockReason }}</p>
     <p v-if="resultLabel" class="result-label" role="status">{{ resultLabel }}</p>
     <div v-if="task" class="task-meta" role="status">
       <template v-if="taskActive(task)">
@@ -127,7 +131,7 @@ const resultLabel = computed(() => {
     </el-button>
     <div class="product-bottom">
       <div class="app-actions">
-        <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="$emit('configure')">
+        <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="app.native_install ? $emit('action', 'install') : $emit('configure')">
           <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
         </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">

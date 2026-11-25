@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { Box, CircleCheck, Download, TrendCharts } from '@element-plus/icons-vue'
 import AppCard from './AppCard.vue'
 import NativeAgentCard from './NativeAgentCard.vue'
-import { appKey, canRecoverFailedUninstall, getAppPermissions, recoveredUninstallStatus } from '../rules'
+import { appKey, canRecoverFailedUninstall, getAppPermissions, isInstalledStatus, recoveredUninstallStatus } from '../rules'
 import type { AppFilter } from '../../../stores/ui'
 import type { AgentMaintenanceState, AgentUpdateAction, AppAction } from '../types'
 import type { AppStatus, CatalogApp, CatalogSource, DockerInventory, DockerPort, ExecutionTask, Host, HostSnapshot } from '../types'
@@ -47,7 +47,7 @@ const statusByKey = computed<Record<string, AppStatus>>(() => Object.fromEntries
   [appKey(row), recovered(row) ? recoveredUninstallStatus(row) : row]
 )))
 const installedCount = computed(() => Object.values(statusByKey.value)
-  .filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
+  .filter(isInstalledStatus).length + (props.snapshot ? 1 : 0))
 const runningCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
 const availableCount = computed(() => props.apps.filter(app => !!app.revision && !app.catalog_only).length + 1)
@@ -70,8 +70,9 @@ const showNativeAgent = computed(() =>
 )
 const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
-  const permissions = getAppPermissions(app, row, props.snapshot?.platform)
-  if (props.filter === 'installed') return !!row && (row.managed || row.external)
+  const permissions = getAppPermissions(app, row, props.snapshot?.platform, !!props.host?.agent_id)
+  if (props.filter === 'installed') return !!row && isInstalledStatus(row)
+  if (props.filter === 'available' && app.native_install) return props.snapshot?.platform === 'macos' && row?.state === 'not_installed'
   if (props.filter === 'available') return !app.catalog_only && (!row || (!row.managed && !row.external))
   if (props.filter === 'update') return permissions.canUpdate
   return true
@@ -90,6 +91,7 @@ function sourceName(id: string) {
   return props.sources.find(source => source.id === id)?.name || id
 }
 function appPorts(app: CatalogApp): DockerPort[] {
+  if (app.native_install) return []
   const resources = props.dockerInventory?.resources || []
   const resource = resources.find(item =>
     item.kind === 'compose_project' &&
@@ -209,7 +211,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :task="cardTask(app)"
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
-          :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform)"
+          :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform, !!host.agent_id)"
           :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"

@@ -1,7 +1,41 @@
 import type { AppPermissions, AppRef, AppStatus, CatalogApp, DockerInventory } from './types'
 
 export const appKey = (app: AppRef) => app.source_id + '/' + app.app_id
-export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = ''): AppPermissions {
+// 旧版 Agent 会返回同名 Compose 状态。原生应用必须使用与安装方式匹配的探测结果。
+export function normalizeNativeStatus(row: AppStatus, nativeKeys: Set<string>): AppStatus {
+  if (!nativeKeys.has(appKey(row)) || row.mode === 'macos_homebrew') return row
+  return {
+    source_id: row.source_id, app_id: row.app_id, state: 'unknown',
+    managed: false, allowed: false, blocked_reason: 'native_install_unsupported'
+  }
+}
+
+export function isInstalledStatus(row: AppStatus): boolean {
+  if (row.mode === 'macos_homebrew') return row.state === 'installed'
+  return row.managed || !!row.external
+}
+
+export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '', paired = true): AppPermissions {
+  if (app.native_install === 'macos_homebrew') {
+    const supported = paired && platform === 'macos' && row?.mode === app.native_install
+    const installed = supported && row.state === 'installed'
+    const installing = supported && row.result === 'running'
+    let reason = ''
+    if (!paired) reason = '请先配对目标 Mac 上的 EasyHostAgent。'
+    else if (platform && platform !== 'macos') reason = '此应用需要安装在 macOS 主机上。'
+    else if (!row || !platform) reason = '等待已配对的 Mac 回报安装状态。'
+    else if (!supported) reason = '请先更新目标 Mac 上的 EasyHostAgent，以支持 Homebrew 原生安装。'
+    else if (!installed && !installing && (!row.allowed || row.state !== 'not_installed')) {
+      reason = row.message || '目标 Mac 尚未就绪，请核对 Homebrew 和 Agent 的安装状态。'
+    }
+    return {
+      showInstall: !installed || installing,
+      canInstall: supported && row.allowed && row.state === 'not_installed' && !installing && !!app.revision,
+      showUpdate: false, canUpdate: false, showUninstall: false, canUninstall: false,
+      showAdopt: false, canAdopt: false, showForceUpdate: false, canForceUpdate: false,
+      grantRequired: false, blockReason: reason
+    }
+  }
   const managed = !!row?.managed
   const external = !!row?.external
   const showAdopt = false // 原有 Deploy 应用完成身份核验后自动关联
