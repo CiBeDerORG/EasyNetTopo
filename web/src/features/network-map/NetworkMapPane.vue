@@ -1,10 +1,12 @@
 <script setup lang="ts">
 import { computed, defineAsyncComponent, h, nextTick, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { listNodeAttributes } from '../network-nodes/attributes'
+import NetworkNodeEditor from '../network-nodes/NetworkNodeEditor.vue'
+import { nodeEditingIssue } from '../network-nodes/identity'
 import { mergedNetworkRows } from '../network-nodes/data'
 import { buildMapTopology, trafficRates, type MapLink, type MapNode, type TrafficSample } from './topology'
 
@@ -32,11 +34,17 @@ const GlobeMap = defineAsyncComponent({
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const router = useRouter()
+const route = useRoute()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
-const hostId = ref('')
-watch(entries, items => {
-  if (!items.some(host => host.id === hostId.value)) hostId.value = items[0]?.id || ''
-}, { immediate: true })
+const requestedEntry = computed(() => typeof route.query.entry === 'string' ? route.query.entry : '')
+const editingLocation = computed(() => route.query.edit === 'location')
+const hostId = computed(() => {
+  if (requestedEntry.value) return entries.value.find(host => host.id === requestedEntry.value)?.id || ''
+  return editingLocation.value ? '' : entries.value[0]?.id || ''
+})
+function changeEntry(id: string) {
+  void router.replace({ path: route.path, query: { ...route.query, entry: id, node: undefined, edit: undefined } })
+}
 
 const routeQuery = useQuery({
   queryKey: computed(() => ['network-map-route', hostId.value]),
@@ -74,7 +82,7 @@ const rawTopology = computed(() => {
 })
 const samples = new Map<string, TrafficSample>()
 const currentRates = ref<Record<string, { rxBps: number | null; txBps: number | null }>>({})
-watch(hostId, () => { samples.clear(); currentRates.value = {}; selectedNodeKey.value = ''; selectedLinkKey.value = '' })
+watch(hostId, () => { samples.clear(); currentRates.value = {}; selectedLinkKey.value = '' })
 watch(() => routeQuery.dataUpdatedAt.value, () => {
   if (!routeQuery.data.value) return
   const current = rawTopology.value
@@ -105,7 +113,7 @@ const withLocation = computed(() => topology.value.nodes.filter(node =>
   node.latitude !== null && node.longitude !== null))
 const withoutLocation = computed(() => topology.value.nodes.filter(node =>
   node.latitude === null || node.longitude === null))
-const selectedNodeKey = ref('')
+const selectedNodeKey = computed(() => typeof route.query.node === 'string' ? route.query.node : '')
 const selectedLinkKey = ref('')
 const selectedNode = computed(() => topology.value.nodes.find(node => node.key === selectedNodeKey.value))
 const selectedLink = computed(() => topology.value.links.find(link => link.key === selectedLinkKey.value))
@@ -134,14 +142,39 @@ const peerStatus = computed(() => {
   return peerQuery.isSuccess.value ? '已接入 Peer Center 全网直连拓扑' : '显示入口路由拓扑 · Peer Center 暂不可用'
 })
 const globeRef = ref<{ focusNode?: (key: string) => void } | null>(null)
-function selectNode(key: string) {
-  selectedNodeKey.value = key
+async function selectNode(key: string, fromList = false) {
   selectedLinkKey.value = ''
+  await router.replace({ path: route.path, query: { ...route.query, entry: hostId.value, node: key } })
   globeRef.value?.focusNode?.(key)
+  if (fromList) await showDetails()
 }
 function selectLink(key: string) {
-  selectedNodeKey.value = ''
   selectedLinkKey.value = key
+  if (selectedNodeKey.value) void router.replace({ path: route.path, query: { ...route.query, node: undefined } })
+}
+const editIssue = computed(() => {
+  if (props.hostsLoading) return ''
+  if (props.hostsError) return '组网入口读取失败，请重试。'
+  if (!hostId.value) return '原组网入口已不可用，请重新选择入口。'
+  if (routeQuery.isError.value || attrsQuery.isError.value) return '路由或节点属性读取失败，请刷新后重试。'
+  if (!locationReady.value) return ''
+  if (!selectedNode.value) return '当前入口已找不到所选节点，请重新选择。'
+  return nodeEditingIssue(selectedNode.value.row, hostId.value)
+})
+function openEditor() {
+  if (!selectedNode.value || editIssue.value || !locationReady.value) return
+  void router.push({ path: route.path, query: { ...route.query, entry: hostId.value, node: selectedNodeKey.value, edit: 'location' } })
+}
+function closeEditor() {
+  const location = { path: route.path, query: { ...route.query, edit: undefined } }
+  // 从地图进入时弹出这一条编辑历史；直接访问编辑链接时只清除编辑参数。
+  if (router.options.history.state.back === router.resolve(location).fullPath) router.back()
+  else void router.replace(location)
+}
+async function onSaved() {
+  closeEditor()
+  await nextTick()
+  globeRef.value?.focusNode?.(selectedNodeKey.value)
 }
 function formatSpeed(bytes: number | null): string {
   if (bytes === null) return '暂无连续采样'
@@ -156,6 +189,13 @@ function formatMs(value: number | null) {
 
 <template>
   <section class="map-page" aria-label="EasyTier 网络地图">
+    <el-alert v-if="editIssue && (editingLocation || (requestedEntry && !hostId) || (selectedNodeKey && !selectedNode))"
+      type="warning" :closable="false" :title="editIssue">
+      <el-button v-if="editingLocation" link @click="closeEditor">返回地图</el-button>
+    </el-alert>
+    <NetworkNodeEditor v-if="editingLocation && locationReady && selectedNode && !nodeEditingIssue(selectedNode.row, hostId)"
+      :key="selectedNode.key" :entry-id="hostId" :row="selectedNode.row" :attributes="selectedNode.attributes"
+      location-only :unavailable="editIssue" @saved="onSaved" @close="closeEditor" />
     <el-alert v-if="hostsError" type="error" :title="hostsError" :closable="false" />
     <div v-if="hostsLoading" class="map-empty">正在读取组网入口…</div>
     <el-empty v-else-if="!hostsError && !entries.length" description="尚未设置组网入口">
@@ -165,13 +205,13 @@ function formatMs(value: number | null) {
       <div class="map-toolbar">
         <div class="entry-picker">
           <label for="map-entry-host">组网入口</label>
-          <el-select id="map-entry-host" v-model="hostId" aria-label="组网入口" class="map-entry">
+          <el-select id="map-entry-host" :model-value="hostId" @change="changeEntry" aria-label="组网入口" class="map-entry">
             <el-option v-for="host in entries" :key="host.id" :label="host.name" :value="host.id" />
           </el-select>
         </div>
         <div class="refresh-controls">
           <span class="last-updated">最近采集 {{ lastUpdated }}</span>
-          <el-button :loading="routeQuery.isFetching.value || peerQuery.isFetching.value || attrsQuery.isFetching.value"
+          <el-button :disabled="!hostId" :loading="routeQuery.isFetching.value || peerQuery.isFetching.value || attrsQuery.isFetching.value"
             @click="routeQuery.refetch(); peerQuery.refetch(); attrsQuery.refetch()">刷新</el-button>
         </div>
       </div>
@@ -227,7 +267,9 @@ function formatMs(value: number | null) {
             <h3 id="map-detail-title" ref="detailHeading" tabindex="-1">{{ selectedNode ? '节点详情' : selectedLink ? '连接详情' : '选中详情' }}</h3>
             <div v-if="selectedNode || selectedLink" class="detail-title">{{ selectionTitle }}</div>
             <template v-if="selectedNode">
-              <dl>
+              <el-button type="primary" size="small" :disabled="!!editIssue || !locationReady" @click="openEditor">编辑位置</el-button>
+              <p v-if="editIssue" class="side-caption">{{ editIssue }}</p>
+              <dl class="node-properties">
                 <div><dt>主机名</dt><dd>{{ selectedNode.hostname }}</dd></div>
                 <div><dt>虚拟地址</dt><dd>{{ selectedNode.ip }}</dd></div>
                 <div><dt>节点 ID</dt><dd>{{ selectedNode.id }}</dd></div>
@@ -266,14 +308,11 @@ function formatMs(value: number | null) {
             <div v-else-if="withoutLocation.length" class="missing-nodes">
               <button v-for="node in withoutLocation" :key="node.key" type="button"
                 class="missing-node" :aria-pressed="node.key === selectedNodeKey"
-                @click="selectNode(node.key); showDetails()">
+                @click="selectNode(node.key, true)">
                 <span>{{ node.label }}</span><small>{{ node.ip }}</small>
               </button>
             </div>
             <p v-else class="side-caption">{{ topology.nodes.length ? '当前路由中的节点均已设置位置。' : '当前路由中没有节点。' }}</p>
-            <el-button class="edit-location" text type="primary" @click="router.push('/network-nodes')">
-              前往网络节点编辑位置
-            </el-button>
           </section>
           <p class="side-footnote">节点位置来自人工确认的 WGS84 经纬度，路由可见仅表示最近采集到了该节点。</p>
         </aside>
@@ -353,7 +392,7 @@ dd { margin: 0; font-size: 12px; font-weight: 600; color: var(--ent-text); overf
 .missing-node:hover, .missing-node[aria-pressed="true"] { border-color: var(--ent-cyan); }
 .missing-node span { overflow-wrap: anywhere; }
 .missing-node small { color: var(--ent-muted); white-space: nowrap; }
-.edit-location { margin-top: 8px; }
+.node-properties { margin-top: 12px; }
 .side-footnote { margin: 0 4px; }
 @container (max-width: 740px) {
   .map-layout { display: flex; flex-direction: column; min-height: auto; flex: none; }

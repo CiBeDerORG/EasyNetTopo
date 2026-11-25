@@ -11,6 +11,7 @@ const props = defineProps<{
   sourceName: string
   permissions: AppPermissions
   busy: boolean
+  loadingConfig: boolean
   ports?: DockerPort[]
   task?: ExecutionTask
 }>()
@@ -131,7 +132,7 @@ const resultLabel = computed(() => {
     </el-button>
     <div class="product-bottom">
       <div class="app-actions">
-        <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="app.native_install ? $emit('action', 'install') : $emit('configure')">
+        <el-button v-if="permissions.showInstall" size="small" type="primary" :loading="loadingConfig" :disabled="loadingConfig || busy || installing || !permissions.canInstall" @click="app.native_install ? $emit('action', 'install') : $emit('configure')">
           <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
         </el-button>
         <el-button v-if="permissions.showUpdate" size="small" type="primary" :disabled="busy || !permissions.canUpdate" @click="$emit('action', 'update')">

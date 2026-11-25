@@ -6,9 +6,9 @@ import { apiRequest, formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import { mergedNetworkRows, type NetworkRow } from './data'
 import NetworkNodeDetails from './NetworkNodeDetails.vue'
-import NetworkNodeLocationPicker from './NetworkNodeLocationPicker.vue'
-import { listNodeAttributes, saveNodeAttributes, type NodeAttributes } from './attributes'
-import { networkNodeAttributeKey, stableNetworkRowKey, stableNetworkRows } from './identity'
+import NetworkNodeEditor from './NetworkNodeEditor.vue'
+import { listNodeAttributes, type NodeAttributes } from './attributes'
+import { networkNodeAttributeKey, nodeEditingIssue, stableNetworkRowKey, stableNetworkRows } from './identity'
 
 const props = defineProps<{ hosts: Host[]; hostsLoading: boolean; hostsError: string }>()
 const entries = computed(() => props.hosts.filter(host => host.network_entry))
@@ -48,88 +48,23 @@ function getAttributes(row: NetworkRow): NodeAttributes | undefined {
     ? attributesByHostname.value.get(scope + '|' + row.rawHostname.toLocaleLowerCase()) : undefined)
     || attributesByKey.value.get(scope + '|' + row.id)
 }
-const editorOpen = ref(false)
-const editorSaving = ref(false)
-const locationLookingUp = ref(false)
-const editingRow = ref<NetworkRow | null>(null)
-const draft = ref<NodeAttributes>({ network_key: '', peer_id: '', hostname: '', alias: '', has_public_ip: false, public_ip: '',
-  location: { country: '', province: '', city: '', county: '', latitude: null, longitude: null } })
-const latitudeText = ref('')
-const longitudeText = ref('')
+const editingKey = ref('')
+const editingRow = computed(() => query.data.value?.find(row => row.key === editingKey.value))
 function editAttributes(row: NetworkRow) {
-  if (row.id === '—') { ElMessage.warning('该节点未报告有效节点 ID，暂无法保存属性'); return }
-  editingRow.value = row
-  const saved = getAttributes(row)
-  draft.value = saved ? { ...saved, location: { ...saved.location } } : {
-    network_key: networkNodeAttributeKey(row, hostId.value), peer_id: row.id, alias: '',
-    has_public_ip: false, public_ip: '',
-    location: { country: '', province: '', city: '', county: '', latitude: null, longitude: null }
-  }
-  // 手工属性永远与当前观测的 Peer ID 绑定，原始 hostname 用于后续稳定识别。
-  draft.value.peer_id = row.id
-  draft.value.hostname = row.rawHostname || ''
-  latitudeText.value = draft.value.location.latitude == null ? '' : String(draft.value.location.latitude)
-  longitudeText.value = draft.value.location.longitude == null ? '' : String(draft.value.location.longitude)
-  editorOpen.value = true
-}
-function chooseCandidate() {
-  if (!editingRow.value?.candidatePublicIP) return
-  draft.value.has_public_ip = true
-  draft.value.public_ip = editingRow.value.candidatePublicIP
-}
-function coordinatesFromInputs(): boolean {
-  const latRaw = latitudeText.value.trim(), lngRaw = longitudeText.value.trim()
-  if (!latRaw && !lngRaw) {
-    draft.value.location.latitude = null; draft.value.location.longitude = null; return true
-  }
-  const lat = Number(latRaw), lng = Number(lngRaw)
-  if (!latRaw || !lngRaw || !Number.isFinite(lat) || !Number.isFinite(lng) ||
-      lat < -85.05112878 || lat > 85.05112878 || lng < -180 || lng > 180) {
-    ElMessage.warning('请同时填写有效经纬度（纬度 ±85.05°，经度 ±180°）')
-    return false
-  }
-  draft.value.location.latitude = lat; draft.value.location.longitude = lng
-  return true
-}
-function onMapSelect(point: { latitude: number; longitude: number }) {
-  draft.value.location.latitude = point.latitude
-  draft.value.location.longitude = point.longitude
-  latitudeText.value = String(point.latitude)
-  longitudeText.value = String(point.longitude)
-}
-async function lookupLocation() {
-  if (!coordinatesFromInputs() || draft.value.location.latitude == null || draft.value.location.longitude == null) {
-    ElMessage.warning('请先在地图选点或输入经纬度')
+  const issue = nodeEditingIssue(row, hostId.value)
+  if (issue) { ElMessage.warning(issue); return }
+  if (!attributesQuery.isSuccess.value || !query.isSuccess.value) {
+    ElMessage.warning('路由或节点属性尚未成功读取，请刷新后重试')
     return
   }
-  locationLookingUp.value = true
-  try {
-    const { latitude, longitude } = draft.value.location
-    const params = new URLSearchParams({ format: 'jsonv2', addressdetails: '1', zoom: '16',
-      'accept-language': 'zh-CN', lat: String(latitude), lon: String(longitude) })
-    const response = await fetch('https://nominatim.openstreetmap.org/reverse?' + params.toString())
-    if (!response.ok) throw new Error('逆地理编码不可用')
-    const result = await response.json() as { address?: Record<string, string> }
-    const address = result.address || {}
-    draft.value.location.country = address.country || ''
-    draft.value.location.province = address.state || address.province || ''
-    draft.value.location.city = address.city || address.town || address.municipality || address.village || ''
-    draft.value.location.county = address.county || address.city_district || address.district || ''
-    ElMessage.success('已识别行政区划，可继续手动修改')
-  } catch { ElMessage.warning('地址解析失败，请手动填写国家、省、市、县') }
-  finally { locationLookingUp.value = false }
+  editingKey.value = row.key
 }
-async function saveAttributes() {
-  if (!coordinatesFromInputs()) return
-  editorSaving.value = true
-  try {
-    await saveNodeAttributes(draft.value)
-    await attributesQuery.refetch()
-    editorOpen.value = false
-    ElMessage.success('节点属性已保存')
-  } catch (error) { ElMessage.error(formatApiError(error)) }
-  finally { editorSaving.value = false }
-}
+watch(editingRow, row => {
+  if (!row && editingKey.value) {
+    editingKey.value = ''
+    ElMessage.warning('该节点已离开当前路由，请重新选择')
+  }
+})
 const loading = computed(() => query.isFetching.value)
 const refreshing = computed(() => query.isFetching.value && !!query.data.value)
 const error = computed(() => query.error.value ? formatApiError(query.error.value) : '')
@@ -145,7 +80,7 @@ const updatedAt = computed(() =>
   query.dataUpdatedAt.value ? new Date(query.dataUpdatedAt.value).toLocaleTimeString() : '尚未采集')
 
 // 点击整行/任意单元格切换详情；点内置展开箭头时由 expand-change 同步，避免双重切换。
-watch(hostId, () => { expandedKeys.value = [] })
+watch(hostId, () => { expandedKeys.value = []; editingKey.value = '' })
 function toggleKey(key: string) {
   expandedKeys.value = expandedKeys.value.includes(key)
     ? expandedKeys.value.filter(item => item !== key) : [...expandedKeys.value, key]
@@ -177,7 +112,7 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
           <el-option v-for="host in entries" :key="host.id" :value="host.id" :label="host.name" />
         </el-select>
         <el-input v-model="search" clearable placeholder="搜索主机名 / 虚拟 IP / 网段 / 节点 ID" aria-label="搜索网络节点" />
-        <el-button :loading="loading" @click="query.refetch()">刷新</el-button>
+        <el-button :loading="loading" @click="query.refetch(); attributesQuery.refetch()">刷新</el-button>
       </div>
 
       <el-alert v-if="error" :title="error"
@@ -270,44 +205,9 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
         本页只展示所选入口当前可见的节点；路由可见不等于设备持续在线。刷新时保持列表可见，可随时展开节点详情。
       </p>
     </template>
-    <el-dialog append-to-body v-model="editorOpen" title="编辑节点属性" width="min(760px, 96vw)" :close-on-click-modal="false">
-      <el-form label-position="top" class="node-editor">
-        <el-form-item label="节点别名">
-          <el-input v-model="draft.alias" maxlength="100" show-word-limit placeholder="自定义节点显示名称" />
-        </el-form-item>
-        <el-form-item label="是否有公网 IP">
-          <el-switch v-model="draft.has_public_ip" active-text="是" inactive-text="否" />
-        </el-form-item>
-        <el-form-item v-if="draft.has_public_ip" label="公网 IP">
-          <el-input v-model="draft.public_ip" placeholder="IPv4 或 IPv6 地址，不含端口" />
-        </el-form-item>
-        <div v-if="editingRow?.candidatePublicIP" class="candidate-ip">
-          对端地址识别候选：<code>{{ editingRow.candidatePublicIP }}</code>
-          <el-button size="small" @click="chooseCandidate">使用此 IP</el-button>
-        </div>
-        <p class="editor-note">对端地址可能指向中继服务器，不能据此保证节点拥有公网 IP；请确认后再保存。</p>
-        <h3>节点位置</h3>
-        <NetworkNodeLocationPicker :latitude="draft.location.latitude" :longitude="draft.location.longitude" @select="onMapSelect" />
-        <div class="location-coordinate-grid">
-          <el-form-item label="纬度"><el-input v-model="latitudeText" placeholder="-85.0511 至 85.0511" /></el-form-item>
-          <el-form-item label="经度"><el-input v-model="longitudeText" placeholder="-180 至 180" /></el-form-item>
-        </div>
-        <div class="location-actions">
-          <el-button @click="coordinatesFromInputs">定位到输入坐标</el-button>
-          <el-button :loading="locationLookingUp" @click="lookupLocation">根据坐标识别行政区划</el-button>
-        </div>
-        <div class="location-address-grid">
-          <el-form-item label="国家"><el-input v-model="draft.location.country" maxlength="120" /></el-form-item>
-          <el-form-item label="省 / 州"><el-input v-model="draft.location.province" maxlength="120" /></el-form-item>
-          <el-form-item label="市"><el-input v-model="draft.location.city" maxlength="120" /></el-form-item>
-          <el-form-item label="县 / 区"><el-input v-model="draft.location.county" maxlength="120" /></el-form-item>
-        </div>
-      </el-form>
-      <template #footer>
-        <el-button @click="editorOpen = false">取消</el-button>
-        <el-button type="primary" :loading="editorSaving" @click="saveAttributes">保存属性</el-button>
-      </template>
-    </el-dialog>
+    <NetworkNodeEditor v-if="editingRow" :key="editingRow.key" :entry-id="hostId" :row="editingRow"
+      :attributes="getAttributes(editingRow)" :unavailable="query.isError.value || attributesQuery.isError.value ? '读取节点数据失败，请重试后保存。' : ''"
+      @close="editingKey = ''" @saved="editingKey = ''" />
   </section>
 </template>
 
@@ -331,13 +231,6 @@ function syncExpandedRows(_row: NetworkRow, expandedRows: NetworkRow[]) {
 .network-pane::-webkit-scrollbar { width: 10px; height: 10px; }
 .network-pane::-webkit-scrollbar-thumb { background: var(--ent-scroll-thumb); border-radius: 8px; }
 .network-pane::-webkit-scrollbar-track { background: var(--ent-panel); }
-.candidate-ip { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; font-size: 13px; }
-.candidate-ip code { color: #8ccffc; }
-.editor-note { font-size: 12px; color: #8bacca; line-height: 1.5; }
-.node-editor h3 { font-size: 15px; margin: 20px 0 12px; }
-.location-coordinate-grid, .location-address-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 14px; margin-top: 16px; }
-.location-actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 0 0 14px; }
-@media (max-width: 540px) { .location-coordinate-grid, .location-address-grid { grid-template-columns: 1fr; } }
 .network-intro h2 { margin: 0; font-size: 19px; }
 .network-intro p, .network-note { color: #8bacca; font-size: 12px; line-height: 1.7; }
 .network-toolbar { display: flex; gap: 12px; margin-top: 22px; }

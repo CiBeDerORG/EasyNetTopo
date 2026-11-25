@@ -23,10 +23,12 @@ const props = defineProps<{
   loading: boolean
   statusError: string
   filter: AppFilter
-  busyKey: string
+  busyKeys: ReadonlySet<string>
+  loadingConfigKey: string
   pendingKey: string
   agentMaintenance: AgentMaintenanceState | null
   agentUpdateBusy: boolean
+  agentCanUpdate: boolean
 }>()
 
 defineEmits<{
@@ -45,7 +47,7 @@ const emptyDescriptions: Record<AppFilter, string> = {
   all: '应用目录为空',
   installed: '当前主机没有已安装应用',
   available: '当前没有未安装的应用',
-  update: '当前没有可更新的应用'
+  update: '当前没有支持更新的应用'
 }
 const hostTask = computed(() => props.host ? currentHostTask(props.tasks, props.host.id) : undefined)
 const storeScroll = ref<HTMLElement>()
@@ -80,7 +82,7 @@ const showNativeAgent = computed(() =>
   'easyhostagent'.includes(query.value) && (
     props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
     props.filter === 'available' && !props.snapshot ||
-    props.filter === 'update' && !!props.snapshot
+    props.filter === 'update' && props.agentCanUpdate
   )
 )
 const visibleApps = computed(() => props.apps.filter(app => {
@@ -183,7 +185,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           <el-radio-button label="all">全部</el-radio-button>
           <el-radio-button label="installed">已安装</el-radio-button>
           <el-radio-button label="available">未安装</el-radio-button>
-          <el-radio-button label="update">可更新</el-radio-button>
+          <el-radio-button label="update">支持更新</el-radio-button>
         </el-radio-group>
       </div>
 
@@ -204,6 +206,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :connection-error="!!snapshotError"
           :maintenance="agentMaintenance"
           :busy="agentUpdateBusy"
+          :can-update="agentCanUpdate"
           @update="$emit('agent-update', $event)"
           @resolve="agentTask && $emit('resolve-task', agentTask)"
         />
@@ -216,7 +219,8 @@ function appPorts(app: CatalogApp): DockerPort[] {
           :ports="appPorts(app)"
           :source-name="sourceName(app.source_id)"
           :permissions="getAppPermissions(app, statusByKey[appKey(app)], snapshot?.platform, !!host.agent_id)"
-          :busy="busyKey === appKey(app) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
+          :loading-config="loadingConfigKey === appKey(app)"
+          :busy="busyKeys.has(host.id + '|' + appKey(app)) || pendingKey === appKey(app) || agentMaintenance?.state === 'waiting' || taskActive(agentTask) || taskActive(cardTask(app))"
           @configure="$emit('configure', app)"
           @action="$emit('action', app, $event)"
           @info="$emit('info', app)"

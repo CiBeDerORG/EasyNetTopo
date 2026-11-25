@@ -3,7 +3,7 @@ import { useRoute } from 'vue-router'
 import NetworkNodesPane from '../../network-nodes/NetworkNodesPane.vue'
 import ServiceNavigationPane from '../../devices/ServiceNavigationPane.vue'
 import DevicesPane from '../../devices/DevicesPane.vue'
-import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, shallowRef, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { ArrowDown, CircleCheck, Delete, SwitchButton } from '@element-plus/icons-vue'
@@ -30,7 +30,7 @@ import {
   updateHost,
   setNetworkEntry
 } from '../api'
-import { appKey, canRecoverFailedUninstall, getAppPermissions } from '../rules'
+import { appKey, canRecoverFailedUninstall, getAppPermissions, recoveredUninstallStatus } from '../rules'
 import { useHostStoreData } from '../composables/useHostStoreData'
 import { currentAppTask, taskActive } from '../task-status'
 import SidebarNav from '../components/SidebarNav.vue'
@@ -244,12 +244,13 @@ const sourceSettingsOpen = ref(false)
 const sourceSaving = ref(false)
 const busySourceId = ref('')
 const deletingSourceId = ref('')
-const actionBusyKey = ref('')
-const configBusy = ref(false)
+const actionBusyKeys = reactive(new Set<string>())
+const loadingConfig = shallowRef<{ host: Host; app: CatalogApp } | null>(null)
+let hostContextVersion = 0
 const dataManagementDialogOpen = ref(false)
 const dataClearBusy = ref<'' | 'nodes' | 'devices'>('')
 const configDialogOpen = ref(false)
-const configState = ref<{ app: CatalogApp; config: AppConfig } | null>(null)
+const configState = ref<{ host: Host; app: CatalogApp; config: AppConfig } | null>(null)
 
 const configApp = computed(() => configState.value?.app || null)
 const configRevision = computed(() => configState.value?.config.revision || '')
@@ -269,17 +270,27 @@ watch(() => data.snapshotQuery.dataUpdatedAt.value, () => {
   ElMessage.info('EasyHostAgent 已重启并恢复连接；请核对发布版本及主机日志确认更新结果。')
 })
 
+const agentCanUpdate = computed(() => {
+  const host = selectedHost.value
+  if (!host?.agent_id || !snapshot.value?.agent_started_at || snapshotError.value) return false
+  const task = currentAppTask(data.tasks.value, host.id, 'native', 'easyhostagent')
+  return !agentUpdateBusy.value && !agentMaintenanceForHost.value && !taskActive(task) && task?.state !== 'interrupted'
+})
+
+let confirmingAgentUpdate = false
 async function requestAgentUpdate(action: AgentUpdateAction) {
   const host = selectedHost.value
   const startedAt = snapshot.value?.agent_started_at
-  if (!host?.agent_id || !startedAt || snapshotError.value || agentUpdateBusy.value ||
-    agentMaintenanceForHost.value?.state === 'waiting') {
+  if (confirmingAgentUpdate) return
+  if (!host || !startedAt || !agentCanUpdate.value) {
     ElMessage.warning('需先连接支持远程更新的 EasyHostAgent，并确认主机快照可用。')
     return
   }
+  const contextVersion = hostContextVersion
+  confirmingAgentUpdate = true
   try {
     await ElMessageBox.confirm(
-      '即将在主机「' + host.name + '」上执行 EasyHostAgent ' +
+      '即将在主机「' + host.name + '」（' + host.endpoint + '）上执行 EasyHostAgent ' +
       (action === 'force-update' ? '强制更新（重新下载并校验所配置 Release）' : '更新') +
       '。系统会延迟启动独立更新任务并重启 Agent，期间短暂断联属正常现象。超过 10 分钟仍未观察到重启并重新连接，页面仅提示开发人员检查日志。是否继续？',
       '确认更新 EasyHostAgent',
@@ -287,7 +298,10 @@ async function requestAgentUpdate(action: AgentUpdateAction) {
     )
   } catch {
     return
+  } finally {
+    confirmingAgentUpdate = false
   }
+  if (contextVersion !== hostContextVersion || !agentCanUpdate.value) return
   agentUpdateBusy.value = true
   try {
     const response = await queueNativeAgentUpdate(host.id, action)
@@ -319,7 +333,7 @@ const autoLinkAttempts = new Set<string>()
 const autoLinking = ref(false)
 watch(() => data.statusQuery.data.value, async rows => {
   const host = selectedHost.value
-  if (!rows?.length || !host?.agent_id || autoLinking.value || pendingAction.value || actionBusyKey.value || agentUpdating.value) return
+  if (!rows?.length || !host?.agent_id || autoLinking.value || pendingAction.value || actionBusyKeys.size || agentUpdating.value) return
   const apps = new Map(data.deployableApps.value.map(app => [appKey(app), app]))
   const candidates = rows.filter(row => row.external && row.adoptable &&
     row.blocked_reason === 'adoption_required')
@@ -361,8 +375,15 @@ watch(hosts, items => {
 watch(selectedHostId, () => {
   pendingAction.value = null
   dockerOpen.value = false
-  configDialogOpen.value = false
 })
+
+// 目标身份或工作页面变化后，先使在途配置和待确认操作失效。
+watch([selectedHostId, () => selectedHost.value?.agent_id, () => selectedHost.value?.endpoint, isStorePage, authenticated], () => {
+  hostContextVersion++
+  loadingConfig.value = null
+  configState.value = null
+  configDialogOpen.value = false
+}, { flush: 'sync' })
 
 // 即使连续重试返回相同的失败记录，也要在新一轮状态查询完成后解除等待。
 watch(() => data.statusQuery.dataUpdatedAt.value, async () => {
@@ -629,82 +650,97 @@ async function removeSource(source: CatalogSource) {
 
 async function openInstallConfig(app: CatalogApp) {
   if (app.app_id === 'easynettopo') return
-  if (!selectedHost.value?.agent_id) {
-    ElMessage.warning('请先选择并配对一台主机。')
-    return
-  }
-  configBusy.value = true
-  try {
-    const config = await getAppConfig(app)
-    configState.value = { app, config }
-    configDialogOpen.value = true
-  } catch (error) {
-    ElMessage.error('无法读取安装配置：' + errorMessage(error))
-  } finally {
-    configBusy.value = false
-  }
-}
-
-function permissionsFor(app: CatalogApp) {
-  return getAppPermissions(app, data.statusByKey.value[appKey(app)], snapshot.value?.platform, !!selectedHost.value?.agent_id)
-}
-
-async function handleAppAction(app: CatalogApp, action: AppAction) {
-  const permissions = permissionsFor(app)
-  if (action === 'install' && (!app.native_install || !permissions.canInstall)) return
-  if (action === 'update' && !permissions.canUpdate) return
-  if (action === 'uninstall' && !permissions.canUninstall) return
-  if (action === 'adopt' && !permissions.canAdopt) return
-  if (action === 'force_update' && !permissions.canForceUpdate) return
-
-  if (action === 'uninstall') {
-    try {
-      await ElMessageBox.confirm(
-        '将在主机「' + (selectedHost.value?.name || '') + '」上卸载「' + app.name +
-          '」。默认保留持久化数据。请确认目标主机和应用正确。',
-        '确认卸载',
-        { type: 'warning', confirmButtonText: '确认卸载', cancelButtonText: '取消' }
-      )
-    } catch {
-      return
-    }
-  } else if (action === 'force_update') {
-    try {
-      await ElMessageBox.confirm(
-        '仅适用于归属明确的受管应用，或已核验原 Deploy 目录的旧项目。Agent 会校验固定来源应用包；已有受管项目重新执行更新脚本，缺失旧脚本时安全修复后再更新。\n\n不会主动清除 .env、.secrets 和持久化数据；如项目归属不符、路径不安全或主机配对失效，Agent 会拒绝执行。更新可能重建容器，请事先备份数据。',
-        '确认强制更新',
-        { type: 'warning', confirmButtonText: '确认强制更新', cancelButtonText: '取消' }
-      )
-    } catch {
-      return
-    }
-
-  }
-  await runAppAction(app, action)
-}
-
-async function runAppAction(
-  app: CatalogApp,
-  action: AppAction,
-  install?: { revision: string; config: Record<string, string> }
-) {
-  if (app.app_id === 'easynettopo' && action !== 'update') return
   const host = selectedHost.value
   if (!host?.agent_id) {
     ElMessage.warning('请先选择并配对一台主机。')
     return
   }
-  const key = appKey(app)
-  setRecovered(host.id, key, false)
-  actionBusyKey.value = key
+  if (loadingConfig.value?.host.id === host.id && appKey(loadingConfig.value.app) === appKey(app)) return
+  const request = { host, app }
+  loadingConfig.value = request
   try {
+    const config = await getAppConfig(app)
+    if (loadingConfig.value !== request) return
+    configState.value = { host, app, config }
+    configDialogOpen.value = true
+  } catch (error) {
+    if (loadingConfig.value === request) ElMessage.error('无法读取安装配置：' + errorMessage(error))
+  } finally {
+    if (loadingConfig.value === request) loadingConfig.value = null
+  }
+}
+
+function actionAllowed(app: CatalogApp, action: AppAction) {
+  const key = appKey(app)
+  let row = data.statusByKey.value[key]
+  if (row && recoveredUninstallCards.value.includes(selectedHostId.value + '|' + key) &&
+    canRecoverFailedUninstall(row, dockerInventory.value, app.app_id)) {
+    row = recoveredUninstallStatus(row)
+  }
+  const permissions = getAppPermissions(app, row, snapshot.value?.platform, !!selectedHost.value?.agent_id)
+  return {
+    install: permissions.canInstall,
+    update: permissions.canUpdate,
+    uninstall: permissions.canUninstall,
+    adopt: permissions.canAdopt,
+    force_update: permissions.canForceUpdate
+  }[action]
+}
+
+function isCurrentTarget(host: Host) {
+  const current = selectedHost.value
+  return authenticated.value && current?.id === host.id && current.agent_id === host.agent_id && current.endpoint === host.endpoint
+}
+
+function handleAppAction(app: CatalogApp, action: AppAction) {
+  const host = selectedHost.value
+  if (!host || (action === 'install' && !app.native_install)) return
+  return runAppAction(host, app, action)
+}
+
+async function runAppAction(
+  host: Host,
+  app: CatalogApp,
+  action: AppAction,
+  install?: { revision: string; config: Record<string, string> }
+) {
+  if (app.app_id === 'easynettopo' && action !== 'update') return
+  if (!isCurrentTarget(host) || !host.agent_id || !actionAllowed(app, action)) return
+  const key = appKey(app)
+  const targetKey = host.id + '|' + key
+  if (actionBusyKeys.has(targetKey)) return
+  actionBusyKeys.add(targetKey)
+  const contextVersion = hostContextVersion
+  try {
+    if (action === 'uninstall' || action === 'force_update') {
+      const name = actionName(action)
+      const details = action === 'uninstall'
+        ? '默认保留持久化数据。'
+        : 'Agent 将校验固定来源的应用包并执行更新，必要时修复旧脚本。更新可能重建容器，保留现有配置和持久化数据。'
+      try {
+        await ElMessageBox.confirm(
+          '将在主机「' + host.name + '」（' + host.endpoint + '）上' + name + '「' + app.name + '」。' + details,
+          '确认' + name,
+          { type: 'warning', confirmButtonText: '确认' + name, cancelButtonText: '取消' }
+        )
+      } catch {
+        return
+      }
+      if (contextVersion !== hostContextVersion || !actionAllowed(app, action)) return
+    }
+    setRecovered(host.id, key, false)
     const payload = action === 'install' && install
       ? { source_id: app.source_id, app_id: app.app_id, revision: install.revision, config: install.config }
       : action === 'install' || action === 'update' || action === 'adopt' || action === 'force_update'
         ? { source_id: app.source_id, app_id: app.app_id, revision: app.revision }
         : { source_id: app.source_id, app_id: app.app_id }
     const accepted = await executeAppAction(host.id, action, payload)
-    configDialogOpen.value = false
+    if (!isCurrentTarget(host)) {
+      ElMessage.info('主机「' + host.name + '」上的「' + app.name + '」请求已返回，请在该主机查看执行结果。')
+      await data.tasksQuery.refetch()
+      return
+    }
+    if (install && configState.value?.host.id === host.id && appKey(configState.value.app) === key) configDialogOpen.value = false
     if (action === 'update' && accepted.accepted) {
       ElMessage.info(app.name + ' 更新任务已加入队列，后台将自动执行。')
       await data.tasksQuery.refetch()
@@ -730,20 +766,24 @@ async function runAppAction(
     await data.statusQuery.refetch()
     if (accepted.result === 'succeeded' && !app.native_install) await data.dockerQuery.refetch()
   } catch (error) {
+    if (!isCurrentTarget(host)) {
+      ElMessage.error('主机「' + host.name + '」上的「' + app.name + '」' + actionName(action) + '失败：' + errorMessage(error))
+      return
+    }
     const restored = action === 'uninstall' && await recoverFailedUninstall(host.id, app)
     if (restored) ElMessage.warning(app.name + ' 卸载指令失败，但远端已确认无应用资源；卡片已恢复待安装')
     else ElMessage.error(app.name + ' ' + actionName(action) + '失败：' + errorMessage(error) +
       (action === 'uninstall' ? '；资源仍存在或状态未确认，保留实际状态' : ''))
     if (action !== 'uninstall') await data.statusQuery.refetch()
   } finally {
-    actionBusyKey.value = ''
+    actionBusyKeys.delete(targetKey)
   }
 }
 
 async function submitInstallConfig(payload: { revision: string; config: Record<string, string> }) {
-  const app = configState.value?.app
-  if (!app) return
-  await runAppAction(app, 'install', payload)
+  const state = configState.value
+  if (!configDialogOpen.value || !state || state.config.revision !== payload.revision) return
+  await runAppAction(state.host, state.app, 'install', payload)
 }
 
 function showAppInfo(app: CatalogApp) {
@@ -948,10 +988,12 @@ async function logout() {
           :loading="marketLoading"
           :status-error="statusError"
           :filter="ui.appFilter"
-          :busy-key="actionBusyKey"
+          :busy-keys="actionBusyKeys"
+          :loading-config-key="loadingConfig ? appKey(loadingConfig.app) : ''"
           :pending-key="pendingKey"
           :agent-maintenance="agentMaintenanceForHost"
           :agent-update-busy="agentUpdateBusy"
+          :agent-can-update="agentCanUpdate"
           @settings="sourceSettingsOpen = true"
           @agent-update="requestAgentUpdate"
           @filter-change="ui.appFilter = $event"
@@ -991,10 +1033,11 @@ async function logout() {
     />
     <AppConfigDialog
       v-model="configDialogOpen"
+      :host="configState?.host || null"
       :app="configApp"
       :revision="configRevision"
       :fields="configFields"
-      :saving="configBusy || !!actionBusyKey"
+      :saving="!!configState && actionBusyKeys.has(configState.host.id + '|' + appKey(configState.app))"
       @submit="submitInstallConfig"
     />
     <el-dialog

@@ -2,10 +2,11 @@
 import { computed, ref, watch } from 'vue'
 import { ElMessage } from 'element-plus'
 import { validateAppConfig, appConfigInput, isConfigFieldVisible } from '../validation'
-import type { CatalogApp, ConfigField } from '../types'
+import type { CatalogApp, ConfigField, Host } from '../types'
 
 const props = defineProps<{
   modelValue: boolean
+  host: Host | null
   app: CatalogApp | null
   revision: string
   fields: ConfigField[]
@@ -52,6 +53,7 @@ function submit() {
   <el-dialog :model-value="modelValue" :title="'安装配置 · ' + (app?.name || '')"
     width="min(600px, calc(100vw - 28px))" append-to-body :close-on-click-modal="false"
     @update:model-value="emit('update:modelValue', $event)">
+    <p v-if="host" class="config-target">目标主机 <strong>{{ host.name }}</strong>（{{ host.endpoint }}）</p>
     <p class="config-intro">以下参数由应用清单定义。密钥只会提交给 EasyNetTopo 服务端，并通过已配对 Agent 发送给目标主机。</p>
     <el-form v-if="visibleFields.length" label-position="top">
       <el-form-item v-for="field in visibleFields" :key="field.key" :label="field.label" :required="field.required" :error="errors[field.key]">
@@ -105,6 +107,7 @@ function submit() {
 </template>
 
 <style scoped>
+.config-target { margin: 0 0 8px; overflow-wrap: anywhere; font-size: 13px; }
 .config-intro { margin: 0 0 18px; color: var(--ent-muted); font-size: 11px; line-height: 1.7; }
 .full-width { width: 100%; }
 .field-help { margin-top: 5px; color: var(--ent-dim); font-size: 10px; line-height: 1.5; }

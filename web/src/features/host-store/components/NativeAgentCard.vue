@@ -18,6 +18,7 @@ const props = defineProps<{
   connectionError: boolean
   maintenance: AgentMaintenanceState | null
   busy: boolean
+  canUpdate: boolean
 }>()
 
 const emit = defineEmits<{
@@ -140,12 +141,12 @@ async function showInstallCommand() {
       <el-button v-if="!paired" size="small" type="primary" @click="showInstallCommand">
         <el-icon><Download /></el-icon>安装
       </el-button>
-      <el-button size="small" type="primary" :loading="busy" :disabled="!connected || !!maintenance || !!task && (taskActive(task) || task.state === 'interrupted') || busy"
+      <el-button size="small" type="primary" :loading="busy" :disabled="!canUpdate"
         @click="emit('update', 'update')"><el-icon><Refresh /></el-icon>更新</el-button>
       <el-button size="small" :disabled="!connected || !!maintenance || busy" @click="openDriverSettings">
         <el-icon><Setting /></el-icon>设置
       </el-button>
-      <el-button size="small" type="warning" :disabled="!connected || !!maintenance || busy"
+      <el-button size="small" type="warning" :disabled="!canUpdate"
         @click="emit('update', 'force-update')"><el-icon><Lightning /></el-icon>强制更新</el-button>
     </div>
     <el-dialog v-model="settingsOpen" title="EasyHostAgent · Driver 设置" width="440px" append-to-body>

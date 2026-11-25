@@ -2,7 +2,7 @@
 import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage, ElMessageBox, type ButtonInstance } from 'element-plus'
 import { Refresh, Search, Delete, Connection, Monitor, Iphone, Box, Link } from '@element-plus/icons-vue'
 import { formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
@@ -138,6 +138,7 @@ const filteredDevices = computed(() => {
     device.note, device.peer_id, device.network_key, ...(device.semantic_kinds || [])
   ].some(value => (value || '').toLocaleLowerCase().includes(keyword)))
 })
+const matchedIds = computed(() => new Set(filteredDevices.value.map(device => device.id)))
 const nodeDevices = computed(() => filteredDevices.value.filter(device => device.is_node_device))
 const discoveryStatusOrder: Record<Device['discovery_status'], number> = { online: 0, offline: 1, unknown: 2 }
 const gatewayGroupSections = computed(() => gatewayGroups.value
@@ -148,7 +149,7 @@ const gatewayGroupSections = computed(() => gatewayGroups.value
       .sort((a, b) => (discoveryStatusOrder[a.discovery_status] ?? discoveryStatusOrder.unknown) -
         (discoveryStatusOrder[b.discovery_status] ?? discoveryStatusOrder.unknown))
     const gatewayDevice = devices.value.find(device => device.id === group.gateway_device_id)
-    const gatewayMatchesSearch = !!gatewayDevice && filteredDevices.value.some(device => device.id === gatewayDevice.id)
+    const gatewayMatchesSearch = !!gatewayDevice && matchedIds.value.has(gatewayDevice.id)
     return { ...group, items, gatewayDevice, gatewayMatchesSearch }
   })
   .filter(group => !!group.gatewayDevice &&
@@ -176,26 +177,53 @@ const deviceSections = computed<DeviceSection[]>(() => {
   return result
 })
 
+const collapsedGroups = ref<string[]>([])
+const collapsedSearchGroups = ref<string[]>([])
+const collapsed = computed({
+  get: () => search.value.trim() ? collapsedSearchGroups.value : collapsedGroups.value,
+  set: (ids: string[]) => {
+    if (search.value.trim()) collapsedSearchGroups.value = ids
+    else collapsedGroups.value = ids
+  }
+})
+watch(search, () => { collapsedSearchGroups.value = [] })
+watch(selectedNodeKey, () => {
+  collapsedGroups.value = []
+  collapsedSearchGroups.value = []
+})
+function toggleGroup(id: string) {
+  collapsed.value = collapsed.value.includes(id)
+    ? collapsed.value.filter(value => value !== id) : [...collapsed.value, id]
+}
 
-const selectableDevices = computed(() => filteredDevices.value)
-const allFilteredSelected = computed(() => selectableDevices.value.length > 0 &&
-  selectableDevices.value.every(device => selectedDeviceIds.value.includes(device.id)))
+// 上级网关可用于说明归属，但只有当前显示且命中筛选的设备才能参与批量操作。
+const selectableIds = computed(() => {
+  const ids = new Set<string>()
+  for (const section of deviceSections.value) {
+    if (section.gatewayDevice && matchedIds.value.has(section.gatewayDevice.id)) ids.add(section.gatewayDevice.id)
+    if (!collapsed.value.includes(section.id)) {
+      for (const device of section.items) ids.add(device.id)
+    }
+  }
+  return ids
+})
+watch(selectableIds, ids => {
+  selectedDeviceIds.value = selectedDeviceIds.value.filter(id => ids.has(id))
+})
+const selectedDevices = computed(() => {
+  const selectedIds = new Set(selectedDeviceIds.value)
+  return filteredDevices.value.filter(device => selectableIds.value.has(device.id) && selectedIds.has(device.id))
+})
+const allFilteredSelected = computed(() => selectableIds.value.size > 0 &&
+  selectedDevices.value.length === selectableIds.value.size)
 function toggleDeviceSelection(id: string, checked: boolean) {
+  if (!selectableIds.value.has(id)) return
   selectedDeviceIds.value = checked
     ? [...new Set([...selectedDeviceIds.value, id])]
     : selectedDeviceIds.value.filter(value => value !== id)
 }
 function toggleSelectAll(checked: boolean) {
-  const visible = selectableDevices.value.map(device => device.id)
-  selectedDeviceIds.value = checked
-    ? [...new Set([...selectedDeviceIds.value, ...visible])]
-    : selectedDeviceIds.value.filter(id => !visible.includes(id))
-}
-const collapsed = ref<string[]>([])
-watch(selectedNodeKey, () => { collapsed.value = [] })
-function toggleGroup(id: string) {
-  collapsed.value = collapsed.value.includes(id)
-    ? collapsed.value.filter(value => value !== id) : [...collapsed.value, id]
+  selectedDeviceIds.value = checked ? [...selectableIds.value] : []
 }
 const semanticKindLabels: Record<string, string> = {
   router: '路由器', server: '服务器', openwrt: 'OpenWrt', phone: '手机', computer: '电脑',
@@ -213,8 +241,7 @@ function deviceIcon(device: Device) {
 function isOpenWrtDevice(device: Pick<Device, 'semantic_kinds'>) {
   return (device.semantic_kinds || []).includes('openwrt')
 }
-const gatewayCount = computed(() => gatewayGroups.value.filter(group => !!group.gateway_device_id).length)
-const deviceAssetCount = computed(() => filteredDevices.value.filter(device => !device.is_node_device).length)
+const gatewayCount = computed(() => filteredDevices.value.filter(device => device.is_gateway && selectableIds.value.has(device.id)).length)
 const networkNodeSyncEnabled = computed(() => networkNodeSyncQuery.data.value?.enabled === true)
 
 const serviceDevice = ref<Device | null>(null)
@@ -372,15 +399,27 @@ async function deleteNodeBaseDevice(device: Device) {
     if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
   }
 }
+const deleteDialogOpen = ref(false)
+const deleteTargets = ref<Device[]>([])
+const deletingDevices = ref(false)
+const cancelDeleteButton = ref<ButtonInstance>()
+const deleteNodeCount = computed(() => deleteTargets.value.filter(device => device.is_node_device).length)
+function reviewSelectedDevices() {
+  if (!selectedDevices.value.length || deletingDevices.value) return
+  deleteTargets.value = [...selectedDevices.value]
+  deleteDialogOpen.value = true
+}
 async function deleteSelectedDevices() {
-  const ids = [...selectedDeviceIds.value]
-  if (!ids.length) return
+  if (!deleteDialogOpen.value || deletingDevices.value || !deleteTargets.value.length) return
+  const ids = deleteTargets.value.map(device => device.id)
+  const eligible = new Set(selectedDevices.value.map(device => device.id))
+  if (ids.some(id => !eligible.has(id))) {
+    deleteDialogOpen.value = false
+    ElMessage.warning('设备选择已变化，请重新核对删除范围')
+    return
+  }
+  deletingDevices.value = true
   try {
-    const nodeCount = devices.value.filter(device => ids.includes(device.id) && device.is_node_device).length
-    await ElMessageBox.confirm(
-      '确定删除当前选中的 ' + ids.length + ' 台设备？所选设备的服务登记也会删除。' +
-      (nodeCount ? '其中有 ' + nodeCount + ' 台节点基础设备；删除不会影响 EasyTier 节点，也不会删除同节点的其他设备。若基础设备本身是网关，其下挂设备将提升为直属设备。该原主机名的基础设备不会被后台自动重新创建。' : '只删除设备登记及各自的 OpenWrt 配置，不会删除 EasyTier 网络节点。'),
-      '批量删除设备', { type: 'warning', confirmButtonText: '删除所选设备', cancelButtonText: '取消' })
     const results = await Promise.allSettled(ids.map(id => deleteDevice(id)))
     const succeeded = ids.filter((_, index) => results[index].status === 'fulfilled')
     const failed = ids.filter((_, index) => results[index].status === 'rejected')
@@ -388,14 +427,15 @@ async function deleteSelectedDevices() {
     await queryClient.invalidateQueries({ queryKey: ['devices'] })
     await queryClient.invalidateQueries({ queryKey: ['device-node-devices'] })
     await queryClient.invalidateQueries({ queryKey: ['gateway-groups'] })
-    if (failed.length) ElMessage.warning('已删除 ' + succeeded.length + ' 台，失败 ' + failed.length + ' 台；失败项仍保留在选择中')
+    if (failed.length) ElMessage.warning('已删除 ' + succeeded.length + ' 台，失败 ' + failed.length + ' 台；请核对后重试失败项')
     else ElMessage.success('已删除 ' + succeeded.length + ' 台设备')
   } catch (error) {
-    if (error !== 'cancel' && error !== 'close') ElMessage.error(formatApiError(error))
+    ElMessage.error(formatApiError(error))
+  } finally {
+    deletingDevices.value = false
+    deleteDialogOpen.value = false
   }
 }
-
-
 
 const discoveryDialogOpen = ref(false)
 const discoveryTarget = ref<Device | null>(null)
@@ -619,12 +659,12 @@ watch(
         <template #prefix><el-icon><Search /></el-icon></template>
       </el-input>
       <div class="devices-summary">
-        <span>{{ deviceAssetCount }} 台设备</span>
-        <span>{{ gatewayCount }} 个网关设备</span>
-        <el-checkbox :model-value="allFilteredSelected" :disabled="!selectableDevices.length"
-          :indeterminate="selectedDeviceIds.length > 0 && !allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
-        <el-button v-if="selectedDeviceIds.length" type="danger" plain size="small" @click="deleteSelectedDevices">
-          <el-icon><Delete /></el-icon>删除所选 {{ selectedDeviceIds.length }} 台
+        <span>显示 {{ selectableIds.size }} 台设备</span>
+        <span v-if="gatewayCount">含 {{ gatewayCount }} 台网关</span>
+        <el-checkbox :model-value="allFilteredSelected" :disabled="!selectableIds.size"
+          :indeterminate="selectedDevices.length > 0 && !allFilteredSelected" @update:model-value="toggleSelectAll">全选显示的设备</el-checkbox>
+        <el-button v-if="selectedDevices.length" type="danger" plain size="small" @click="reviewSelectedDevices">
+          <el-icon><Delete /></el-icon>删除所选 {{ selectedDevices.length }} 台
         </el-button>
       </div>
     </div>
@@ -650,7 +690,7 @@ watch(
       <div v-for="section in deviceSections" :key="section.id" class="device-group">
         <div class="group-heading">
           <div v-if="section.gatewayDevice" class="gateway-heading-main">
-            <el-checkbox class="gateway-heading-select"
+            <el-checkbox class="gateway-heading-select" :disabled="!selectableIds.has(section.gatewayDevice.id)"
               :model-value="selectedDeviceIds.includes(section.gatewayDevice.id)"
               :aria-label="'选择设备 ' + section.gatewayDevice.name"
               @update:model-value="toggleDeviceSelection(section.gatewayDevice.id, $event)" />
@@ -755,6 +795,24 @@ watch(
         <el-button @click="search = ''">清除搜索</el-button>
       </el-empty>
     </template>
+
+    <el-dialog v-model="deleteDialogOpen" title="确认批量删除设备" width="min(500px, 94vw)" append-to-body destroy-on-close
+      :show-close="!deletingDevices" :close-on-click-modal="!deletingDevices" :close-on-press-escape="!deletingDevices"
+      @opened="cancelDeleteButton?.ref?.focus()">
+      <p class="delete-impact">将删除以下 {{ deleteTargets.length }} 台设备的登记、服务记录及 OpenWrt 配置。</p>
+      <p v-if="deleteNodeCount" class="delete-impact">其中 {{ deleteNodeCount }} 台为节点基础设备，删除后不会自动补回。实际 EasyTier 节点会保留。</p>
+      <p v-if="deleteTargets.some(device => device.is_gateway)" class="delete-impact">所选网关中未勾选的下挂设备会保留，并提升到上一级。</p>
+      <ul class="delete-target-list">
+        <li v-for="device in deleteTargets" :key="device.id">
+          <strong>{{ device.name }}</strong>
+          <span>{{ device.ip_address || serviceDeviceNetworkIP(device) || device.mac_address || '暂无地址' }}</span>
+        </li>
+      </ul>
+      <template #footer>
+        <el-button ref="cancelDeleteButton" :disabled="deletingDevices" @click="deleteDialogOpen = false">取消</el-button>
+        <el-button type="danger" :loading="deletingDevices" @click="deleteSelectedDevices">删除 {{ deleteTargets.length }} 台设备</el-button>
+      </template>
+    </el-dialog>
 
     <el-dialog append-to-body v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '新增设备'" width="min(620px, 94vw)" destroy-on-close>
       <el-form label-position="top" @submit.prevent="saveDeviceRecord">
@@ -934,6 +992,10 @@ watch(
 .device-note { margin:10px 0 0; color:var(--ent-muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .openwrt-status { display:flex; align-items:center; gap:7px; margin-top:12px; padding:8px 10px; border:1px solid var(--ent-detail-line); border-radius:8px; background:var(--ent-detail-bg); color:var(--ent-detail-accent); font-size:11px; }
 .openwrt-endpoint { margin-left:auto; color:var(--ent-muted); }
+.delete-impact { margin:0 0 10px; }
+.delete-target-list { display:grid; gap:6px; margin:0; padding:0; list-style:none; }
+.delete-target-list li { display:flex; flex-wrap:wrap; align-items:baseline; justify-content:space-between; gap:4px 12px; padding:8px 10px; background:var(--ent-panel-2); border-radius:8px; overflow-wrap:anywhere; }
+.delete-target-list span { color:var(--ent-muted); font-variant-numeric:tabular-nums; }
 .devices-loading { padding:18px; }
 .empty-initialize { display:flex; align-items:center; flex-direction:column; gap:10px; }
 .empty-initialize p { margin:0; color:var(--ent-muted); font-size:12px; text-align:center; }

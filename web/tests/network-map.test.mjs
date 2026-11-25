@@ -1,5 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { nodeEditingIssue } from '../src/features/network-nodes/identity.ts'
 import { buildMapTopology, curveSeparationMeters, linkCurveLanes, trafficRates } from '../src/features/network-map/topology.ts'
 
 const route = {
@@ -157,6 +158,9 @@ test('地图节点和连线 identity 随 Peer ID 变更保持稳定，坐标继�
   const newNAS = updated.nodes.find(item => item.hostname === 'FnOS')
   assert.equal(newNAS?.key, oldNAS?.key)
   assert.equal(newNAS?.label, '家用 NAS')
+  assert.equal(nodeEditingIssue(newNAS.row, 'entry-one'), '')
+  assert.equal(newNAS.row.id, '1200')
+  assert.equal(newNAS.attributes.alias, '家用 NAS')
   assert.equal(newNAS?.latitude, 35.2)
   assert.equal(newNAS?.longitude, 139.6)
   assert.deepEqual(updated.links.map(item => item.key), original.links.map(item => item.key))
@@ -175,6 +179,7 @@ test('地图同网络原始主机名冲突时不得将两个节点或坐标合�
   const named = graph.nodes.filter(item => item.hostname.toLowerCase() === 'fnos')
   assert.equal(named.length, 2)
   assert.notEqual(named[0].key, named[1].key)
+  for (const node of named) assert.match(nodeEditingIssue(node.row, 'entry'), /身份冲突/)
   // 有歧义时禁止把同一个历史坐标无条件应用于两个节点。
   assert.equal(named.filter(item => item.latitude !== null).length, 1)
 })

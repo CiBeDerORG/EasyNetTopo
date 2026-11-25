@@ -4,6 +4,8 @@ import { networkNodeAttributeKey, stableNetworkRows } from '../network-nodes/ide
 
 export type MapLinkKind = 'p2p' | 'relay' | 'unknown'
 export type MapNode = {
+  row: NetworkRow
+  attributes?: NodeAttributes
   key: string
   id: string
   instanceID: string
@@ -254,6 +256,7 @@ export function buildMapTopology(
       || attrs.get(scope + '|' + row.id)
     const positioned = isValidLocation(attr)
     return {
+      row, attributes: attr,
       key: row.key, id: row.id, instanceID: row.instanceID, instance: row.instance,
       networkKey: row.networkKey, hostname: row.hostname,
       label: attr?.alias || row.hostname, ip: row.cidr,

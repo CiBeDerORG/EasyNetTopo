@@ -38,3 +38,10 @@ export function stableNetworkRows(rows: NetworkRow[], entryHostId: string): Netw
     }
   })
 }
+
+export function nodeEditingIssue(row: NetworkRow, entryId: string): string {
+  if (!row.id || row.id === '—') return '该节点尚未报告有效节点 ID。'
+  // 保存接口按网络作用域和原始主机名换绑 Peer ID，同名冲突时不能只靠运行时 ID 写入。
+  if (row.key !== stableNetworkRowKey(row, entryId)) return '当前网络内存在身份冲突，请先确认节点主机名。'
+  return ''
+}

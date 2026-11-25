@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { Compass, Connection, House, Link, Search, Setting, TopRight } from '@element-plus/icons-vue'
 import { formatApiError } from '../../lib/api-client'
@@ -15,6 +15,9 @@ const servicesQuery = useQuery({ queryKey: navigationServicesKey, queryFn: ({ si
 const devicesQuery = useQuery({ queryKey: ['devices', '__all__'], queryFn: () => getDevices(), retry: 0 })
 const devices = computed(() => devicesQuery.data.value ?? [])
 const filter = ref('')
+watch(devicesQuery.data, items => {
+  if (items && filter.value && !items.some(device => device.id === filter.value)) filter.value = ''
+})
 const search = ref('')
 const managing = ref(false)
 const servicesOpen = ref(false)
@@ -37,16 +40,20 @@ const cards = computed(() => {
 const filters = computed(() => {
   const counts = new Map<string, number>()
   for (const { device } of cards.value) counts.set(device.id, (counts.get(device.id) ?? 0) + 1)
-  const groups = devices.value.filter(device => counts.has(device.id)).map(device => ({
-    id: device.id, name: device.name, count: counts.get(device.id)
-  }))
+  const groups = devices.value
+    .filter(device => device.id === filter.value || counts.has(device.id))
+    .map(device => ({ id: device.id, name: device.name, count: counts.get(device.id) ?? 0 }))
   return [{ id: '', name: '全部设备', count: cards.value.length }, ...groups]
 })
-const activeFilter = computed(() => filters.value.some(item => item.id === filter.value) ? filter.value : '')
+const emptyDevice = computed(() => filters.value.find(item => item.id && item.id === filter.value && item.count === 0))
+const emptyDescription = computed(() => {
+  if (emptyDevice.value) return emptyDevice.value.name + ' · 0 个导航服务'
+  return cards.value.length ? '没有符合条件的服务' : '在设备的服务列表中开启导航后，服务会出现在这里。'
+})
 const visibleCards = computed(() => {
   const query = search.value.trim().toLocaleLowerCase()
   return cards.value.filter(({ service, device }) =>
-    (!activeFilter.value || activeFilter.value === device.id) &&
+    (!filter.value || filter.value === device.id) &&
     [service.name, service.note, device.name].some(value => value.toLocaleLowerCase().includes(query)))
 })
 const loading = computed(() => servicesQuery.isPending.value || devicesQuery.isPending.value)
@@ -72,8 +79,8 @@ function retry() {
           <h2>服务导航</h2>
           <p>快速访问已开启导航的设备服务。</p>
         </div>
-        <el-button v-if="activeFilter" type="primary" plain :icon="Setting" @click="openServices(activeFilter)">管理该设备服务</el-button>
-        <el-popover v-else v-model:visible="managing" placement="bottom-end" trigger="click" :width="252">
+        <el-button v-if="filter && !emptyDevice" type="primary" plain :icon="Setting" @click="openServices(filter)">管理该设备服务</el-button>
+        <el-popover v-else-if="!filter" v-model:visible="managing" placement="bottom-end" trigger="click" :width="252">
           <template #reference>
             <el-button type="primary" plain :icon="Setting" :disabled="!devices.length">管理导航</el-button>
           </template>
@@ -90,8 +97,8 @@ function retry() {
       <template v-else>
         <div class="navigation-toolbar">
           <el-input v-model="search" class="navigation-search" :prefix-icon="Search" clearable placeholder="搜索服务或设备" aria-label="搜索服务或设备" />
-          <el-select :model-value="activeFilter" filterable :empty-values="[null, undefined]" class="navigation-filter" aria-label="按设备筛选"
-            placeholder="全部设备" @update:model-value="filter = $event">
+          <el-select v-model="filter" filterable :empty-values="[null, undefined]" class="navigation-filter" aria-label="按设备筛选"
+            placeholder="全部设备">
             <el-option v-for="item in filters" :key="item.id" :value="item.id" :label="item.name + '（' + item.count + '）'" />
           </el-select>
         </div>
@@ -117,9 +124,10 @@ function retry() {
             </div>
           </article>
         </div>
-        <el-empty v-else :description="cards.length ? '没有符合条件的服务' : '在设备的服务列表中开启导航后，服务会出现在这里。'" :image-size="65">
+        <el-empty v-else :description="emptyDescription" :image-size="65">
           <template #image><el-icon class="empty-icon"><Compass /></el-icon></template>
-          <el-button v-if="cards.length" @click="search = ''; filter = ''">清除筛选</el-button>
+          <el-button v-if="emptyDevice" type="primary" :icon="Setting" @click="openServices(filter)">管理该设备服务</el-button>
+          <el-button v-else-if="cards.length" @click="search = ''">清除搜索</el-button>
           <el-button v-else type="primary" @click="$router.push('/devices')">前往设备列表</el-button>
         </el-empty>
       </template>
