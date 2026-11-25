@@ -1,6 +1,6 @@
 <script setup lang="ts">
-import { computed } from 'vue'
-import { Box, CircleCheck, Download, TrendCharts } from '@element-plus/icons-vue'
+import { computed, ref, watch } from 'vue'
+import { Box, Search, Setting } from '@element-plus/icons-vue'
 import AppCard from './AppCard.vue'
 import NativeAgentCard from './NativeAgentCard.vue'
 import { appKey, canRecoverFailedUninstall, getAppPermissions, isInstalledStatus, recoveredUninstallStatus } from '../rules'
@@ -31,12 +31,25 @@ const props = defineProps<{
 
 defineEmits<{
   'filter-change': [filter: AppFilter]
+  settings: []
   configure: [app: CatalogApp]
   action: [app: CatalogApp, action: AppAction]
   info: [app: CatalogApp]
   'resolve-task': [task: ExecutionTask]
   'agent-update': [action: AgentUpdateAction]
 }>()
+
+const search = ref('')
+const query = computed(() => search.value.trim().toLocaleLowerCase())
+const emptyDescriptions: Record<AppFilter, string> = {
+  all: '应用目录为空',
+  installed: '当前主机没有已安装应用',
+  available: '当前没有未安装的应用',
+  update: '当前没有可更新的应用'
+}
+const hostTask = computed(() => props.host ? currentHostTask(props.tasks, props.host.id) : undefined)
+const storeScroll = ref<HTMLElement>()
+watch(() => props.host?.id, () => storeScroll.value?.scrollTo({ top: 0 }), { flush: 'post' })
 
 function recovered(row: AppStatus): boolean {
   return !!props.host &&
@@ -64,11 +77,14 @@ const agentState = computed(() => {
   return { label: '已配对', type: 'info' as const }
 })
 const showNativeAgent = computed(() =>
-  props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
-  props.filter === 'available' && !props.snapshot ||
-  props.filter === 'update' && !!props.snapshot
+  'easyhostagent'.includes(query.value) && (
+    props.filter === 'all' || props.filter === 'installed' && !!props.snapshot ||
+    props.filter === 'available' && !props.snapshot ||
+    props.filter === 'update' && !!props.snapshot
+  )
 )
 const visibleApps = computed(() => props.apps.filter(app => {
+  if (query.value && ![app.name, app.app_id].some(value => value.toLocaleLowerCase().includes(query.value))) return false
   const row = statusByKey.value[appKey(app)]
   const permissions = getAppPermissions(app, row, props.snapshot?.platform, !!props.host?.agent_id)
   if (props.filter === 'installed') return !!row && isInstalledStatus(row)
@@ -105,32 +121,34 @@ function appPorts(app: CatalogApp): DockerPort[] {
 <template>
   <section class="store-panel" aria-label="主机应用商店">
     <div v-if="!host" class="store-empty">
-      <el-empty description="请先添加并选择一台主机" :image-size="110" />
+      <el-empty description="请先添加并选择一台主机" :image-size="110">
+        <el-button :icon="Setting" @click="$emit('settings')">应用源设置</el-button>
+      </el-empty>
     </div>
-    <div v-else class="store-scroll">
+    <div v-else ref="storeScroll" class="store-scroll">
       <div class="selected-host">
         <div class="selected-heading">
           <div class="selected-icon"><el-icon><Box /></el-icon></div>
           <div class="selected-info">
             <h2>{{ host.name }}</h2>
             <p>
-              {{ host.endpoint }}
+              <span class="endpoint">{{ host.endpoint }}</span>
               <span v-if="snapshot"> · {{ snapshot.platform }} · {{ snapshot.arch }}</span>
               <el-tag size="small" effect="dark" :type="agentState.type">{{ agentState.label }}</el-tag>
             </p>
           </div>
         </div>
-        <div v-if="currentHostTask(tasks, host.id)" class="host-observed" role="status">
-          <template v-if="currentHostTask(tasks, host.id)?.state === 'succeeded'">
+        <div v-if="hostTask" class="host-observed" role="status">
+          <template v-if="hostTask.state === 'succeeded'">
             <span>最近任务</span>
-            <strong>{{ formatTaskTime(currentHostTask(tasks, host.id)!) }}</strong>
+            <strong>{{ formatTaskTime(hostTask) }}</strong>
           </template>
           <template v-else>
-            <span>{{ taskStateLabel(currentHostTask(tasks, host.id)!.state) }}</span>
-            <strong>{{ currentHostTask(tasks, host.id)?.id }}</strong>
-            <span>{{ taskSourceLabel(currentHostTask(tasks, host.id)!.trigger_source) }}</span>
+            <span>{{ taskStateLabel(hostTask.state) }}</span>
+            <strong>{{ hostTask.id }}</strong>
+            <span>{{ taskSourceLabel(hostTask.trigger_source) }}</span>
           </template>
-          <span>触发时间：{{ formatTaskTriggerTime(currentHostTask(tasks, host.id)!) }}</span>
+          <span>触发时间：{{ formatTaskTriggerTime(hostTask) }}</span>
         </div>
         <div v-if="snapshot" class="host-observed">
           <span>最近采集</span>
@@ -138,28 +156,11 @@ function appPorts(app: CatalogApp): DockerPort[] {
         </div>
       </div>
 
-      <div class="metrics">
-        <div class="metric">
-          <div class="metric-caption"><el-icon><Download /></el-icon>已安装应用</div>
-          <div class="metric-num">{{ String(installedCount).padStart(2, '0') }}</div>
-          <div class="metric-foot">目标主机当前部署</div>
-        </div>
-        <div class="metric">
-          <div class="metric-caption"><el-icon><TrendCharts /></el-icon>运行中</div>
-          <div class="metric-num green">{{ String(runningCount).padStart(2, '0') }}</div>
-          <div class="metric-foot">Docker 与原生应用运行状态</div>
-        </div>
-        <div class="metric">
-          <div class="metric-caption"><el-icon><Box /></el-icon>可用应用</div>
-          <div class="metric-num cyan">{{ String(availableCount).padStart(2, '0') }}</div>
-          <div class="metric-foot">来自已同步的应用源</div>
-        </div>
-        <div class="metric">
-          <div class="metric-caption"><el-icon><CircleCheck /></el-icon>Agent 状态</div>
-          <div class="metric-num agent" :class="{ green: agentState.type === 'success' }">{{ agentState.label }}</div>
-          <div class="metric-foot">{{ snapshot ? snapshot.platform + ' · ' + snapshot.arch : '通过配对身份安全连接' }}</div>
-        </div>
-      </div>
+      <dl class="metrics">
+        <div><dt>已安装</dt><dd>{{ installedCount }}</dd></div>
+        <div><dt>运行中</dt><dd>{{ runningCount }}</dd></div>
+        <div><dt>可用应用</dt><dd>{{ availableCount }}</dd></div>
+      </dl>
 
       <div v-if="snapshotError && !agentMaintenance" class="notice-line" role="status">
         <el-alert title="暂时无法获取主机快照。连接失败不代表主机或 Docker 资源已删除。" type="warning" :closable="false" show-icon />
@@ -172,11 +173,13 @@ function appPorts(app: CatalogApp): DockerPort[] {
       </div>
 
       <div class="store-heading">
-        <div>
-          <h3>应用市场</h3>
-          <p>Docker 应用按可信来源执行；EasyHostAgent 支持在线更新与强制更新</p>
-        </div>
-        <el-radio-group :model-value="filter" size="small" @update:model-value="$emit('filter-change', $event)">
+        <h3>应用市场</h3>
+        <el-button text :icon="Setting" @click="$emit('settings')">应用源设置</el-button>
+      </div>
+      <div class="store-filters">
+        <el-input v-model="search" class="app-search" clearable :prefix-icon="Search"
+          aria-label="搜索应用" placeholder="搜索应用名称或 ID" />
+        <el-radio-group :model-value="filter" aria-label="安装状态" @update:model-value="$emit('filter-change', $event)">
           <el-radio-button label="all">全部</el-radio-button>
           <el-radio-button label="installed">已安装</el-radio-button>
           <el-radio-button label="available">未安装</el-radio-button>
@@ -190,6 +193,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
       <div v-else-if="visibleApps.length || showNativeAgent" class="market-grid">
         <NativeAgentCard
           v-if="showNativeAgent"
+          :key="host.id"
           :host-id="host.id"
           :software-root="snapshot?.software_root"
           :platform="snapshot?.platform"
@@ -219,11 +223,10 @@ function appPorts(app: CatalogApp): DockerPort[] {
           @resolve="cardTask(app) && $emit('resolve-task', cardTask(app)!)"
         />
       </div>
-      <el-empty v-else :description="filter === 'update' ? '当前没有可更新的应用' : '暂无应用，请先在主机商店设置中添加并同步 Git 应用源'" :image-size="100" />
-
-      <p class="side-note">
-        <strong>安全提示：</strong>Docker 应用操作需要主机已配对及可信应用源，无需逐个授权。原生 Agent 的更新由系统独立维护任务执行，短暂断联正常；状态未知或身份不匹配时禁止远程操作。
-      </p>
+      <el-empty v-else :description="query ? '没有匹配的应用' : emptyDescriptions[filter]" :image-size="80">
+        <el-button v-if="query" @click="search = ''">清除搜索</el-button>
+        <el-button v-else @click="$emit('filter-change', 'all')">查看全部应用</el-button>
+      </el-empty>
     </div>
   </section>
 </template>
@@ -231,7 +234,7 @@ function appPorts(app: CatalogApp): DockerPort[] {
 <style scoped>
 .store-panel { display: flex; min-width: 0; min-height: 0; flex-direction: column; }
 .store-scroll { overflow: auto; min-height: 0; flex: 1; padding: 23px 27px 35px; }
-.store-empty { display: grid; min-height: 100%; place-items: center; }
+.store-empty { display: grid; overflow: auto; flex: 1; place-items: center; }
 .selected-host { display: flex; align-items: center; justify-content: space-between; gap: 18px; flex-wrap: wrap; }
 .selected-heading { display: flex; min-width: 0; align-items: center; gap: 12px; }
 .selected-icon {
@@ -249,33 +252,25 @@ function appPorts(app: CatalogApp): DockerPort[] {
 .selected-info { min-width: 0; }
 .selected-info h2 { overflow: hidden; margin: 0; font-size: 19px; letter-spacing: .2px; text-overflow: ellipsis; white-space: nowrap; }
 .selected-info p { display: flex; align-items: center; gap: 8px; margin: 6px 0 0; color: #88abc6; font-size: 11px; line-height: 1.6; flex-wrap: wrap; }
-.host-observed { display: grid; gap: 4px; color: var(--ent-dim); font-size: 10px; text-align: right; }
+.endpoint, .host-observed { overflow-wrap: anywhere; }
+.host-observed { min-width: 0; max-width: 100%; display: grid; gap: 4px; color: var(--ent-dim); font-size: 10px; text-align: right; }
 .host-observed strong { color: var(--ent-muted); font-weight: 500; }
-.metrics { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 11px; margin-top: 21px; }
-.metric { min-height: 84px; padding: 13px 15px; border: 1px solid #20364a; border-radius: 12px; background: linear-gradient(135deg, #101f31, #0e1b2b); }
-.metric-caption { display: flex; align-items: center; gap: 8px; color: #88a8c3; font-size: 11px; }
-.metric-caption .el-icon { font-size: 14px; }
-.metric-num { margin-top: 7px; color: var(--ent-text); font-size: 25px; font-weight: 750; letter-spacing: -.7px; line-height: 1; }
-.metric-num.green { color: var(--ent-green); }
-.metric-num.cyan { color: var(--ent-cyan); }
-.metric-num.agent { margin-top: 11px; font-size: 18px; }
-.metric-foot { overflow: hidden; margin-top: 6px; color: #5e7e9c; font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.metrics { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 18px; margin: 14px 0 0; }
+.metrics div { display: inline-flex; align-items: baseline; gap: 6px; }
+.metrics dt { color: var(--ent-muted); font-size: 12px; }
+.metrics dd { margin: 0; color: var(--ent-text); font-weight: 700; font-variant-numeric: tabular-nums; }
 .notice-line { margin-top: 12px; }
-.store-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 27px 0 14px; flex-wrap: wrap; }
+.store-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin: 20px 0 10px; flex-wrap: wrap; }
 .store-heading h3 { margin: 0; font-size: 16px; font-weight: 720; }
-.store-heading p { margin: 6px 0 0; color: var(--ent-muted); font-size: 11px; }
-.market-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); align-items: stretch; gap: 13px; }
+.store-filters { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; margin-bottom: 14px; }
+.app-search { width: min(280px, 100%); }
+.market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 260px), 1fr)); align-items: stretch; gap: 13px; }
 .market-loading { padding: 18px; border: 1px solid var(--ent-line); border-radius: 12px; background: var(--ent-panel); }
-.side-note { margin: 19px 0; color: #617f97; font-size: 10px; line-height: 1.7; }
-.side-note strong { color: #98cce1; font-weight: 650; }
-@media (max-width: 1460px) { .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 1110px) { .metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); } .store-scroll { padding: 19px; } }
-@media (max-width: 830px) { .market-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-@media (max-width: 630px) {
-  .store-scroll { padding: 15px; }
-  .metrics { gap: 7px; }
-  .metric { padding: 11px; }
-  .market-grid { grid-template-columns: 1fr; }
-  .store-heading { align-items: flex-start; }
+@media (max-width: 1110px) { .store-scroll { padding: 18px; } }
+@media (max-width: 760px) {
+  .store-scroll { padding: 14px; }
+  .selected-host { justify-content: flex-start; gap: 8px 16px; }
+  .host-observed { display: flex; align-items: baseline; flex-wrap: wrap; text-align: left; }
+  .app-search { flex: 1 1 200px; }
 }
 </style>

@@ -3,10 +3,11 @@ import { computed, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Refresh, Search, Edit, Delete, Connection, Monitor, Iphone, Box, Link, Setting, Grid } from '@element-plus/icons-vue'
+import { Refresh, Search, Delete, Connection, Monitor, Iphone, Box, Link } from '@element-plus/icons-vue'
 import { formatApiError } from '../../lib/api-client'
 import type { Host } from '../host-store/types'
 import type { NetworkRow } from '../network-nodes/data'
+import DeviceActions from './DeviceActions.vue'
 import DeviceServicesDialog from './DeviceServicesDialog.vue'
 import OpenWrtDiscoveryDialog from './OpenWrtDiscoveryDialog.vue'
 import { suggestedDirectGatewayIP } from './gateway-ip'
@@ -563,7 +564,7 @@ watch(
       </div>
       <div class="devices-actions">
         <el-button @click="refreshAll" :loading="isRefreshing"><el-icon><Refresh /></el-icon>刷新</el-button>
-        <el-button v-if="devices.length && networkEntries.length && !networkNodeSyncEnabled"
+        <el-button v-if="networkEntries.length && !networkNodeSyncEnabled"
           :disabled="!canInitializeNetworkNodes" :loading="initializingDevices" @click="initializeNetworkNodes">
           <el-icon><Connection /></el-icon>同步网络节点
         </el-button>
@@ -573,7 +574,7 @@ watch(
 
     <div class="node-scope-toolbar">
       <div class="node-scope-label">所处节点</div>
-      <el-select v-model="selectedNodeKey" filterable class="node-scope-select" popper-class="device-node-dropdown" placeholder="选择网络节点">
+      <el-select v-model="selectedNodeKey" filterable aria-label="所处节点" class="node-scope-select" popper-class="device-node-dropdown" placeholder="选择网络节点">
         <el-option label="全部" :value="ALL_SCOPE" />
         <el-option v-for="node in nodeOptions" :key="nodeValue(node)"
           :label="node.label + ' · ' + (node.isOnline ? '在线' : '离线')" :value="nodeValue(node)">
@@ -620,7 +621,8 @@ watch(
       <div class="devices-summary">
         <span>{{ deviceAssetCount }} 台设备</span>
         <span>{{ gatewayCount }} 个网关设备</span>
-        <el-checkbox :model-value="allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
+        <el-checkbox :model-value="allFilteredSelected" :disabled="!selectableDevices.length"
+          :indeterminate="selectedDeviceIds.length > 0 && !allFilteredSelected" @update:model-value="toggleSelectAll">全选当前结果</el-checkbox>
         <el-button v-if="selectedDeviceIds.length" type="danger" plain size="small" @click="deleteSelectedDevices">
           <el-icon><Delete /></el-icon>删除所选 {{ selectedDeviceIds.length }} 台
         </el-button>
@@ -634,12 +636,11 @@ watch(
       <el-skeleton :rows="5" animated />
     </div>
     <template v-else>
-      <el-empty v-if="!devices.length && !gatewayGroups.length" description="当前节点还没有登记设备" :image-size="120">
+      <el-empty v-if="!devicesQuery.isError.value && !gatewayGroupsQuery.isError.value && !devices.length && !gatewayGroups.length" :description="isAllScope ? '尚未登记设备' : '当前节点还没有登记设备'" :image-size="90">
         <div class="empty-initialize">
           <p v-if="selectedNode && !nodeDevices.length">该节点尚未生成基础节点设备记录，可以同步网络节点后继续。</p>
-          <p v-else-if="isAllScope">暂无设备记录。</p>
-          <p v-else>先编辑当前节点的基础设备，将其设置为网关设备，再从该设备卡片新增下挂设备。</p>
-          <el-button v-if="selectedNode && !nodeDevices.length && networkEntries.length"
+          <p v-else-if="!isAllScope">先编辑当前节点的基础设备，将其设置为网关设备，再从该设备卡片新增下挂设备。</p>
+          <el-button v-if="networkNodeSyncEnabled && selectedNode && !nodeDevices.length && networkEntries.length"
             :loading="initializingDevices" :disabled="!canInitializeNetworkNodes" @click="initializeNetworkNodes">
             <el-icon><Connection /></el-icon>初始化 / 同步网络节点
           </el-button>
@@ -694,28 +695,11 @@ watch(
             <strong>{{ section.name }}</strong>
             <span v-if="section.kind === 'gateway'" class="group-count">{{ section.items.length }}</span>
           </button>
-          <div v-if="section.gatewayDevice" class="gateway-heading-actions">
-            <el-button text circle aria-label="设备服务列表" title="设备服务列表"
-              @click="openDeviceServices(section.gatewayDevice)"><el-icon><Grid /></el-icon></el-button>
-            <el-button v-if="section.gatewayDevice.is_gateway && section.gatewayDevice.owned_gateway_group_id" text circle aria-label="新增下挂设备" title="新增下挂设备"
-              @click="openCreateDevice(section.gatewayDevice)"><el-icon><Plus /></el-icon></el-button>
-            <el-button text circle aria-label="编辑设备" title="编辑设备"
-              @click="openEditDevice(section.gatewayDevice)"><el-icon><Edit /></el-icon></el-button>
-            <el-button v-if="section.gatewayDevice.is_node_device" text circle type="danger"
-              aria-label="删除节点基础设备" title="删除节点基础设备"
-              @click="deleteNodeBaseDevice(section.gatewayDevice)"><el-icon><Delete /></el-icon></el-button>
-            <el-button v-if="isOpenWrtDevice(section.gatewayDevice)" text circle
-              aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
-              @click="openOpenWrtSettings(section.gatewayDevice)"><el-icon><Setting /></el-icon></el-button>
-            <el-button v-if="isOpenWrtDevice(section.gatewayDevice) && section.gatewayDevice.openwrt_configured"
-              text circle aria-label="OpenWrt 服务发现" title="OpenWrt 服务发现"
-              @click="openDiscovery(section.gatewayDevice, 'devices')"><el-icon><Search /></el-icon></el-button>
-            <el-button v-if="isOpenWrtDevice(section.gatewayDevice) && section.gatewayDevice.openwrt_configured"
-              text circle aria-label="ADB 发现" title="ADB 发现"
-              @click="openDiscovery(section.gatewayDevice, 'adb')"><el-icon><Iphone /></el-icon></el-button>
-          </div>
+          <DeviceActions v-if="section.gatewayDevice" :device="section.gatewayDevice" :open-wrt="isOpenWrtDevice(section.gatewayDevice)"
+            @services="openDeviceServices" @edit="openEditDevice" @add="openCreateDevice"
+            @settings="openOpenWrtSettings" @discover="openDiscovery" @remove="deleteNodeBaseDevice" />
         </div>
-        <div v-if="section.items.length && !collapsed.includes(section.id)" class="device-grid">
+        <div v-if="section.kind === 'gateway' && !collapsed.includes(section.id)" class="device-grid">
           <article v-for="device in section.items" :key="device.id" class="device-card">
             <div class="device-card-head">
               <el-checkbox class="device-select" :model-value="selectedDeviceIds.includes(device.id)"
@@ -743,18 +727,6 @@ watch(
                   </div>
                 </div>
               </div>
-              <div class="device-actions">
-                <el-button text circle aria-label="设备服务列表" title="设备服务列表"
-                  @click="openDeviceServices(device)"><el-icon><Grid /></el-icon></el-button>
-                <el-button v-if="device.is_gateway && device.owned_gateway_group_id" size="small" type="primary" plain
-                  @click="openCreateDevice(device)"><el-icon><Plus /></el-icon>新增设备</el-button>
-                <el-button text circle aria-label="编辑设备" title="编辑设备" @click="openEditDevice(device)"><el-icon><Edit /></el-icon></el-button>
-                <el-button v-if="device.is_node_device" text circle type="danger"
-                  aria-label="删除节点基础设备" title="删除节点基础设备"
-                  @click="deleteNodeBaseDevice(device)"><el-icon><Delete /></el-icon></el-button>
-                <el-button v-if="isOpenWrtDevice(device)" text circle aria-label="OpenWrt RPCD 配置" title="OpenWrt RPCD 配置"
-                  @click="openOpenWrtSettings(device)"><el-icon><Setting /></el-icon></el-button>
-              </div>
             </div>
             <div class="device-meta">
               <span v-if="device.mac_address">MAC：{{ device.mac_address }}</span>
@@ -772,22 +744,19 @@ watch(
                 {{ device.openwrt_https ? 'HTTPS' : 'HTTP' }} · {{ device.openwrt_rpcd_port || 80 }}
               </span>
             </div>
-            <div v-if="device.is_gateway && isOpenWrtDevice(device) && device.openwrt_configured"
-              class="discovery-actions">
-              <el-button size="small" plain @click="openDiscovery(device, 'devices')">服务发现</el-button>
-              <el-button size="small" plain @click="openDiscovery(device, 'adb')">ADB 发现</el-button>
-            </div>
+            <DeviceActions :device="device" :open-wrt="isOpenWrtDevice(device)"
+              @services="openDeviceServices" @edit="openEditDevice" @add="openCreateDevice"
+              @settings="openOpenWrtSettings" @discover="openDiscovery" @remove="deleteNodeBaseDevice" />
           </article>
-          <el-empty v-if="!section.items.length"
-            :description="section.kind === 'gateway'
-              ? (search ? '没有匹配的下挂设备' : '该网关设备还没有下挂设备')
-              : '暂无设备'" :image-size="54" />
+          <p v-if="!section.items.length" class="device-group-empty">{{ search ? '没有匹配的下挂设备' : '该网关还没有下挂设备' }}</p>
         </div>
       </div>
-      <el-empty v-if="devices.length && !deviceSections.length && search" description="没有匹配的设备" />
+      <el-empty v-if="devices.length && !deviceSections.length && search" description="没有匹配的设备">
+        <el-button @click="search = ''">清除搜索</el-button>
+      </el-empty>
     </template>
 
-    <el-dialog v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '新增设备'" width="min(620px, 94vw)" destroy-on-close>
+    <el-dialog append-to-body v-model="deviceDialogOpen" :title="editingDeviceId ? '编辑设备' : '新增设备'" width="min(620px, 94vw)" destroy-on-close>
       <el-form label-position="top" @submit.prevent="saveDeviceRecord">
         <div class="form-grid">
           <el-form-item label="设备名称" required>
@@ -874,10 +843,10 @@ watch(
       :key="discoveryTarget.id + ':' + discoveryKind"
       v-model="discoveryDialogOpen" :device="discoveryTarget" :kind="discoveryKind" />
 
-    <el-dialog v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
+    <el-dialog append-to-body v-model="openWrtDialogOpen" title="OpenWrt RPCD 配置" width="min(520px, 92vw)" destroy-on-close>
       <template v-if="openWrtTarget">
         <el-alert type="info" :closable="false" show-icon
-          title="此配置属于设备「{{ openWrtTarget.name }}」，不会挂在网关组上。RPCD 密钥在服务端加密保存，不会回传。" />
+          :title="'设备「' + openWrtTarget.name + '」的 RPCD 密钥在服务端加密保存。'" />
         <div class="rpcd-preview">
           RPCD 地址：{{ openWrtForm.https ? 'https' : 'http' }}://{{ openWrtTarget.ip_address }}:{{ openWrtForm.rpcd_port }}/ubus
         </div>
@@ -922,12 +891,12 @@ watch(
 .devices-actions { display:flex; gap:8px; flex-wrap:wrap; }
 .devices-toolbar { display:flex; align-items:center; gap:14px; }
 .devices-toolbar :deep(.el-input) { max-width:420px; }
-.devices-summary { display:flex; gap:12px; color:var(--ent-muted); font-size:12px; white-space:nowrap; }
+.devices-summary { display:flex; align-items:center; gap:12px; color:var(--ent-muted); font-size:12px; white-space:nowrap; }
 .device-group { overflow:hidden; border:1px solid var(--ent-line); border-radius:14px; background:var(--ent-panel); }
-.group-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:54px; padding:8px 15px; border-bottom:1px solid var(--ent-line-soft); background:var(--ent-panel-2); }
+.group-heading { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; min-height:54px; padding:8px 15px; border-bottom:1px solid var(--ent-line-soft); background:var(--ent-panel-2); }
 .group-toggle { display:flex; min-width:0; align-items:center; gap:10px; padding:0; border:0; background:transparent; color:var(--ent-text); text-align:left; cursor:pointer; }
 .group-toggle strong { font-size:14px; }
-.gateway-heading-main { display:flex; min-width:0; flex:1; align-items:center; gap:9px; }
+.gateway-heading-main { display:flex; min-width:min(100%,260px); flex:1; align-items:center; gap:9px; }
 .gateway-heading-select { flex:none; }
 .gateway-group-toggle { min-width:0; flex:1; }
 .gateway-heading-avatar { width:34px; height:34px; border-radius:10px; font-size:16px; }
@@ -942,13 +911,13 @@ watch(
 .gateway-discovery-state.offline { color:var(--ent-dim); }
 .gateway-heading-rpcd { display:flex; align-items:center; flex-wrap:wrap; gap:5px; color:var(--ent-data-highlight); font-size:10px; }
 .gateway-heading-rpcd > span { color:var(--ent-muted); }
-.gateway-heading-actions { display:flex; flex:none; align-items:center; flex-wrap:wrap; gap:1px; }
-.gateway-heading-actions :deep(.el-button) { margin-left:0; color:var(--ent-muted); }
+.group-heading > .device-actions { margin-left:auto; }
 .group-chevron { display:inline-block; color:var(--ent-cyan); font-size:18px; transition:transform .15s; }
 .group-chevron.collapsed { transform:rotate(-90deg); }
 .group-count { padding:2px 8px; border-radius:12px; background:var(--ent-elev); color:var(--ent-muted); font-size:11px; }
 .group-actions { display:flex; gap:4px; }
 .device-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(360px,100%),1fr)); gap:12px; padding:14px; }
+.device-group-empty { grid-column:1 / -1; margin:0; color:var(--ent-muted); font-size:12px; }
 .device-card { min-width:0; padding:15px; border:1px solid var(--ent-line); border-radius:12px; background:var(--ent-node-row); }
 .device-card-head { display:flex; align-items:flex-start; gap:10px; }
 .device-select { flex:none; margin-top:10px; }
@@ -958,16 +927,13 @@ watch(
 .device-title strong { overflow-wrap:anywhere; color:var(--ent-text); font-size:14px; }
 .device-subtitle { display:flex; flex-wrap:wrap; gap:8px; margin-top:7px; color:var(--ent-muted); font-size:11px; }
 .device-ip-addresses { display:flex; flex-direction:column; align-items:flex-start; gap:3px; }
-.device-actions { display:flex; flex:none; gap:0; margin-left:auto; }
-.device-actions :deep(.el-button) { color:var(--ent-muted); }
+.device-card > .device-actions { justify-content:flex-start; border-top:1px solid var(--ent-line-soft); margin-top:12px; padding-top:6px; }
 .device-meta { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin-top:13px; color:var(--ent-muted); font-size:11px; }
 .node-association { display:inline-flex; align-items:center; gap:4px; color:var(--ent-data-highlight); }
 .muted { color:var(--ent-dim); }
 .device-note { margin:10px 0 0; color:var(--ent-muted); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
 .openwrt-status { display:flex; align-items:center; gap:7px; margin-top:12px; padding:8px 10px; border:1px solid var(--ent-detail-line); border-radius:8px; background:var(--ent-detail-bg); color:var(--ent-detail-accent); font-size:11px; }
 .openwrt-endpoint { margin-left:auto; color:var(--ent-muted); }
-.discovery-actions { display:flex; flex-wrap:wrap; gap:6px; margin-top:9px; }
-.discovery-actions :deep(.el-button + .el-button) { margin-left:0; }
 .devices-loading { padding:18px; }
 .empty-initialize { display:flex; align-items:center; flex-direction:column; gap:10px; }
 .empty-initialize p { margin:0; color:var(--ent-muted); font-size:12px; text-align:center; }
@@ -1005,8 +971,8 @@ watch(
   .node-scope-meta { align-items:flex-start; }
   .device-grid { grid-template-columns:minmax(0,1fr); padding:10px; }
   .group-heading { flex-wrap:wrap; gap:4px 8px; padding-inline:12px; }
-  .group-heading:has(.gateway-heading-actions > :nth-child(3)) .gateway-heading-main { flex-basis:100%; }
-  .gateway-heading-actions { max-width:100%; justify-content:flex-end; margin-left:auto; }
+  .gateway-heading-main { flex-basis:100%; }
+  .group-heading > .device-actions { width:100%; justify-content:flex-start; border-top:1px solid var(--ent-line-soft); padding-top:4px; }
   .group-actions { flex-wrap:wrap; justify-content:flex-end; }
 }
 
@@ -1014,15 +980,6 @@ watch(
   .group-heading, .device-card { padding-inline:9px; }
   .gateway-heading-main, .group-toggle, .device-card-head { gap:6px; }
   .gateway-heading-avatar, .device-avatar { width:32px; height:32px; font-size:16px; }
-  .group-heading:has(.gateway-heading-actions > :nth-child(2)) .gateway-heading-main { flex-basis:100%; }
-  .gateway-heading-actions :deep(.el-button), .device-actions :deep(.el-button) {
-    min-width:44px;
-    min-height:44px;
-    margin-left:0;
-  }
-  .device-card-head { flex-wrap:wrap; }
-  .device-actions { flex-wrap:wrap; justify-content:flex-end; max-width:100%; }
-  .device-card-head:has(.device-actions > :nth-child(2)) .device-actions { flex-basis:100%; }
   .openwrt-status { flex-wrap:wrap; overflow-wrap:anywhere; }
 }
 </style>

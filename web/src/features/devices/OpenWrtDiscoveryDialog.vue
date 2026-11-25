@@ -154,7 +154,7 @@ function matchLocationLabel(value?: string) {
 </script>
 
 <template>
-  <el-dialog v-model="visible" :title="title + ' · ' + device.name" width="min(980px, 94vw)" destroy-on-close>
+  <el-dialog append-to-body v-model="visible" :title="title + ' · ' + device.name" width="min(980px, 94vw)" destroy-on-close>
     <el-alert type="info" :closable="false" show-icon
       :title="kind === 'adb'
         ? '扫描会将发现的无线 ADB 设备自动添加到该网关下的设备列表；不执行配对、连接或 ADB 指令。'

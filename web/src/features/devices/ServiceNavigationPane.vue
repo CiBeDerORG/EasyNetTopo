@@ -40,7 +40,7 @@ const filters = computed(() => {
   const groups = devices.value.filter(device => counts.has(device.id)).map(device => ({
     id: device.id, name: device.name, count: counts.get(device.id)
   }))
-  return [{ id: '', name: '全部服务', count: cards.value.length }, ...groups]
+  return [{ id: '', name: '全部设备', count: cards.value.length }, ...groups]
 })
 const activeFilter = computed(() => filters.value.some(item => item.id === filter.value) ? filter.value : '')
 const visibleCards = computed(() => {
@@ -72,9 +72,10 @@ function retry() {
           <h2>服务导航</h2>
           <p>快速访问已开启导航的设备服务。</p>
         </div>
-        <el-popover v-model:visible="managing" placement="bottom-end" trigger="click" :width="252">
+        <el-button v-if="activeFilter" type="primary" plain :icon="Setting" @click="openServices(activeFilter)">管理该设备服务</el-button>
+        <el-popover v-else v-model:visible="managing" placement="bottom-end" trigger="click" :width="252">
           <template #reference>
-            <el-button type="primary" plain :icon="Setting">管理导航</el-button>
+            <el-button type="primary" plain :icon="Setting" :disabled="!devices.length">管理导航</el-button>
           </template>
           <el-select filterable placeholder="选择要管理的设备" aria-label="选择要管理的设备"
             :loading="devicesQuery.isPending.value" @change="openServices">
@@ -88,12 +89,11 @@ function retry() {
       <el-skeleton v-else-if="loading" class="navigation-feedback" :rows="4" animated />
       <template v-else>
         <div class="navigation-toolbar">
-          <div class="navigation-filters" role="group" aria-label="按设备筛选">
-            <button v-for="item in filters" :key="item.id" type="button"
-              :aria-pressed="activeFilter === item.id"
-              @click="filter = item.id">{{ item.name }} <small>{{ item.count }}</small></button>
-          </div>
           <el-input v-model="search" class="navigation-search" :prefix-icon="Search" clearable placeholder="搜索服务或设备" aria-label="搜索服务或设备" />
+          <el-select :model-value="activeFilter" filterable :empty-values="[null, undefined]" class="navigation-filter" aria-label="按设备筛选"
+            placeholder="全部设备" @update:model-value="filter = $event">
+            <el-option v-for="item in filters" :key="item.id" :value="item.id" :label="item.name + '（' + item.count + '）'" />
+          </el-select>
         </div>
         <div v-if="visibleCards.length" class="navigation-grid">
           <article v-for="{ service, device, links } in visibleCards" :key="service.id" class="navigation-card">
@@ -132,16 +132,13 @@ function retry() {
 <style scoped>
 .navigation-workspace { flex:1; min-height:0; overflow:auto; padding:24px; }
 .navigation-panel { max-width:1500px; margin:0 auto; padding:24px; background:var(--ent-panel); border:1px solid var(--ent-line); border-radius:var(--ent-radius); }
-.navigation-heading { display:flex; align-items:flex-start; justify-content:space-between; gap:12px; }
+.navigation-heading { display:flex; align-items:flex-start; flex-wrap:wrap; justify-content:space-between; gap:12px; }
 .navigation-heading h2 { margin:0; font-size:24px; }
 .navigation-heading p { margin:6px 0 0; color:var(--ent-muted); }
 .navigation-feedback { margin-top:18px; }
-.navigation-toolbar { display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px; margin:20px 0 16px; padding-bottom:14px; border-bottom:1px solid var(--ent-line-soft); }
-.navigation-filters { display:flex; flex:1 1 290px; flex-wrap:wrap; gap:4px; }
-.navigation-filters button { color:var(--ent-muted); background:transparent; border:1px solid transparent; border-radius:7px; padding:6px 10px; min-height:34px; overflow-wrap:anywhere; }
-.navigation-filters button:hover, .navigation-filters button[aria-pressed=true] { color:var(--ent-text); background:var(--ent-elev); border-color:var(--ent-line); }
-.navigation-filters small { margin-left:3px; font-variant-numeric:tabular-nums; }
-.navigation-search { width:min(100%,255px); }
+.navigation-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:10px; margin:20px 0 16px; padding-bottom:14px; border-bottom:1px solid var(--ent-line-soft); }
+.navigation-search { width:min(100%,340px); }
+.navigation-filter { width:min(100%,240px); }
 .navigation-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(min(100%,270px),1fr)); gap:14px; }
 @media (min-width:1280px) { .navigation-grid { grid-template-columns:repeat(3,minmax(0,1fr)); } }
 .navigation-card { display:flex; flex-direction:column; min-width:0; padding:15px; border:1px solid var(--ent-line); background:var(--ent-panel-2); border-radius:12px; }
@@ -157,7 +154,9 @@ function retry() {
 .service-addresses > :first-child { border-top:1px solid var(--ent-line-soft); }
 .service-address { display:flex; align-items:center; gap:7px; min-height:34px; padding:5px 4px; color:var(--ent-muted); font-size:12px; text-decoration:none; }
 a.service-address:hover { background:var(--ent-elev); border-radius:5px; }
-.service-address .el-icon { flex:none; color:var(--ent-cyan); }
+.service-address .el-icon { flex:none; }
+a.service-address .el-icon { color:var(--ent-cyan); }
+a.service-address:focus-visible { outline:2px solid var(--ent-cyan); outline-offset:1px; }
 .service-address > span:first-of-type { white-space:nowrap; }
 .address-value { min-width:0; margin-left:auto; overflow-wrap:anywhere; text-align:right; }
 .address-value.has-link { color:var(--ent-data-highlight); font:11px/1.35 ui-monospace,monospace; }
@@ -167,6 +166,7 @@ a.service-address:hover { background:var(--ent-elev); border-radius:5px; }
   .navigation-panel { padding:14px; }
   .navigation-heading h2 { font-size:20px; }
   .navigation-toolbar { margin-top:14px; }
-  .navigation-search { width:100%; order:-1; }
+  .navigation-search, .navigation-filter { width:100%; }
+  .service-address { min-height:44px; }
 }
 </style>

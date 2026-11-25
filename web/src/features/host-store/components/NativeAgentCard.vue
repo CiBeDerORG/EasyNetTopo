@@ -113,7 +113,7 @@ async function showInstallCommand() {
       <div class="native-logo"><img :src="nativeAgentIcon" alt="EasyHostAgent 图标" /></div>
       <div>
         <h4>EasyHostAgent</h4>
-        <span class="kind">宿主机原生服务 · {{ platform === 'macos' ? 'launchd' : 'systemd' }}</span>
+        <span class="kind">宿主机原生服务<template v-if="platform"> · {{ platform === 'macos' ? 'launchd' : 'systemd' }}</template></span>
       </div>
     </div>
     <p class="description">自动关联已配对主机。更新由系统独立维护任务执行，服务会自动重启。</p>
@@ -134,20 +134,20 @@ async function showInstallCommand() {
       </template>
       和网络连接。
     </p>
+    <p class="foot"><el-icon><CopyDocument /></el-icon>更新任务会在 Agent 重启并重新连接后验证结果。</p>
     <div class="actions">
-      <el-button size="small" :disabled="!connected || !!maintenance || busy" @click="openDriverSettings">
-        <el-icon><Setting /></el-icon>设置
-      </el-button>
       <el-button v-if="task?.state === 'interrupted'" size="small" type="warning" @click="emit('resolve')">核实后解除阻塞</el-button>
       <el-button v-if="!paired" size="small" type="primary" @click="showInstallCommand">
         <el-icon><Download /></el-icon>安装
       </el-button>
-      <el-button size="small" :loading="busy" :disabled="!connected || !!maintenance || !!task && (taskActive(task) || task.state === 'interrupted') || busy"
+      <el-button size="small" type="primary" :loading="busy" :disabled="!connected || !!maintenance || !!task && (taskActive(task) || task.state === 'interrupted') || busy"
         @click="emit('update', 'update')"><el-icon><Refresh /></el-icon>更新</el-button>
+      <el-button size="small" :disabled="!connected || !!maintenance || busy" @click="openDriverSettings">
+        <el-icon><Setting /></el-icon>设置
+      </el-button>
       <el-button size="small" type="warning" :disabled="!connected || !!maintenance || busy"
         @click="emit('update', 'force-update')"><el-icon><Lightning /></el-icon>强制更新</el-button>
     </div>
-    <p class="foot"><el-icon><CopyDocument /></el-icon>更新指令受理后不会立即报告成功；重启后自动验证主机重新连接。</p>
     <el-dialog v-model="settingsOpen" title="EasyHostAgent · Driver 设置" width="440px" append-to-body>
       <p class="settings-description">为当前主机启用或关闭内置 Driver。关闭后 Agent 将拒绝对应适配器请求，不影响应用本身运行。</p>
       <el-alert v-if="settingsError" :title="settingsError" type="error" show-icon :closable="false" class="settings-error" />
@@ -174,8 +174,8 @@ async function showInstallCommand() {
 .native-logo{display:grid;place-items:center;width:43px;height:43px;flex:none;border-radius:12px;background:#214b60;color:#96e4fd;font-weight:800}
 .native-logo img{display:block;width:100%;height:100%;object-fit:contain;border-radius:inherit}
 h4{margin:0 0 5px;font-size:14px}.kind{color:#80a6c3;font-size:10px}.description{color:#87a5bf;font-size:11px;line-height:1.7;margin:14px 0}
-.state{color:#e0bb77;font-size:12px}.state.online{color:#8ce4b4}.state.danger{color:#ff9d92}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:14px}.actions :deep(.el-button){margin:0}
-.foot{display:flex;align-items:center;gap:4px;color:#7f9ab4;font-size:10px;margin:10px 0 0;line-height:1.4}
+.state{color:var(--ent-amber);font-size:12px}.state.online{color:var(--ent-green)}.state.danger{color:var(--ent-red)}.actions{display:flex;flex-wrap:wrap;gap:5px;margin-top:auto;padding-top:14px}.actions :deep(.el-button){min-height:32px;margin:0}.actions :deep(.el-icon){margin-inline-end:4px}
+.foot{overflow-wrap:anywhere;display:flex;align-items:center;gap:4px;color:#7f9ab4;font-size:10px;margin:10px 0 0;line-height:1.4}
 .diagnostic{color:#ffb5aa;font-size:11px;line-height:1.8;margin:9px 0}.diagnostic code{font-size:10px;color:#f2c9a6}
  .settings-description{font-size:12px;color:#a0b5c6;line-height:1.7;margin:0 0 16px}
  .settings-error{margin-bottom:12px}

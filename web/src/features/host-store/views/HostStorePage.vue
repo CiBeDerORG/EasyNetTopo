@@ -6,7 +6,7 @@ import DevicesPane from '../../devices/DevicesPane.vue'
 import { computed, defineAsyncComponent, h, nextTick, onUnmounted, reactive, ref, watch } from 'vue'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/vue-query'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { CircleCheck, Delete, SwitchButton } from '@element-plus/icons-vue'
+import { ArrowDown, CircleCheck, Delete, SwitchButton } from '@element-plus/icons-vue'
 import { formatApiError } from '../../../lib/api-client'
 import { clearDeviceData as clearDeviceDataApi, navigationServicesKey } from '../../devices/api'
 import { clearNodeAttributes } from '../../network-nodes/attributes'
@@ -86,8 +86,9 @@ const isNetworkPage = computed(() => route.path === '/network-nodes')
 const isNavigationPage = computed(() => route.path === '/navigation')
 const isDevicesPage = computed(() => route.path === '/devices')
 const isMapPage = computed(() => route.path === '/network-map')
-const pageTitle = computed(() => isNavigationPage.value ? '导航' : isNetworkPage.value ? '网络节点'
+const pageTitle = computed(() => isNavigationPage.value ? '服务导航' : isNetworkPage.value ? '网络节点'
   : isDevicesPage.value ? '设备列表' : isMapPage.value ? '网络地图' : '主机商店')
+watch(pageTitle, title => { document.title = 'EasyNetTopo · ' + title }, { immediate: true })
 const isStorePage = computed(() => route.path === '/host-store')
 const ui = useHostStoreUiStore()
 const queryClient = useQueryClient()
@@ -815,6 +816,11 @@ async function clearAllDeviceData() {
   }
 }
 
+function handleWorkbenchCommand(command: string) {
+  if (command === 'data') dataManagementDialogOpen.value = true
+  if (command === 'logout') void logout()
+}
+
 async function logout() {
   try {
     await logoutApi()
@@ -884,7 +890,7 @@ async function logout() {
     <main class="workspace">
       <header class="topbar">
         <div>
-          <div class="crumb">EasyNetTopo <span>/</span> 工作台 <span>/</span> {{ pageTitle }}</div>
+          <div class="crumb">EasyNetTopo <span>/</span> 工作台</div>
           <div class="page-title"><span class="title-square"></span><h1>{{ pageTitle }}</h1></div>
         </div>
         <div class="topbar-actions">
@@ -894,17 +900,18 @@ async function logout() {
             <el-option label="浅色模式" value="light" />
             <el-option label="深色模式" value="dark" />
           </el-select>
-          <span v-if="controllerId" class="controller-id">控制端 {{ controllerId.slice(0, 8) }}</span>
-          <el-tooltip content="删除 EasyNetTopo 本地节点及设备数据" placement="bottom">
-            <el-button text aria-label="删除数据" :disabled="!!dataClearBusy" @click="dataManagementDialogOpen = true">
-              <el-icon><Delete /></el-icon>删除数据
+          <el-dropdown trigger="click" placement="bottom-end" @command="handleWorkbenchCommand">
+            <el-button class="workbench-menu" aria-label="工作台管理菜单">
+              管理<el-icon><ArrowDown /></el-icon>
             </el-button>
-          </el-tooltip>
-          <el-tooltip content="退出登录" placement="bottom">
-            <el-button text circle aria-label="退出登录" @click="logout">
-              <el-icon><SwitchButton /></el-icon>
-            </el-button>
-          </el-tooltip>
+            <template #dropdown>
+              <el-dropdown-menu>
+                <el-dropdown-item v-if="controllerId" disabled>控制端 {{ controllerId.slice(0, 8) }}</el-dropdown-item>
+                <el-dropdown-item command="data" :icon="Delete" :disabled="!!dataClearBusy">数据管理</el-dropdown-item>
+                <el-dropdown-item command="logout" :icon="SwitchButton" divided>退出登录</el-dropdown-item>
+              </el-dropdown-menu>
+            </template>
+          </el-dropdown>
         </div>
       </header>
 
@@ -922,7 +929,6 @@ async function logout() {
           @select="ui.selectHost"
           @add="addHostOpen = true"
           @refresh="refreshAll"
-          @settings="sourceSettingsOpen = true"
           @edit="openEditor"
           @docker="openDocker"
           @delete="removeHost"
@@ -946,6 +952,7 @@ async function logout() {
           :pending-key="pendingKey"
           :agent-maintenance="agentMaintenanceForHost"
           :agent-update-busy="agentUpdateBusy"
+          @settings="sourceSettingsOpen = true"
           @agent-update="requestAgentUpdate"
           @filter-change="ui.appFilter = $event"
           @configure="openInstallConfig"
@@ -992,8 +999,8 @@ async function logout() {
     />
     <el-dialog
       v-model="dataManagementDialogOpen"
-      title="删除数据"
-      width="560px"
+      title="数据管理"
+      width="min(560px, calc(100vw - 28px))"
       :close-on-click-modal="!dataClearBusy"
       :close-on-press-escape="!dataClearBusy"
     >
@@ -1163,7 +1170,7 @@ async function logout() {
 .page-title h1 { margin: 0; font-size: 22px; font-weight: 750; letter-spacing: .4px; }
 .topbar-actions { display: flex; align-items: center; gap: 10px; }
 .theme-switcher { width: 120px; flex: none; }
-.controller-id { color: var(--ent-dim); font-size: 10px; }
+.workbench-menu .el-icon { margin-left: 6px; }
 .topbar-actions :deep(.el-button) { color: #9ab6cf; }
 .data-management-dialog { display: flex; flex-direction: column; gap: 16px; }
 .data-clear-item { display: flex; align-items: center; justify-content: space-between; gap: 18px; }
@@ -1178,18 +1185,22 @@ async function logout() {
 .main-layout { display: grid; min-height: 0; flex: 1; grid-template-columns: var(--ent-host-pane-width) minmax(0, 1fr); }
 @media (max-width: 1460px) { .main-layout { grid-template-columns: 286px minmax(0, 1fr); } }
 @media (max-width: 1110px) { .main-layout { grid-template-columns: 250px minmax(0, 1fr); } }
-@media (max-width: 830px) {
+@media (max-width: 1000px) {
   .ent-shell, .ent-shell.is-collapsed { grid-template-columns: 70px minmax(0, 1fr); }
   .topbar { min-height: 70px; padding: 0 18px; }
   .page-title h1 { font-size: 19px; }
   .main-layout { grid-template-columns: 220px minmax(0, 1fr); }
 }
-@media (max-width: 630px) {
+@media (max-width: 760px) {
+  .ent-shell, .ent-shell.is-collapsed { grid-template-columns: minmax(0, 1fr); grid-template-rows: minmax(0, 1fr) auto; }
+  .workspace { grid-row: 1; }
   .main-layout { grid-template-columns: 1fr; grid-template-rows: auto minmax(0, 1fr); }
-  .topbar { min-height: 64px; padding: 0 14px; }
+  .topbar { min-height: 54px; gap: 8px; padding: 0 12px; }
   .crumb { display: none; }
   .page-title h1 { font-size: 17px; }
-  .controller-id { display: none; }
+  .topbar-actions { gap: 6px; }
+  .theme-switcher { width: 100px; }
+  .page-title { margin-top: 0; gap: 8px; }
   .auth-screen { padding: 14px; }
   .auth-card { padding: 22px; }
 }

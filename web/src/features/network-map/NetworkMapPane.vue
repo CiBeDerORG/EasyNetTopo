@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, defineAsyncComponent, h, ref, watch } from 'vue'
+import { computed, defineAsyncComponent, h, nextTick, ref, watch } from 'vue'
 import { useQuery } from '@tanstack/vue-query'
 import { useRouter } from 'vue-router'
 import { apiRequest, formatApiError } from '../../lib/api-client'
@@ -109,16 +109,35 @@ const selectedNodeKey = ref('')
 const selectedLinkKey = ref('')
 const selectedNode = computed(() => topology.value.nodes.find(node => node.key === selectedNodeKey.value))
 const selectedLink = computed(() => topology.value.links.find(link => link.key === selectedLinkKey.value))
+watch(visibleLinks, links => {
+  if (selectedLinkKey.value && !links.some(link => link.key === selectedLinkKey.value)) selectedLinkKey.value = ''
+})
+const detailHeading = ref<HTMLElement | null>(null)
+async function showDetails() {
+  await nextTick()
+  detailHeading.value?.focus({ preventScroll: true })
+  detailHeading.value?.scrollIntoView({ block: 'nearest' })
+}
 const byKey = computed(() => new Map(topology.value.nodes.map(node => [node.key, node])))
+const selectionTitle = computed(() => {
+  if (selectedNode.value) return selectedNode.value.label
+  const link = selectedLink.value
+  if (!link) return ''
+  return (byKey.value.get(link.from)?.label || '未知节点') + ' → ' + (byKey.value.get(link.to)?.label || '未知节点')
+})
 const lastUpdated = computed(() => routeQuery.dataUpdatedAt.value
   ? new Date(routeQuery.dataUpdatedAt.value).toLocaleTimeString() : '尚未采集')
 const routeError = computed(() => routeQuery.error.value ? formatApiError(routeQuery.error.value) : '')
-const peerAvailable = computed(() => peerQuery.isSuccess.value)
-const globeRef = ref<{ focusNode: (key: string) => void; resetCamera: () => void } | null>(null)
+const locationReady = computed(() => !!routeQuery.data.value && !!attrsQuery.data.value)
+const peerStatus = computed(() => {
+  if (peerQuery.isPending.value) return '正在读取 Peer Center 拓扑'
+  return peerQuery.isSuccess.value ? '已接入 Peer Center 全网直连拓扑' : '显示入口路由拓扑 · Peer Center 暂不可用'
+})
+const globeRef = ref<{ focusNode?: (key: string) => void } | null>(null)
 function selectNode(key: string) {
   selectedNodeKey.value = key
   selectedLinkKey.value = ''
-  globeRef.value?.focusNode(key)
+  globeRef.value?.focusNode?.(key)
 }
 function selectLink(key: string) {
   selectedNodeKey.value = ''
@@ -137,75 +156,77 @@ function formatMs(value: number | null) {
 
 <template>
   <section class="map-page" aria-label="EasyTier 网络地图">
-    <div class="map-header">
-      <div class="map-header-copy">
-        <div class="map-eyebrow">EASYTIER · GEO NETWORK</div>
-        <p>基于已迁移的网络节点与真实路由信息，展示节点位置及直连拓扑。</p>
-      </div>
-      <div class="map-toolbar">
-        <el-select v-model="hostId" placeholder="组网入口" aria-label="组网入口" class="map-entry">
-          <el-option v-for="host in entries" :key="host.id" :label="host.name" :value="host.id" />
-        </el-select>
-        <el-select v-model="basemap" class="basemap-select" aria-label="地图底图">
-          <el-option value="auto" label="跟随页面主题" />
-          <el-option value="standard" label="标准地图" />
-          <el-option value="satellite" label="卫星影像" />
-          <el-option value="dark" label="深色地图" />
-        </el-select>
-        <el-button :loading="routeQuery.isFetching.value" @click="routeQuery.refetch(); peerQuery.refetch()">
-          刷新
-        </el-button>
-      </div>
-    </div>
-
     <el-alert v-if="hostsError" type="error" :title="hostsError" :closable="false" />
     <div v-if="hostsLoading" class="map-empty">正在读取组网入口…</div>
-    <el-empty v-else-if="!entries.length" description="尚未设置组网入口">
+    <el-empty v-else-if="!hostsError && !entries.length" description="尚未设置组网入口">
       <el-button type="primary" @click="router.push('/host-store')">前往主机商店设置入口</el-button>
     </el-empty>
-    <template v-else>
+    <template v-else-if="entries.length">
+      <div class="map-toolbar">
+        <div class="entry-picker">
+          <label for="map-entry-host">组网入口</label>
+          <el-select id="map-entry-host" v-model="hostId" aria-label="组网入口" class="map-entry">
+            <el-option v-for="host in entries" :key="host.id" :label="host.name" :value="host.id" />
+          </el-select>
+        </div>
+        <div class="refresh-controls">
+          <span class="last-updated">最近采集 {{ lastUpdated }}</span>
+          <el-button :loading="routeQuery.isFetching.value || peerQuery.isFetching.value || attrsQuery.isFetching.value"
+            @click="routeQuery.refetch(); peerQuery.refetch(); attrsQuery.refetch()">刷新</el-button>
+        </div>
+      </div>
       <div v-if="routeError" class="status-alert" role="alert">
         {{ routeError }}。{{ routeQuery.data.value ? '以下保留上一次成功采集的节点，不代表当前实时状态。' : '请检查 Agent、EasyTier Driver 及 RPC 连接。' }}
       </div>
       <div class="map-stats">
-        <div><span>当前路由可见节点</span><strong>{{ topology.nodes.length }}</strong></div>
-        <div><span>已定位</span><strong>{{ withLocation.length }}</strong></div>
-        <div><span>P2P 直连关系</span><strong class="cyan">{{ topology.links.filter(link => link.kind === 'p2p').length }}</strong></div>
-        <div><span>中继路由</span><strong class="orange">{{ topology.links.filter(link => link.kind === 'relay').length }}</strong></div>
-        <div><span>最近采集</span><strong class="stamp">{{ lastUpdated }}</strong></div>
+        <div><span>当前路由可见节点</span><strong>{{ routeQuery.data.value ? topology.nodes.length : '—' }}</strong></div>
+        <div><span>已定位</span><strong>{{ locationReady ? withLocation.length : '—' }}</strong></div>
+        <div><span>P2P 直连关系</span><strong class="cyan">{{ routeQuery.data.value ? topology.links.filter(link => link.kind === 'p2p').length : '—' }}</strong></div>
+        <div><span>中继路由</span><strong class="orange">{{ routeQuery.data.value ? topology.links.filter(link => link.kind === 'relay').length : '—' }}</strong></div>
       </div>
       <div class="map-layout">
         <div class="globe-area">
-          <GlobeMap :data-ready="routeQuery.isSuccess.value && attrsQuery.isSuccess.value" ref="globeRef" :nodes="topology.nodes" :links="visibleLinks"
-            :basemap="basemap" :show-traffic="showTraffic"
-            :selected-node-key="selectedNodeKey" :selected-link-key="selectedLinkKey"
-            @node-click="selectNode" @link-click="selectLink" />
+          <div class="map-controls" role="group" aria-label="地图显示设置">
+            <el-select v-model="basemap" class="basemap-select" aria-label="地图底图">
+              <el-option value="auto" label="跟随页面主题" />
+              <el-option value="standard" label="标准地图" />
+              <el-option value="satellite" label="卫星影像" />
+              <el-option value="dark" label="深色地图" />
+            </el-select>
+            <el-select v-model="filter" aria-label="连接筛选" class="link-filter">
+              <el-option value="all" label="全部连接" />
+              <el-option value="p2p" label="仅直连" />
+              <el-option value="relay" label="仅中继" />
+              <el-option value="unknown" label="未知路由" />
+            </el-select>
+            <el-switch v-model="showTraffic" active-text="显示流量粒子" />
+          </div>
+          <div class="map-viewport">
+            <GlobeMap :entry-id="hostId" :data-ready="routeQuery.isSuccess.value && attrsQuery.isSuccess.value" ref="globeRef" :nodes="topology.nodes" :links="visibleLinks"
+              :basemap="basemap" :show-traffic="showTraffic"
+              :selected-node-key="selectedNodeKey" :selected-link-key="selectedLinkKey"
+              @node-click="selectNode" @link-click="selectLink" />
+          </div>
+          <button v-if="selectedNode || selectedLink" type="button" class="selection-shortcut" @click="showDetails">
+            <span>{{ selectionTitle }}</span>
+            <strong>查看详情 ↓</strong>
+          </button>
           <div class="map-legend">
             <span><i class="line p2p" /> P2P 直连</span>
             <span><i class="line relay" /> 中继路由</span>
             <span><i class="line unknown" /> 未知</span>
             <span><i class="point" /> 地图节点</span>
           </div>
-          <div class="map-controls">
-            <el-select v-model="filter" aria-label="连接筛选" size="small" class="link-filter">
-              <el-option value="all" label="全部连接" />
-              <el-option value="p2p" label="仅直连" />
-              <el-option value="relay" label="仅中继" />
-              <el-option value="unknown" label="未知路由" />
-            </el-select>
-            <el-switch v-model="showTraffic" size="small" active-text="真实流量粒子" />
-          </div>
           <div class="map-source-info">
-            {{ peerAvailable ? '全网直连拓扑已接入 Peer Center' : '显示入口路由拓扑 · Peer Center 暂不可用' }}
-            · 每 15 秒后台刷新
+            {{ peerStatus }} · 路由每 15 秒刷新
           </div>
         </div>
 
         <aside class="map-side">
-          <section class="side-section">
-            <h3>选中详情</h3>
+          <section class="side-section" aria-labelledby="map-detail-title">
+            <h3 id="map-detail-title" ref="detailHeading" tabindex="-1">{{ selectedNode ? '节点详情' : selectedLink ? '连接详情' : '选中详情' }}</h3>
+            <div v-if="selectedNode || selectedLink" class="detail-title">{{ selectionTitle }}</div>
             <template v-if="selectedNode">
-              <div class="detail-title">{{ selectedNode.label }}</div>
               <dl>
                 <div><dt>主机名</dt><dd>{{ selectedNode.hostname }}</dd></div>
                 <div><dt>虚拟地址</dt><dd>{{ selectedNode.ip }}</dd></div>
@@ -219,10 +240,6 @@ function formatMs(value: number | null) {
               </dl>
             </template>
             <template v-else-if="selectedLink">
-              <div class="detail-title">
-                {{ byKey.get(selectedLink.from)?.label || '未知节点' }} →
-                {{ byKey.get(selectedLink.to)?.label || '未知节点' }}
-              </div>
               <dl>
                 <div><dt>连接类型</dt><dd>{{ selectedLink.kind === 'p2p' ? 'P2P 直连' : selectedLink.kind === 'relay' ? '中继转发' : '路由未知' }}</dd></div>
                 <div><dt>来源</dt><dd>{{ selectedLink.source === 'peer-center' ? 'Peer Center 全局直连关系' : '入口 Route 路由' }}</dd></div>
@@ -241,19 +258,24 @@ function formatMs(value: number | null) {
             <p v-else class="side-caption">点击地球上的节点或连接线查看详情；拖动旋转，滚轮缩放到城市级地图。</p>
           </section>
           <section class="side-section">
-            <div class="side-heading"><h3>待定位节点</h3><span>{{ withoutLocation.length }}</span></div>
-            <div v-if="withoutLocation.length" class="missing-nodes">
+            <div class="side-heading"><h3>待定位节点</h3><span>{{ locationReady ? withoutLocation.length : '—' }}</span></div>
+            <p v-if="attrsQuery.isError.value && !attrsQuery.data.value" class="side-caption" role="alert">
+              读取节点位置失败，可点击刷新重试。
+            </p>
+            <p v-else-if="!locationReady" class="side-caption">{{ routeError ? '暂无节点位置数据。' : '正在读取节点位置…' }}</p>
+            <div v-else-if="withoutLocation.length" class="missing-nodes">
               <button v-for="node in withoutLocation" :key="node.key" type="button"
-                class="missing-node" @click="selectNode(node.key)">
+                class="missing-node" :aria-pressed="node.key === selectedNodeKey"
+                @click="selectNode(node.key); showDetails()">
                 <span>{{ node.label }}</span><small>{{ node.ip }}</small>
               </button>
             </div>
-            <p v-else class="side-caption">当前路由中的节点均已设置位置。</p>
+            <p v-else class="side-caption">{{ topology.nodes.length ? '当前路由中的节点均已设置位置。' : '当前路由中没有节点。' }}</p>
             <el-button class="edit-location" text type="primary" @click="router.push('/network-nodes')">
               前往网络节点编辑位置
             </el-button>
           </section>
-          <p class="side-footnote">地图使用人工确认的 WGS84 经纬度。路由可见不等于持续在线；不展示虚构地理位置、离线状态或未采集的流量。</p>
+          <p class="side-footnote">节点位置来自人工确认的 WGS84 经纬度，路由可见仅表示最近采集到了该节点。</p>
         </aside>
       </div>
     </template>
@@ -262,33 +284,33 @@ function formatMs(value: number | null) {
 
 <style scoped>
 .map-page { display: flex; flex: 1; flex-direction: column; min-width: 0; min-height: 0;
-  padding: 16px 20px 20px; gap: 12px; color: var(--ent-text); overflow: hidden; }
-.map-header { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; }
-.map-header-copy p { margin: 5px 0 0; font-size: 12px; color: var(--ent-muted); }
-.map-eyebrow { font-size: 10px; color: var(--ent-cyan); font-weight: 750; letter-spacing: 1.5px; }
-.map-toolbar { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-.map-entry { width: 172px; } .basemap-select { width: 118px; }
-.map-stats { display: grid; grid-template-columns: repeat(5,minmax(0,1fr)); gap: 9px; }
-.map-stats > div { display: flex; flex-direction: column; padding: 10px 13px; border: 1px solid var(--ent-line);
-  border-radius: 11px; background: var(--ent-panel); }
-.map-stats span { font-size: 11px; color: var(--ent-muted); }
-.map-stats strong { font-size: 23px; margin-top: 5px; font-variant-numeric: tabular-nums; }
-.map-stats strong.stamp { font-size: 16px; margin-top: 9px; }
-.map-stats strong.cyan { color: #25bfcf; } .map-stats strong.orange { color: #e39a48; }
+  container-type: inline-size; overflow: auto; padding: 16px 20px 20px; gap: 12px; color: var(--ent-text); }
+.map-toolbar, .entry-picker, .refresh-controls { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; }
+.map-toolbar { justify-content: space-between; }
+.entry-picker label, .last-updated { font-size: 12px; color: var(--ent-muted); }
+.map-entry { width: 176px; }
+.last-updated { font-variant-numeric: tabular-nums; }
+.map-stats { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 8px; }
+.map-stats > div { display: flex; flex-wrap: wrap; align-items: baseline; justify-content: space-between;
+  gap: 4px 8px; padding: 8px 12px; border: 1px solid var(--ent-line); border-radius: 10px; background: var(--ent-panel); }
+.map-stats span { font-size: 12px; color: var(--ent-muted); }
+.map-stats strong { font-size: 19px; font-variant-numeric: tabular-nums; }
+.map-stats strong.cyan { color: var(--ent-cyan); } .map-stats strong.orange { color: var(--ent-amber); }
 .status-alert { border-radius: 8px; background: #5c401c37; color: var(--ent-text);
   font-size: 12px; padding: 8px 12px; }
 .map-empty { margin: 30px; color: var(--ent-muted); }
-.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) 286px; min-height: 0; flex: 1; gap: 12px; }
-.globe-area { position: relative; min-height: 0; overflow: hidden; border: 1px solid var(--ent-line);
-  border-radius: 14px; background: #061323; }
+.map-layout { display: grid; grid-template-columns: minmax(0, 1fr) minmax(228px, 26%); min-height: 440px; flex: 1; gap: 12px; }
+.globe-area { display: flex; flex-direction: column; min-width: 0; min-height: 0; overflow: hidden;
+  border: 1px solid var(--ent-line); border-radius: 14px; background: var(--ent-panel); }
+.map-viewport { position: relative; flex: 1; min-height: 280px; }
 .globe-loading, .globe-load-error {
   position: absolute; inset: 0; display: flex; flex-direction: column;
   align-items: center; justify-content: center; gap: 13px;
   color: var(--ent-muted); font-size: 12px;
   background: radial-gradient(circle at 48% 46%, #18364d, #071423 76%);
 }
-:global(:root[data-theme='light']) .globe-loading,
-:global(:root[data-theme='light']) .globe-load-error {
+:root[data-theme='light'] .globe-loading,
+:root[data-theme='light'] .globe-load-error {
   background: radial-gradient(circle at 48% 46%, #f7fbff, #d7e6f0 76%);
 }
 .globe-loading-spinner {
@@ -297,29 +319,23 @@ function formatMs(value: number | null) {
   animation: globe-loading-spin .8s linear infinite;
 }
 @keyframes globe-loading-spin { to { transform: rotate(360deg); } }
-:global(:root[data-theme='light']) .globe-area { background: #dceaf4; }
-.map-legend { position: absolute; left: 16px; bottom: 16px; background: #0b1f32e8; color: #dbeaf8;
-  border: 1px solid #28465b; padding: 10px 12px; border-radius: 10px; display: flex; flex-wrap: wrap; gap: 12px; font-size: 11px; box-shadow: 0 6px 20px #0003; backdrop-filter: blur(10px); }
-:global(:root[data-theme='light']) .map-legend { background: #ffffffed; color: #29445d; border-color: #bfd0df; box-shadow: 0 5px 18px #365b7620; }
+.map-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; padding: 9px 12px 4px;
+  font-size: 12px; color: var(--ent-text); border-top: 1px solid var(--ent-line); }
 .map-legend span { display: inline-flex; align-items: center; gap: 7px; }
 .line { display: inline-block; width: 24px; border-top: 2px solid; }
 .line.p2p { border-color: #38d8ff; border-top-style: solid; border-top-width: 3px; box-shadow: 0 0 8px #3ae6ff; }
 .line.relay { border-color: #ffae55; border-top-style: dashed; border-top-width: 3px; }
 .line.unknown { border-color: #b1bfd0; border-top-style: dotted; border-top-width: 2px; }
-:global(:root[data-theme='light']) .line.p2p { border-color: #087f9a; box-shadow: 0 0 6px #087f9a55; }
-:global(:root[data-theme='light']) .line.relay { border-color: #a85b0a; }
-:global(:root[data-theme='light']) .line.unknown { border-color: #74899a; }
+:root[data-theme='light'] .line.p2p { border-color: #087f9a; box-shadow: 0 0 6px #087f9a55; }
+:root[data-theme='light'] .line.relay { border-color: #a85b0a; }
+:root[data-theme='light'] .line.unknown { border-color: #74899a; }
 .point { width: 9px; height: 9px; border: 1px solid white; border-radius: 50%; background: #36dcec; }
-.map-controls { position: absolute; top: 15px; right: 16px; display: flex; gap: 12px; align-items: center;
-  padding: 7px 9px; border-radius: 10px; background: #0c2138e9; color: #eafaff; border: 1px solid #31516a; box-shadow: 0 5px 18px #0002; backdrop-filter: blur(10px); }
-:global(:root[data-theme='light']) .map-controls { background: #ffffffed; color: #29445d; border-color: #bfd0df; box-shadow: 0 5px 18px #365b7620; }
-:global(:root[data-theme='light']) .map-controls .el-switch { --el-switch-on-color: #087f9a; }
-:global(:root[data-theme='light']) .map-controls .el-select__wrapper { background: #f6fafd; box-shadow: 0 0 0 1px #c2d3e1 inset; }
-:global(:root[data-theme='light']) .map-controls .el-select__selected-item { color: #29445d; }
-.link-filter { width: 116px; }
-.map-source-info { position: absolute; bottom: 62px; left: 16px; color: #b7d8ec;
-  padding: 5px 8px; border-radius: 5px; background: #081b2be8; border: 1px solid #29485f; font-size: 10px; backdrop-filter: blur(8px); }
-:global(:root[data-theme='light']) .map-source-info { color: #4c657b; background: #ffffffed; border-color: #c2d3e1; }
+.map-controls { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center;
+  padding: 8px 12px; border-bottom: 1px solid var(--ent-line); }
+.basemap-select { width: 142px; }
+.link-filter { width: 114px; }
+.map-source-info { padding: 3px 12px 9px; color: var(--ent-muted); font-size: 11px; }
+.selection-shortcut { display: none; }
 .map-side { min-width: 0; min-height: 0; overflow: auto; display: flex; flex-direction: column; gap: 11px; }
 .side-section { padding: 15px; border: 1px solid var(--ent-line); border-radius: 13px; background: var(--ent-panel); }
 .side-section h3 { margin: 0 0 11px; font-size: 13px; }
@@ -334,21 +350,30 @@ dd { margin: 0; font-size: 12px; font-weight: 600; color: var(--ent-text); overf
 .missing-node { display: flex; align-items: center; justify-content: space-between; gap: 8px; text-align: left;
   border: 1px solid var(--ent-line); border-radius: 8px; padding: 9px 8px;
   background: var(--ent-panel-2); color: var(--ent-text); cursor: pointer; }
-.missing-node:hover { border-color: var(--ent-cyan); }
+.missing-node:hover, .missing-node[aria-pressed="true"] { border-color: var(--ent-cyan); }
+.missing-node span { overflow-wrap: anywhere; }
 .missing-node small { color: var(--ent-muted); white-space: nowrap; }
 .edit-location { margin-top: 8px; }
 .side-footnote { margin: 0 4px; }
-@media (max-width: 1080px) {
-  .map-layout { grid-template-columns: minmax(0,1fr) 248px; }
-  .map-page { padding: 12px; }
-  .map-stats { grid-template-columns: repeat(3,minmax(0,1fr)); }
+@container (max-width: 740px) {
+  .map-layout { display: flex; flex-direction: column; min-height: auto; flex: none; }
+  .map-viewport { flex: none; height: clamp(280px, 47dvh, 450px); }
+  .map-side { overflow: visible; }
+  .selection-shortcut { display: flex; align-items: center; justify-content: space-between; gap: 8px;
+    border: 0; border-top: 1px solid var(--ent-line); background: var(--ent-panel-2); color: var(--ent-text);
+    padding: 10px 12px; text-align: left; }
+  .selection-shortcut span { overflow-wrap: anywhere; }
+  .selection-shortcut strong { flex-shrink: 0; color: var(--ent-cyan); }
+}
+@container (max-width: 480px) {
+  .map-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
+  .entry-picker, .refresh-controls { width: 100%; }
+  .map-entry { flex: 1; min-width: 0; }
+  .refresh-controls { justify-content: space-between; }
+  .map-controls { padding: 8px; }
+  .basemap-select, .link-filter { flex: 1 1 112px; }
 }
 @media (max-width: 760px) {
-  .map-page { overflow: auto; }
-  .map-layout { grid-template-columns: 1fr; display: flex; flex-direction: column; overflow: visible; }
-  .globe-area { height: 480px; flex: none; }
-  .map-side { overflow: visible; }
-  .map-stats { grid-template-columns: repeat(2,minmax(0,1fr)); }
-  .map-legend { max-width: 80%; }
+  .map-page { padding: 10px; }
 }
 </style>

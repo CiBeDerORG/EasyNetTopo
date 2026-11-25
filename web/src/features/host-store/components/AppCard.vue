@@ -77,7 +77,7 @@ const resultLabel = computed(() => {
         <span>{{ categoryLabel }} · {{ sourceName }}</span>
       </div>
       <el-tooltip content="应用信息" placement="top">
-        <el-button text circle size="small" aria-label="应用信息" @click="$emit('info')">
+        <el-button text circle size="small" :aria-label="app.name + '的应用信息'" @click="$emit('info')">
           <el-icon><InfoFilled /></el-icon>
         </el-button>
       </el-tooltip>
@@ -134,11 +134,11 @@ const resultLabel = computed(() => {
         <el-button v-if="permissions.showInstall" size="small" type="primary" :disabled="busy || installing || !permissions.canInstall" @click="app.native_install ? $emit('action', 'install') : $emit('configure')">
           <el-icon><Download /></el-icon>{{ installing ? '安装中' : status?.state === 'missing' ? '重新安装' : '安装' }}
         </el-button>
+        <el-button v-if="permissions.showUpdate" size="small" type="primary" :disabled="busy || !permissions.canUpdate" @click="$emit('action', 'update')">
+          <el-icon><Refresh /></el-icon>更新
+        </el-button>
         <el-button v-if="permissions.showForceUpdate" size="small" type="warning" :disabled="busy || !permissions.canForceUpdate" @click="$emit('action', 'force_update')">
           <el-icon><Lightning /></el-icon>强制更新
-        </el-button>
-        <el-button v-if="permissions.showUpdate" size="small" :disabled="busy || !permissions.canUpdate" @click="$emit('action', 'update')">
-          <el-icon><Refresh /></el-icon>更新
         </el-button>
         <el-button v-if="permissions.showUninstall" size="small" type="danger" plain :disabled="busy || !permissions.canUninstall" @click="$emit('action', 'uninstall')">
           <el-icon><Delete /></el-icon>卸载
@@ -211,10 +211,11 @@ button.restriction-icon { cursor: pointer; }
 .task-meta { margin-top: 9px; color: #a8c6d9; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 .task-line, .task-error { display: block; }
 .task-error { color: #f9b0a1; }
-.result-label { margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
+.result-label { overflow-wrap: anywhere; margin: 8px 0 0; color: var(--ent-muted); font-size: 10px; line-height: 1.5; }
 .product-bottom { margin-top: auto; border-top: 1px solid #243b50; padding-top: 12px; }
 .app-actions { display: flex; align-items: center; gap: 5px; flex-wrap: wrap; }
-.app-actions :deep(.el-button) { margin: 0; }
+.app-actions :deep(.el-button) { min-height: 32px; margin: 0; }
+.app-actions :deep(.el-icon) { margin-inline-end: 4px; }
 @media (max-width: 630px) {
   .product-card { min-height: 0; }
 }

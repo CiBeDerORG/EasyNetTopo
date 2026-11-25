@@ -2,15 +2,19 @@
 import { ArrowLeft, HomeFilled, Connection, Monitor, Location, Compass } from '@element-plus/icons-vue'
 
 defineProps<{ collapsed: boolean }>()
-import { useRoute, useRouter } from 'vue-router'
-const route = useRoute()
-const router = useRouter()
+const pages = [
+  { path: '/navigation', label: '服务导航', icon: Compass },
+  { path: '/host-store', label: '主机商店', icon: HomeFilled },
+  { path: '/network-nodes', label: '网络节点', icon: Connection },
+  { path: '/network-map', label: '网络地图', icon: Location },
+  { path: '/devices', label: '设备列表', icon: Monitor }
+]
 defineEmits<{ toggle: [] }>()
 </script>
 
 <template>
   <aside class="sidebar" :class="{ 'is-collapsed': collapsed }" aria-label="主导航">
-    <button class="collapse-toggle" type="button"
+    <button class="collapse-toggle" type="button" :aria-expanded="!collapsed" aria-controls="workbench-pages"
       :title="collapsed ? '展开左侧菜单' : '收起左侧菜单'"
       :aria-label="collapsed ? '展开左侧菜单' : '收起左侧菜单'"
       @click="$emit('toggle')">
@@ -48,33 +52,12 @@ defineEmits<{ toggle: [] }>()
       </div>
     </div>
 
-    <nav class="sidebar-menu">
-      <el-tooltip content="导航" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" aria-label="导航" :aria-current="route.path === '/navigation' ? 'page' : undefined" @click="router.push('/navigation')">
-          <el-icon><Compass /></el-icon><span>导航</span>
-        </button>
-      </el-tooltip>
-      <el-tooltip content="主机商店" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" :aria-current="route.path === '/host-store' ? 'page' : undefined" @click="router.push('/host-store')">
-          <el-icon><HomeFilled /></el-icon>
-          <span>主机商店</span>
-        </button>
-      </el-tooltip>
-      <el-tooltip content="网络节点" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" :aria-current="route.path === '/network-nodes' ? 'page' : undefined" @click="router.push('/network-nodes')">
-          <el-icon><Connection /></el-icon><span>网络节点</span>
-        </button>
-      </el-tooltip>
-      <el-tooltip content="网络地图" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" :aria-current="route.path === '/network-map' ? 'page' : undefined" @click="router.push('/network-map')">
-          <el-icon><Location /></el-icon><span>网络地图</span>
-        </button>
-      </el-tooltip>
-      <el-tooltip content="设备列表" placement="right" :disabled="!collapsed">
-        <button class="nav-item" type="button" :aria-current="route.path === '/devices' ? 'page' : undefined" @click="router.push('/devices')">
-          <el-icon><Monitor /></el-icon><span>设备列表</span>
-        </button>
-      </el-tooltip>
+    <nav id="workbench-pages" class="sidebar-menu" aria-label="工作台页面">
+      <router-link v-for="page in pages" :key="page.path" :to="page.path" class="nav-item"
+        :aria-label="page.label" :title="page.label">
+        <el-icon><component :is="page.icon" /></el-icon>
+        <span>{{ page.label }}</span>
+      </router-link>
     </nav>
 
   </aside>
@@ -138,7 +121,7 @@ defineEmits<{ toggle: [] }>()
 .collapse-toggle:hover { background: #143450; }
 .collapse-toggle .el-icon { transition: transform .25s; }
 .is-collapsed .collapse-toggle .el-icon { transform: rotate(180deg); }
-.sidebar-menu { display: flex; flex-direction: column; gap: 8px; margin-top: 24px; }
+.sidebar-menu { display: flex; min-height: 0; overflow-y: auto; flex-direction: column; gap: 8px; margin-top: 24px; }
 .nav-item {
   display: flex;
   width: 100%;
@@ -152,18 +135,29 @@ defineEmits<{ toggle: [] }>()
   box-shadow: inset 3px 0 0 #4bd9ec, 0 0 24px #33b6e70b;
   color: #d7f7ff;
   text-align: left;
+  text-decoration: none;
 }
 .nav-item:not([aria-current="page"]) { background: transparent; box-shadow: none; border-color: transparent; color: #8bacca; }
+.nav-item:not([aria-current="page"]):hover { background: var(--ent-elev); }
 .nav-item .el-icon { color: #62e1f1; font-size: 21px; }
 .nav-item span { overflow: hidden; font-size: 13px; font-weight: 680; white-space: nowrap; }
 .is-collapsed .brand { justify-content: center; padding-inline: 0; }
 .is-collapsed .brand-names, .is-collapsed .nav-item span { display: none; }
 .is-collapsed .nav-item { justify-content: center; padding: 0; }
-@media (max-width: 830px) {
+@media (min-width: 761px) and (max-width: 1000px) {
   .sidebar { padding: 18px 10px; }
   .collapse-toggle { display: none; }
   .brand { justify-content: center; padding-inline: 0; }
-  .brand-names, .nav-item span { display: none; }
-  .nav-item { justify-content: center; padding: 0; }
+  .brand-names { display: none; }
+  .nav-item, .is-collapsed .nav-item { flex-direction: column; justify-content: center; gap: 4px; padding: 6px 0; }
+  .nav-item span, .is-collapsed .nav-item span { display: inline; font-size: 11px; }
+}
+@media (max-width: 760px) {
+  .sidebar { grid-row: 2; padding: 4px 4px calc(4px + env(safe-area-inset-bottom)); border: 0; border-top: 1px solid var(--ent-line); }
+  .brand, .collapse-toggle { display: none; }
+  .sidebar-menu { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); gap: 2px; margin: 0; }
+  .nav-item, .is-collapsed .nav-item { min-height: 50px; flex-direction: column; justify-content: center; gap: 3px; padding: 3px 0; border-radius: 8px; }
+  .nav-item .el-icon { font-size: 18px; }
+  .nav-item span, .is-collapsed .nav-item span { display: inline; font-size: 11px; }
 }
 </style>

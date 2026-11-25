@@ -62,3 +62,22 @@
 .el-alert--error .el-alert__icon { color: var(--ent-red); }
 .el-empty__description p { color: var(--ent-muted); }
 .el-skeleton__item { background: linear-gradient(90deg, #13263b 25%, #1a334c 37%, #13263b 63%); }
+
+/* 长表单单独滚动，标题和确认操作始终留在视口中。 */
+.el-dialog {
+  --el-dialog-margin-top: min(6dvh, 48px);
+  display: flex;
+  flex-direction: column;
+  max-width: calc(100vw - 24px);
+  max-height: calc(100dvh - 2 * min(6dvh, 48px));
+  margin-bottom: var(--el-dialog-margin-top);
+  padding: 0;
+}
+.el-dialog__header, .el-dialog__footer { flex: none; }
+.el-dialog__header.show-close { padding-right: 50px !important; }
+.el-dialog__body { min-height: 0; overflow: auto; overscroll-behavior: contain; }
+@media (max-width: 760px) {
+  .el-dialog { --el-dialog-margin-top: 12px; max-height: calc(100dvh - 24px); }
+  .el-dialog__header, .el-dialog__body, .el-dialog__footer { padding: 14px 16px !important; }
+  .el-message-box { max-width: calc(100vw - 24px); }
+}

@@ -236,13 +236,13 @@ async function saveService() {
 </script>
 
 <template>
-  <el-dialog
+  <el-dialog append-to-body
     v-model="open" :title="(importing ? '关联主机' : adding ? (editing ? '编辑服务' : '新增服务') : '服务列表') + ' · ' + device.name" width="min(660px, 94vw)" destroy-on-close
     :close-on-click-modal="!busy" :close-on-press-escape="!busy" :show-close="!busy"
   >
     <DeviceServiceImport v-if="importing" v-model:saving="savingImport" :device="device" :hosts="hosts" :network-ip="networkIp"
       @close="importing = false" @imported="afterImport" />
-    <el-form v-else-if="adding" class="service-form" label-position="top" @submit.prevent="saveService">
+    <el-form v-else-if="adding" :id="'device-service-form-' + device.id" class="service-form" label-position="top" @submit.prevent="saveService">
       <el-alert v-if="errorMessage" type="error" :title="errorMessage" show-icon :closable="false" />
       <el-form-item label="服务名称" required>
         <el-input v-model="form.name" maxlength="128" placeholder="例如：NAS 管理后台" :disabled="saving" />
@@ -315,10 +315,6 @@ async function saveService() {
           </template>
         </template>
       </section>
-      <div class="service-form-actions">
-        <el-button :disabled="busy" @click="adding = false">返回列表</el-button>
-        <el-button type="primary" native-type="submit" :disabled="checking" :loading="saving">保存服务</el-button>
-      </div>
     </el-form>
     <template v-else>
       <div class="service-list-actions">
@@ -373,12 +369,16 @@ async function saveService() {
       </ul>
       <el-empty v-else description="该设备还没有登记服务" :image-size="84" />
     </template>
+    <template v-if="adding && !importing" #footer>
+      <el-button :disabled="busy" @click="adding = false">返回列表</el-button>
+      <el-button type="primary" native-type="submit" :form="'device-service-form-' + device.id"
+        :disabled="checking" :loading="saving">保存服务</el-button>
+    </template>
   </el-dialog>
 </template>
 
 <style scoped>
-.service-list-actions, .service-form-actions { display:flex; justify-content:flex-end; margin-bottom:12px; }
-.service-form-actions { margin-bottom:0; }
+.service-list-actions { display:flex; justify-content:flex-end; margin-bottom:12px; }
 .service-form-grid { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; }
 .service-form :deep(.el-input-number), .service-form :deep(.el-select) { width:100%; }
 .service-form > .el-alert { margin-bottom:14px; }

@@ -10,6 +10,7 @@ type Basemap = 'auto' | 'standard' | 'satellite' | 'dark'
 type Theme = 'light' | 'dark'
 
 const props = defineProps<{
+  entryId: string
   dataReady: boolean
   nodes: MapNode[]
   links: MapLink[]
@@ -340,6 +341,11 @@ watch(() => [props.basemap, activeTheme.value], () => {
 })
 watch(() => [props.nodes, props.links, props.showTraffic, props.selectedNodeKey, props.selectedLinkKey],
   redraw, { deep: true })
+watch(() => props.entryId, () => {
+  initialViewFitted = false
+  resetCamera()
+  fitInitialView()
+})
 watch(() => [props.nodes, props.dataReady], fitInitialView, { deep: true, flush: 'post' })
 type IdleWindow = Window & {
   requestIdleCallback?: (callback: () => void, options?: { timeout: number }) => number
@@ -438,16 +444,16 @@ onUnmounted(() => {
     <div ref="globe" class="earth-canvas" aria-label="三维地球网络地图，可拖动旋转与滚轮缩放" />
     <div v-if="loading" class="map-notice">正在启动 3D 地球…</div>
     <div v-if="error" class="map-notice error-notice" role="alert">{{ error }}</div>
-    <div class="zoom-tools">
-      <button title="放大" type="button" @click="zoomIn">+</button>
-      <button title="缩小" type="button" @click="zoomOut">−</button>
-      <button title="全球视角" type="button" @click="resetCamera">◎</button>
+    <div v-if="!loading && viewer" class="zoom-tools" role="group" aria-label="地图视角">
+      <button aria-label="放大地图" title="放大地图" type="button" @click="zoomIn">+</button>
+      <button aria-label="缩小地图" title="缩小地图" type="button" @click="zoomOut">−</button>
+      <button aria-label="恢复全球视角" title="恢复全球视角" type="button" @click="resetCamera">◎</button>
     </div>
   </div>
 </template>
 
 <style scoped>
-.earth-shell { position: relative; width: 100%; height: 100%; min-height: 320px; overflow: hidden;
+.earth-shell { position: relative; width: 100%; height: 100%; overflow: hidden;
   background: radial-gradient(circle at 45% 50%, #214563, #071423 72%); transition: background .2s ease; }
 .earth-shell.theme-light { background: radial-gradient(circle at 45% 50%, #f7fbff, #d7e6f0 72%); }
 .earth-canvas { position: absolute; inset: 0; }
@@ -459,9 +465,9 @@ onUnmounted(() => {
 .error-notice { border-color: #bc795a; background: #372820ef; color: #ffdfba; }
 .theme-light .map-notice { border-color: #b6cad9; background: #ffffffed; color: #29465e; }
 .theme-light .error-notice { border-color: #e1b6a0; background: #fff6f0ed; color: #914323; }
-.zoom-tools { position: absolute; z-index: 3; right: 18px; bottom: 46px; display: grid; gap: 7px; }
+.zoom-tools { position: absolute; z-index: 3; right: 12px; bottom: 32px; display: grid; gap: 7px; }
 .zoom-tools button { border: 1px solid #4e7190; background: #102e45e8; color: #e4faff;
-  border-radius: 9px; width: 40px; height: 40px; cursor: pointer; font-size: 23px; }
+  border-radius: 9px; width: 44px; height: 44px; cursor: pointer; font-size: 23px; }
 .zoom-tools button:hover { background: #1e526d; }
 .theme-light .zoom-tools button { border-color: #b5c8d8; background: #ffffffed; color: #23445e; box-shadow: 0 2px 9px #45678020; }
 .theme-light .zoom-tools button:hover { background: #eaf3f9; }

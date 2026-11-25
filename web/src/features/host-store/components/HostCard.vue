@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed } from 'vue'
-import { Box, Delete, Edit, Connection } from '@element-plus/icons-vue'
+import { Box, Delete, Edit, Connection, MoreFilled } from '@element-plus/icons-vue'
 import type { ExecutionTask, Host, HostHealthStatus } from '../types'
 import { formatTaskTime, taskSourceLabel, taskStateLabel } from '../task-status'
 
@@ -37,52 +37,34 @@ const statusType = computed(() => ({
 </script>
 
 <template>
-  <article
-    class="host-card"
-    :class="{ active: selected }"
-    role="button"
-    tabindex="0"
-    :aria-label="'选择主机 ' + host.name"
-    :aria-pressed="selected"
-    @click="$emit('select', host)"
-    @keydown.enter.prevent="$emit('select', host)"
-    @keydown.space.prevent="$emit('select', host)"
-  >
+  <article class="host-card" :class="{ active: selected }">
     <div class="host-head">
       <div class="host-emblem"><el-icon><Box /></el-icon></div>
-      <div class="host-info">
-        <div class="host-name">{{ host.name }}</div>
-        <div class="host-address">{{ host.endpoint }}</div>
-      </div>
-      <span class="status-dot" :class="'status-' + healthStatus"></span>
+      <button class="host-select" type="button" :aria-label="'选择主机 ' + host.name" :aria-pressed="selected"
+        @click="$emit('select', host)">
+        <span class="host-name">{{ host.name }}</span>
+        <span class="host-address" :title="host.endpoint">{{ host.endpoint }}</span>
+      </button>
+      <el-dropdown trigger="click" placement="bottom-end">
+        <el-button class="host-menu" text :aria-label="host.name + '的主机操作'" title="主机操作">
+          <el-icon><MoreFilled /></el-icon>
+        </el-button>
+        <template #dropdown>
+          <el-dropdown-menu>
+            <el-dropdown-item :icon="Edit" @click="$emit('edit', host)">编辑主机</el-dropdown-item>
+            <el-dropdown-item :icon="Box" :disabled="!host.agent_id" @click="$emit('docker', host)">Docker 资源</el-dropdown-item>
+            <el-dropdown-item :icon="Connection" :disabled="!host.agent_id" @click="$emit('network', host)">
+              {{ host.network_entry ? '取消组网入口' : '设为组网入口' }}
+            </el-dropdown-item>
+            <el-dropdown-item divided :icon="Delete" class="delete-action" @click="$emit('delete', host)">删除主机</el-dropdown-item>
+          </el-dropdown-menu>
+        </template>
+      </el-dropdown>
     </div>
-
-    <div class="host-bottom">
-      <div class="host-tags">
-        <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
-        <el-tag v-if="host.network_entry" size="small" type="success">组网入口</el-tag>
-        <el-tag v-if="host.agent_id" size="small" effect="plain" type="info">Agent</el-tag>
-      </div>
-      <div class="host-ops" @click.stop @keydown.stop>
-        <el-tooltip :content="host.network_entry ? '取消组网入口' : '设为组网入口'" placement="top">
-          <el-button text circle size="small" :aria-label="host.network_entry ? '取消组网入口' : '设为组网入口'" :disabled="!host.agent_id" @click="$emit('network', host)"><el-icon><Connection /></el-icon></el-button>
-        </el-tooltip>
-        <el-tooltip content="编辑主机" placement="top">
-          <el-button text circle size="small" aria-label="编辑主机" @click="$emit('edit', host)">
-            <el-icon><Edit /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="Docker 资源" placement="top">
-          <el-button text circle size="small" aria-label="Docker 资源" :disabled="!host.agent_id" @click="$emit('docker', host)">
-            <el-icon><Box /></el-icon>
-          </el-button>
-        </el-tooltip>
-        <el-tooltip content="删除主机" placement="top">
-          <el-button text circle size="small" class="delete-action" aria-label="删除主机" @click="$emit('delete', host)">
-            <el-icon><Delete /></el-icon>
-          </el-button>
-        </el-tooltip>
-      </div>
+    <div class="host-tags">
+      <el-tag size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+      <el-tag v-if="host.network_entry" size="small" type="success">组网入口</el-tag>
+      <el-tag v-if="host.agent_id" size="small" effect="plain" type="info">Agent</el-tag>
     </div>
     <div v-if="task" class="host-task" role="status">
       <template v-if="task.state === 'succeeded'">
@@ -99,6 +81,7 @@ const statusType = computed(() => ({
 
 <style scoped>
 .host-card {
+  position: relative;
   display: block;
   width: 100%;
   margin-bottom: 10px;
@@ -130,22 +113,18 @@ const statusType = computed(() => ({
   color: #79d7f2;
   font-size: 19px;
 }
-.host-info { min-width: 0; flex: 1; }
-.host-name { overflow: hidden; font-size: 12px; font-weight: 730; text-overflow: ellipsis; white-space: nowrap; }
-.host-address { overflow: hidden; margin-top: 5px; color: #8bacca; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
-.status-dot { display: block; width: 7px; height: 7px; flex: none; margin-top: 6px; border-radius: 50%; background: #8594a5; }
-.status-online { background: var(--ent-green); box-shadow: 0 0 10px #46ddb766; }
-.status-checking, .status-paired { background: var(--ent-amber); box-shadow: 0 0 10px #ffbf735c; }
-.status-error { background: var(--ent-red); box-shadow: 0 0 10px #ff788b66; }
-.status-unpaired { background: #8594a5; }
+.host-select { flex: 1; min-width: 0; border: 0; padding: 0; background: transparent; color: inherit; text-align: left; }
+/* 主机卡片整体可点，操作菜单单独接收点击和键盘焦点。 */
+.host-select::after { position: absolute; inset: 0; border-radius: 13px; content: ''; }
+.host-select:focus-visible::after { outline: 2px solid var(--ent-cyan); outline-offset: 1px; }
+.host-head :deep(.el-dropdown) { position: relative; }
+.host-menu { width: 34px; height: 34px; padding: 0; color: var(--ent-muted); }
+.delete-action { color: var(--ent-red); }
+.host-name { display: block; overflow: hidden; font-size: 14px; font-weight: 730; text-overflow: ellipsis; white-space: nowrap; }
+.host-address { display: block; overflow: hidden; margin-top: 5px; color: #8bacca; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .host-task { margin-top: 9px; color: #93b4ca; font-size: 10px; line-height: 1.6; overflow-wrap: anywhere; }
 .host-task-title { display: block; color: #e1e9f1; }
 .host-task-source, .host-task-message { display: block; }
 .host-task-message { color: #f8b2a8; }
-.host-bottom { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; margin-top: 10px; }
-.host-tags { display: flex; min-width: 0; align-items: center; gap: 5px; flex-wrap: wrap; }
-.host-ops { display: flex; flex: none; align-items: center; gap: 0; }
-.host-ops :deep(.el-button) { width: 27px; height: 27px; margin: 0; color: #82acc4; }
-.host-ops :deep(.el-button:hover) { background: #25516c77; color: var(--ent-cyan); }
-.host-ops :deep(.delete-action:hover) { background: #75293a55; color: var(--ent-red); }
+.host-tags { display: flex; margin-top: 10px; align-items: center; gap: 5px; flex-wrap: wrap; }
 </style>
