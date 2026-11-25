@@ -117,6 +117,12 @@ func TestCatalogSchemaMigratesLegacySnapshot(t *testing.T) {
 	if err != nil || len(apps) != 1 || apps[0] != entry {
 		t.Fatalf("重新初始化后展示条目不一致: %+v, %v", apps, err)
 	}
+	// A 的回填若与 B 的成功刷新交错，不能改变已经切换到 B 的卡片。
+	verified := entry
+	verified.CatalogOnly, verified.NativeInstall, verified.Revision = false, "macos_homebrew", "a"
+	if err := s.RestoreCatalogNativeInstall(ctx, verified); err != nil {
+		t.Fatal(err)
+	}
 	found, err := s.CatalogAppByID(ctx, source.ID, entry.AppID)
 	if err != nil || found != entry {
 		t.Fatalf("按身份读取展示条目失败: %+v, %v", found, err)

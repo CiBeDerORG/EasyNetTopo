@@ -169,6 +169,20 @@ func (s *Store) CatalogApps(ctx context.Context) ([]CatalogApp, error) {
 	}
 	return apps, rows.Err()
 }
+
+// 只补齐仍属于同一来源当前快照、路径和清单摘要的旧记录。
+func (s *Store) RestoreCatalogNativeInstall(ctx context.Context, verified CatalogApp) error {
+	if verified.CatalogOnly || verified.NativeInstall == "" {
+		return errors.New("缺少已验证的原生安装声明")
+	}
+	_, err := s.db.ExecContext(ctx, `UPDATE catalog_apps SET catalog_only=0, native_install=?
+		WHERE source_id=? AND app_id=? AND revision=? AND manifest_path=? AND manifest_sha256=?
+		AND catalog_only=1 AND native_install=''
+		AND EXISTS (SELECT 1 FROM catalog_sources WHERE id=catalog_apps.source_id AND current_revision=catalog_apps.revision)`,
+		verified.NativeInstall, verified.SourceID, verified.AppID, verified.Revision, verified.ManifestPath, verified.ManifestSHA256)
+	return err
+}
+
 func (s *Store) SetCatalogSyncError(ctx context.Context, id string) error {
 	// 不记录 Git 的原始报错，避免泄露 SSH 配置、执行环境或远程凭据。
 	result, err := s.db.ExecContext(ctx, "UPDATE catalog_sources SET last_error='同步失败，请检查 Git 访问和仓库应用清单',updated_at=? WHERE id=?", time.Now().UTC().Format(time.RFC3339), id)

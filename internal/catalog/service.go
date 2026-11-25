@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"log"
 	"os"
 	"path"
 	"path/filepath"
@@ -28,8 +29,46 @@ func NewService(ctx context.Context, db *storage.Store) (*Service, error) {
 	if err := os.MkdirAll(cache, 0700); err != nil {
 		return nil, err
 	}
-	return &Service{store: db, cacheDir: cache}, nil
+	s := &Service{store: db, cacheDir: cache}
+	if err := s.restoreNativeInstallers(ctx); err != nil {
+		log.Printf("恢复应用商店原生安装能力失败：%v", err)
+	}
+	return s, nil
 }
+
+// 旧版可先同步含 native_install 的清单，并将该固定版本记为仅展示。
+// 启动时用同一份保留的提交重算一次，不访问远端，也不重写来源的同步状态。
+func (s *Service) restoreNativeInstallers(ctx context.Context) error {
+	saved, err := s.store.CatalogApps(ctx)
+	if err != nil {
+		return err
+	}
+	seen := make(map[[2]string]bool)
+	for _, old := range saved {
+		snapshot := [2]string{old.SourceID, old.Revision}
+		if !old.CatalogOnly || old.NativeInstall != "" || seen[snapshot] || !bundleSourceID.MatchString(old.SourceID) {
+			continue
+		}
+		seen[snapshot] = true
+		repo, err := pinnedBundleRepository(ctx, filepath.Join(s.cacheDir, old.SourceID+".git"), old.Revision)
+		if err != nil {
+			continue
+		}
+		apps, err := readCatalogApps(ctx, old.SourceID, repo)
+		if err != nil {
+			continue
+		}
+		for _, app := range apps {
+			if app.NativeInstall != "" {
+				if err := s.store.RestoreCatalogNativeInstall(ctx, app); err != nil {
+					return err
+				}
+			}
+		}
+	}
+	return nil
+}
+
 func (s *Service) Create(ctx context.Context, name, remote, branch string) (storage.CatalogSource, error) {
 	name = strings.TrimSpace(name)
 	if len(name) < 1 || len(name) > 80 || strings.ContainsAny(name, "\r\n\x00") {
