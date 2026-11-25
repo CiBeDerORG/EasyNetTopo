@@ -1,10 +1,72 @@
 package httpapi
 
 import (
+	"context"
+	"fmt"
+	"net/http"
+	"net/http/httptest"
+	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/CiBeDerORG/EasyNetTopo/internal/catalog"
 	"github.com/CiBeDerORG/EasyNetTopo/internal/storage"
+	"github.com/CiBeDerORG/EasyNetTopo/internal/tasks"
 )
+
+func TestManualUpdateRetainsConfirmedRevision(t *testing.T) {
+	ctx := context.Background()
+	db, err := storage.Open(filepath.Join(t.TempDir(), "app.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	svc, err := catalog.NewService(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := db.CreateCatalogSource(ctx, "应用源", "https://github.com/example/catalog.git", "main")
+	if err != nil {
+		t.Fatal(err)
+	}
+	store, err := storage.NewTaskStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner, err := tasks.New(ctx, store, svc, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	first, next := strings.Repeat("a", 40), strings.Repeat("b", 40)
+	saveSnapshot := func(revision string) {
+		t.Helper()
+		if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, []storage.CatalogApp{{
+			SourceID: source.ID, AppID: "demo", Revision: revision,
+		}}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	saveSnapshot(first)
+	request := func() int {
+		body := fmt.Sprintf(`{"source_id":%q,"app_id":"demo","revision":%q}`, source.ID, first)
+		req := httptest.NewRequest(http.MethodPost, "/api/v1/hosts/host/apps/update", strings.NewReader(body))
+		req.Header.Set("Content-Type", "application/json")
+		w := httptest.NewRecorder()
+		enqueueManualUpdate(w, req, "host", runner, svc)
+		return w.Code
+	}
+	if code := request(); code != http.StatusAccepted {
+		t.Fatalf("当前版本未入队：HTTP %d", code)
+	}
+	saveSnapshot(next)
+	if code := request(); code != http.StatusConflict {
+		t.Fatalf("刷新后仍然接受旧版本的新请求：HTTP %d", code)
+	}
+	task, ok, err := store.Next(ctx, "host")
+	if err != nil || !ok || task.Revision != first {
+		t.Fatalf("已入队的更新未保留确认版本：%+v，%v", task, err)
+	}
+}
 
 func TestResolveHookTargets(t *testing.T) {
 	hosts := []storage.Host{

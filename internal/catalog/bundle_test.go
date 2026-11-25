@@ -113,11 +113,50 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 	if err != nil || !bytes.Equal(first.ZIP, second.ZIP) || first.SHA256 != second.SHA256 {
 		t.Fatalf("未提交的工作区文件影响已锁定的包: %v", err)
 	}
+	// 模拟用户确认 A 后目录刷新到 B。两个版本均合法，包摘要确实不同。
+	git("restore", ".")
+	nextManifest := append(bytes.Clone(manifestRaw), []byte("\n# 新一版清单\n")...)
+	write(app+"/app.yaml", nextManifest)
+	git("add", ".")
+	git("commit", "-qm", "测试：更新当前目录快照")
+	nextRevision := git("rev-parse", "HEAD")
+	git("push", "-q", cache, "HEAD:refs/easynettopo/catalog/"+nextRevision)
+	nextHash := sha256.Sum256(nextManifest)
+	if err := db.SaveCatalogSnapshot(ctx, source.ID, nextRevision, []storage.CatalogApp{{
+		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: hex.EncodeToString(nextHash[:]),
+	}}); err != nil {
+		t.Fatal(err)
+	}
+	current, err := service.BuildUpdateBundle(ctx, source.ID, app, "")
+	if err != nil || current.Revision != nextRevision || current.SHA256 == first.SHA256 {
+		t.Fatalf("跟随当前目录的更新应构建 B：%s，%v", current.Revision, err)
+	}
+	pinned, err := service.BuildUpdateBundle(ctx, source.ID, app, revision)
+	if err != nil || pinned.Revision != revision || !bytes.Equal(pinned.ZIP, first.ZIP) {
+		t.Fatalf("排队的手动更新未使用当时确认的 A：%s，%v", pinned.Revision, err)
+	}
+	if err := db.SaveCatalogSnapshot(ctx, source.ID, nextRevision, nil); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := service.BuildUpdateBundle(ctx, source.ID, app, revision); err == nil {
+		t.Fatal("当前成功目录已撤回应用，却仍用旧引用创建了包")
+	}
+	if err := db.SaveCatalogSnapshot(ctx, source.ID, nextRevision, []storage.CatalogApp{{
+		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: hex.EncodeToString(nextHash[:]),
+	}}); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "-d", "refs/easynettopo/catalog/"+revision); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := service.BuildUpdateBundle(ctx, source.ID, app, revision); err == nil {
+		t.Fatal("A 的固定引用丢失后仍构建了包")
+	}
+	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "-d", "refs/easynettopo/catalog/"+nextRevision); err != nil {
+		t.Fatal(err)
+	}
 	if _, err := service.BuildCandidateBundle(ctx, source.ID, app); err == nil {
-		t.Fatal("未固定的 Git Commit 被用于构建")
+		t.Fatal("未固定的当前 Git Commit 被用于构建")
 	}
 	if _, err := service.BuildCandidateBundle(ctx, "../not-a-source-id", "sub2api"); err == nil {
 		t.Fatal("非法来源 ID 被接受")

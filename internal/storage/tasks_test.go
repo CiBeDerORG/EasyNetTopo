@@ -111,6 +111,36 @@ func TestTaskInterruptedBlocksHostAndPreparationRecovery(t *testing.T) {
 	if err != nil || ok {
 		t.Fatal("interrupted task must block subsequent updates")
 	}
+	parent, err := store.Get(ctx, first.ParentID)
+	if err != nil || parent.State != "interrupted" || parent.FinishedAt != "" {
+		t.Fatalf("还有待执行应用时，主机应显示中断并保留未完成状态：%+v，%v", parent, err)
+	}
+	// 模拟升级前保存的错误汇总；重开数据库后就要显示正确状态。
+	if _, err := db.db.ExecContext(ctx, "UPDATE execution_tasks SET state='running' WHERE id=?", parent.ID); err != nil {
+		t.Fatal(err)
+	}
+	store, err = NewTaskStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	parent, err = store.Get(ctx, first.ParentID)
+	if err != nil || parent.State != "interrupted" {
+		t.Fatalf("升级后未恢复中断状态：%+v，%v", parent, err)
+	}
+	if err := store.ResolveInterrupted(ctx, first.ID); err != nil {
+		t.Fatal(err)
+	}
+	next, ok, err = store.Next(ctx, "A")
+	if err != nil || !ok || next.AppID != "two" {
+		t.Fatalf("解除中断后应继续同批后续任务：%+v，%v", next, err)
+	}
+	if err := store.SetState(ctx, next, "succeeded", ""); err != nil {
+		t.Fatal(err)
+	}
+	parent, err = store.Get(ctx, first.ParentID)
+	if err != nil || parent.State != "failed" || parent.FinishedAt == "" {
+		t.Fatalf("整批完成后应汇总已人工关闭的失败任务：%+v，%v", parent, err)
+	}
 }
 
 func TestNativeAgentAndAppShareHostQueue(t *testing.T) {
@@ -357,7 +387,11 @@ func TestLegacyTaskStateSchemaMigratesToCancelled(t *testing.T) {
 	}
 	_, err = db.db.ExecContext(ctx, `INSERT INTO execution_tasks
 		(id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at)
-		VALUES('legacy-task','legacy-parent','application','A','source','app','update','manual','queued','','2026-11-08T00:00:00Z','','')`)
+		VALUES('legacy-parent','','host','A','','','update','manual','queued','','2026-11-08T00:00:00Z','',''),
+		      ('legacy-task','legacy-parent','application','A','source','app','update','manual','queued','','2026-11-08T00:00:00Z','',''),
+		      ('legacy-hook','hook-parent','application','B','source','app','update','github_actions','queued','','2026-11-08T00:00:00Z','',''),
+		      ('legacy-running','run-parent','application','C','source','app','update','manual','running','','2026-11-08T00:00:00Z','',''),
+		      ('legacy-native','native-parent','application','D','native','easyhostagent','update','manual','preparing','','2026-11-08T00:00:00Z','','')`)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -365,15 +399,39 @@ func TestLegacyTaskStateSchemaMigratesToCancelled(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	task, err := store.Get(ctx, "legacy-task")
-	if err != nil || task.State != "queued" {
-		t.Fatalf("legacy task should survive schema migration: %+v, %v", task, err)
+	for id, want := range map[string]string{
+		"legacy-task": "failed", "legacy-parent": "failed", "legacy-hook": "queued",
+		"legacy-running": "running", "legacy-native": "preparing",
+	} {
+		task, err := store.Get(ctx, id)
+		if err != nil || task.State != want {
+			t.Fatalf("旧任务 %s 迁移后应为 %s，实际为 %+v，%v", id, want, task, err)
+		}
+	}
+	task, err := store.Get(ctx, "legacy-hook")
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := store.SetState(ctx, task, "cancelled", "migration test"); err != nil {
 		t.Fatal(err)
 	}
-	task, err = store.Get(ctx, "legacy-task")
+	task, err = store.Get(ctx, "legacy-hook")
 	if err != nil || task.State != "cancelled" {
 		t.Fatalf("migrated schema must accept cancelled state: %+v, %v", task, err)
+	}
+	// 新协议的 Hook 可以自报 manual。重新打开任务库时不应把它当作无版本的旧页面任务。
+	created, err := store.Enqueue(ctx, "manual", []TaskTarget{{
+		HostID: "B", SourceID: "source", AppID: "app", Action: "update",
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	reopened, err := NewTaskStore(ctx, db)
+	if err != nil {
+		t.Fatal(err)
+	}
+	hook, err := reopened.Get(ctx, created[1].ID)
+	if err != nil || hook.State != "queued" || hook.Revision != "" {
+		t.Fatalf("以 manual 标记来源的 Hook 应继续采用执行时版本：%+v，%v", hook, err)
 	}
 }

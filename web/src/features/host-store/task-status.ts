@@ -6,7 +6,7 @@ const pending = (task: ExecutionTask) => task.state === 'queued'
 
 export function currentHostTask(tasks: ExecutionTask[], hostId: string): ExecutionTask | undefined {
   const hostTasks = tasks.filter(task => task.host_id === hostId && task.type === 'host')
-  return hostTasks.find(inProgress) || hostTasks.find(task => task.state === 'interrupted') || hostTasks.find(pending) || hostTasks[0]
+  return hostTasks.find(task => task.state === 'interrupted') || hostTasks.find(inProgress) || hostTasks.find(pending) || hostTasks[0]
 }
 
 export function currentAppTask(

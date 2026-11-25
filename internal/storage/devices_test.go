@@ -5,6 +5,7 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
 )
 
@@ -552,13 +553,14 @@ func TestNetworkNodeHostnameLegacyMigrationAndAmbiguityGuards(t *testing.T) {
 	}
 }
 
-func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
+func legacyDuplicateNodes(t *testing.T) (*DeviceStore, string, string) {
+	t.Helper()
 	ctx := context.Background()
 	db, err := Open(filepath.Join(t.TempDir(), "legacy-duplicates.db"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	defer db.Close()
+	t.Cleanup(func() { db.Close() })
 	store, err := NewDeviceStore(ctx, db)
 	if err != nil {
 		t.Fatal(err)
@@ -576,10 +578,6 @@ func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
 	if _, err := db.SaveNodeAttributes(ctx, NodeAttributes{NetworkKey: "network:home", PeerID: "old", Hostname: "FnOS"}); err != nil {
 		t.Fatal(err)
 	}
-	child, err := store.CreateDevice(ctx, DeviceInput{Name: "旧节点的下挂设备", NetworkKey: "network:home", PeerID: "old"})
-	if err != nil {
-		t.Fatal(err)
-	}
 	if _, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
 		{Name: "FnOS · 网络节点", NetworkKey: "network:home", PeerID: "new"},
 	}); err != nil {
@@ -589,19 +587,75 @@ func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
 	if err != nil || len(nodes) != 2 {
 		t.Fatalf("未模拟出历史重复节点: %+v %v", nodes, err)
 	}
+	for _, node := range nodes {
+		if node.PeerID == "new" {
+			return store, originalID, node.ID
+		}
+	}
+	t.Fatal("缺少新 Peer ID 的重复节点")
+	return nil, "", ""
+}
+
+func TestNetworkNodeReconcileAlreadyCreatedLegacyDuplicate(t *testing.T) {
+	ctx := context.Background()
+	store, originalID, _ := legacyDuplicateNodes(t)
+	child, err := store.CreateDevice(ctx, DeviceInput{Name: "旧节点的下挂设备", NetworkKey: "network:home", PeerID: "old"})
+	if err != nil {
+		t.Fatal(err)
+	}
 	result, err := store.SyncNetworkNodeDevices(ctx, []NetworkNodeDeviceInput{
 		{Name: "任意展示别名", NetworkKey: "network:home", PeerID: "new", Hostname: "FnOS"},
 	})
 	if err != nil || result.Rebound != 1 {
 		t.Fatalf("未回收空白重复节点并沿用原历史设备: %+v %v", result, err)
 	}
-	nodes, err = store.ListNodeDevices(ctx)
+	nodes, err := store.ListNodeDevices(ctx)
 	if err != nil || len(nodes) != 1 || nodes[0].ID != originalID || nodes[0].PeerID != "new" {
 		t.Fatalf("原历史节点 ID 未保留: %+v %v", nodes, err)
 	}
 	c, err := store.Device(ctx, child.ID)
 	if err != nil || c.NodeHostname != "FnOS" || c.PeerID != "old" {
 		t.Fatalf("原有子设备未保留主机名归属: %+v %v", c, err)
+	}
+}
+
+func TestNetworkNodeReconcileKeepsDuplicateWithDeviceService(t *testing.T) {
+	ctx := context.Background()
+	store, originalID, duplicateID := legacyDuplicateNodes(t)
+	item := DeviceServiceImport{
+		DeviceServiceInput: DeviceServiceInput{Name: "NAS 管理", Port: 8443, Protocols: []string{"tcp"}, AccessURL: "https://nas:8443", Icon: "web", Note: "保留备注"},
+		Source:             DeviceServiceSource{HostID: "host", SourceID: "source", AppID: "nas", OriginalPort: 8443},
+	}
+	if result, err := store.ImportDeviceServices(ctx, duplicateID, []DeviceServiceImport{item}); err != nil || result.Imported != 1 {
+		t.Fatalf("登记设备服务失败: %+v %v", result, err)
+	}
+	services, err := store.ListDeviceServices(ctx, duplicateID)
+	if err != nil || len(services) != 1 {
+		t.Fatalf("读取登记服务失败: %+v %v", services, err)
+	}
+	serviceID := services[0].ID
+	forward := &DeviceServiceForward{Enabled: true, HostID: "host", InstanceID: "instance", Listen: "127.0.0.1:18443", Destination: "10.0.0.2:8443", Protocols: []string{"tcp"}}
+	if _, err := store.SaveDeviceServiceForward(ctx, duplicateID, serviceID, forward); err != nil {
+		t.Fatal(err)
+	}
+	want, err := store.SetDeviceServiceNavigation(ctx, duplicateID, serviceID, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := 0; i < 2; i++ {
+		result, err := store.SyncNetworkNodeDevicesIfEnabled(ctx, []NetworkNodeDeviceInput{
+			{Name: "显示名", NetworkKey: "network:home", PeerID: "new", Hostname: "FnOS"},
+		})
+		if err != nil || result.Existing != 1 || result.Rebound != 0 {
+			t.Fatalf("第 %d 次同步错误换绑节点: %+v %v", i+1, result, err)
+		}
+		if original, err := store.Device(ctx, originalID); err != nil || original.PeerID != "old" {
+			t.Fatalf("原历史节点被意外改动: %+v %v", original, err)
+		}
+		got, err := store.DeviceService(ctx, duplicateID, serviceID)
+		if err != nil || !reflect.DeepEqual(want, got) {
+			t.Fatalf("服务归属或元数据发生变化: 得到 %+v，期望 %+v，错误 %v", got, want, err)
+		}
 	}
 }
 

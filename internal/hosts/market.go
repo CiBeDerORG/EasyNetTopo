@@ -9,6 +9,7 @@ import (
 
 type AppError struct {
 	Status  int
+	Code    string
 	Message string
 }
 

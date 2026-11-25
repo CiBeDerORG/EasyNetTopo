@@ -290,7 +290,7 @@ func enqueueManualUpdate(w http.ResponseWriter, r *http.Request, hostID string, 
 		return
 	}
 	created, err := runner.Enqueue(r.Context(), "manual", []storage.TaskTarget{
-		{HostID: hostID, SourceID: req.Source, AppID: req.App, Action: "update"},
+		{HostID: hostID, SourceID: req.Source, AppID: req.App, Revision: req.Revision, Action: "update"},
 	})
 	if err != nil {
 		http.Error(w, "创建更新任务失败", http.StatusServiceUnavailable)

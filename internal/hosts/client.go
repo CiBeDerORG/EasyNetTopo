@@ -279,8 +279,14 @@ func (c *Client) request(ctx context.Context, method, path string, body any, con
 		}
 		if strings.HasPrefix(path, "/v1/apps/") {
 			var failure struct{ Code, Message string }
-			if json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure) == nil && (failure.Code == "app_action" || failure.Code == "app_status") {
-				return nil, &AppError{Status: res.StatusCode, Message: failure.Message}
+			if json.NewDecoder(io.LimitReader(res.Body, 2048)).Decode(&failure) == nil {
+				switch failure.Code {
+				case "app_action", "app_status", "app_busy", "app_conflict", "invalid_request":
+					return nil, &AppError{Status: res.StatusCode, Code: failure.Code, Message: failure.Message}
+				}
+			}
+			if res.StatusCode >= 400 && res.StatusCode < 500 {
+				return nil, &AppError{Status: res.StatusCode, Message: fmt.Sprintf("Agent 拒绝应用请求（HTTP %d）", res.StatusCode)}
 			}
 		}
 		return nil, fmt.Errorf("Agent 返回 HTTP %d", res.StatusCode)

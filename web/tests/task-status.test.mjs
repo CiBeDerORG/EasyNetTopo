@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createSelfUpdateDetector, formatTaskTime, formatTaskTriggerTime, taskActive } from '../src/features/host-store/task-status.ts'
+import { createSelfUpdateDetector, currentHostTask, formatTaskTime, formatTaskTriggerTime, taskActive } from '../src/features/host-store/task-status.ts'
 
 function makeTask(state, overrides = {}) {
   return {
@@ -18,6 +18,12 @@ function makeTask(state, overrides = {}) {
     ...overrides
   }
 }
+
+test('同主机有中断任务时优先展示需要处理的批次', () => {
+  const blocked = makeTask('interrupted', { id: 'blocked', type: 'host' })
+  const running = makeTask('running', { id: 'running', type: 'host' })
+  assert.equal(currentHostTask([running, blocked], 'host-1'), blocked)
+})
 
 test('排队、准备和执行中的任务使用触发时间展示模式', () => {
   for (const state of ['queued', 'preparing', 'running']) {

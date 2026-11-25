@@ -1512,7 +1512,7 @@ func uniqueLegacyNodeTx(ctx context.Context, tx *sql.Tx, networkKey, hostname, e
 	return id, peerID, nil
 }
 
-// 仅清理系统自动生成且完全没有下挂设备、网关、人工属性和管理配置的重复节点壳。
+// 仅清理系统自动生成且没有下挂设备、登记服务、网关、人工属性和管理配置的重复节点壳。
 func disposableDuplicateNodeTx(ctx context.Context, tx *sql.Tx, networkKey, peerID, nodeID, hostname string) (bool, error) {
 	var name string
 	var disposable bool
@@ -1525,6 +1525,7 @@ func disposableDuplicateNodeTx(ctx context.Context, tx *sql.Tx, networkKey, peer
 		AND NOT EXISTS(SELECT 1 FROM network_node_attributes a WHERE a.network_key=? AND a.peer_id=?)
 		AND NOT EXISTS(SELECT 1 FROM device_openwrt_configs c WHERE c.device_id=?)
 		AND NOT EXISTS(SELECT 1 FROM device_discovery_observations o WHERE o.device_id=? OR o.gateway_device_id=?)
+		AND NOT EXISTS(SELECT 1 FROM device_services s WHERE s.device_id=devices.id)
 		FROM devices WHERE id=?`, networkKey, peerID, nodeID, networkKey, peerID, networkKey, peerID,
 		nodeID, nodeID, nodeID, nodeID).Scan(&name, &disposable)
 	if err != nil {

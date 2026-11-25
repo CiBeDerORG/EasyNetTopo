@@ -11,25 +11,29 @@ import (
 
 // Task 是 EasyNetTopo 的调度记录，不是远程 Agent 自己的任务 ID。
 type Task struct {
-	ID            string `json:"id"`
-	ParentID      string `json:"parent_id,omitempty"`
-	Type          string `json:"type"`
-	HostID        string `json:"host_id"`
-	SourceID      string `json:"source_id,omitempty"`
-	AppID         string `json:"app_id,omitempty"`
-	Action        string `json:"action"`
-	TriggerSource string `json:"trigger_source"`
-	State         string `json:"state"`
-	Message       string `json:"message,omitempty"`
-	CreatedAt     string `json:"created_at"`
-	StartedAt     string `json:"started_at,omitempty"`
-	FinishedAt    string `json:"finished_at,omitempty"`
+	ID       string `json:"id"`
+	ParentID string `json:"parent_id,omitempty"`
+	Type     string `json:"type"`
+	HostID   string `json:"host_id"`
+	SourceID string `json:"source_id,omitempty"`
+	AppID    string `json:"app_id,omitempty"`
+	Revision string `json:"revision,omitempty"`
+	// 仅在当前下发请求收到匹配的受理回执后保存，用于重启后继续核对同一包。
+	AcceptedBundleSHA256 string `json:"-"`
+	Action               string `json:"action"`
+	TriggerSource        string `json:"trigger_source"`
+	State                string `json:"state"`
+	Message              string `json:"message,omitempty"`
+	CreatedAt            string `json:"created_at"`
+	StartedAt            string `json:"started_at,omitempty"`
+	FinishedAt           string `json:"finished_at,omitempty"`
 }
 
 type TaskTarget struct {
 	HostID   string
 	SourceID string
 	AppID    string
+	Revision string
 	Action   string
 }
 
@@ -53,6 +57,8 @@ func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
 		action TEXT NOT NULL,
 		trigger_source TEXT NOT NULL,
 		state TEXT NOT NULL CHECK(state IN ('queued','preparing','running','succeeded','failed','interrupted','cancelled')),
+		revision TEXT NOT NULL DEFAULT '',
+		accepted_bundle_sha256 TEXT NOT NULL DEFAULT '',
 		message TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		started_at TEXT NOT NULL DEFAULT '',
@@ -63,6 +69,9 @@ func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
 	if err := migrateTaskCancellationState(ctx, store.db); err != nil {
 		return nil, fmt.Errorf("迁移任务取消状态: %w", err)
 	}
+	if err := migrateUpdateTaskMetadata(ctx, store.db); err != nil {
+		return nil, fmt.Errorf("迁移应用更新任务: %w", err)
+	}
 	for _, query := range []string{
 		`CREATE INDEX IF NOT EXISTS idx_execution_tasks_queue ON execution_tasks(host_id,type,state,created_at)`,
 		`CREATE INDEX IF NOT EXISTS idx_execution_tasks_parent ON execution_tasks(parent_id)`,
@@ -70,6 +79,13 @@ func NewTaskStore(ctx context.Context, store *Store) (*TaskStore, error) {
 		if _, err := store.db.ExecContext(ctx, query); err != nil {
 			return nil, fmt.Errorf("初始化任务索引: %w", err)
 		}
+	}
+	// 旧版本在同批还有待执行子任务时，会把已经阻塞的主机任务保留为 running。
+	if _, err := store.db.ExecContext(ctx, `UPDATE execution_tasks SET state='interrupted'
+		WHERE type='host' AND state='running' AND EXISTS (
+			SELECT 1 FROM execution_tasks child WHERE child.parent_id=execution_tasks.id AND child.state='interrupted'
+		)`); err != nil {
+		return nil, fmt.Errorf("恢复中断的主机任务状态: %w", err)
 	}
 	return &TaskStore{db: store.db}, nil
 }
@@ -120,6 +136,61 @@ func migrateTaskCancellationState(ctx context.Context, db *sql.DB) error {
 	return tx.Commit()
 }
 
+func migrateUpdateTaskMetadata(ctx context.Context, db *sql.DB) error {
+	tx, err := db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	var hasRevision, hasReceipt bool
+	if err := tx.QueryRowContext(ctx, `SELECT COUNT(*) FILTER (WHERE name='revision'),
+		COUNT(*) FILTER (WHERE name='accepted_bundle_sha256') FROM pragma_table_info('execution_tasks')`).Scan(&hasRevision, &hasReceipt); err != nil {
+		return err
+	}
+	if !hasReceipt {
+		if _, err := tx.ExecContext(ctx, "ALTER TABLE execution_tasks ADD COLUMN accepted_bundle_sha256 TEXT NOT NULL DEFAULT ''"); err != nil {
+			return err
+		}
+	}
+	if hasRevision {
+		return tx.Commit()
+	}
+	if _, err := tx.ExecContext(ctx, "ALTER TABLE execution_tasks ADD COLUMN revision TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	// 老任务只保存了触发来源，无法区分手动更新与同名 Hook，也无法找回当时选定的版本。
+	// 仅关闭尚未发出命令的此类应用更新，正在执行的任务继续按原方式核对远端结果。
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	rows, err := tx.QueryContext(ctx, `UPDATE execution_tasks SET state='failed',finished_at=?,
+		message='旧任务未保存确认的 Git 版本，请重新提交更新'
+		WHERE type='application' AND trigger_source='manual' AND state IN ('queued','preparing')
+		  AND NOT (source_id=? AND app_id=?) RETURNING parent_id`, now, NativeAgentSourceID, NativeAgentAppID)
+	if err != nil {
+		return err
+	}
+	parents := make(map[string]bool)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			rows.Close()
+			return err
+		}
+		parents[id] = true
+	}
+	if err := rows.Close(); err != nil {
+		return err
+	}
+	if err := rows.Err(); err != nil {
+		return err
+	}
+	for id := range parents {
+		if err := updateParentSummary(ctx, tx, id, now); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
+}
+
 // Enqueue 原子地保存主机父任务及其全部应用子任务。
 // 不联系远端主机，即使主机暂时离线也能立即返回。
 func (s *TaskStore) Enqueue(ctx context.Context, trigger string, targets []TaskTarget) ([]Task, error) {
@@ -136,9 +207,9 @@ func (s *TaskStore) Enqueue(ctx context.Context, trigger string, targets []TaskT
 	stamp := time.Now().UTC().Format(time.RFC3339Nano)
 	insert := func(t Task) error {
 		_, err := tx.ExecContext(ctx, `INSERT INTO execution_tasks
-			(id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at)
-			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-			t.ID, t.ParentID, t.Type, t.HostID, t.SourceID, t.AppID, t.Action,
+			(id,parent_id,type,host_id,source_id,app_id,revision,action,trigger_source,state,message,created_at,started_at,finished_at)
+			VALUES(?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+			t.ID, t.ParentID, t.Type, t.HostID, t.SourceID, t.AppID, t.Revision, t.Action,
 			t.TriggerSource, t.State, t.Message, t.CreatedAt, t.StartedAt, t.FinishedAt)
 		return err
 	}
@@ -175,7 +246,7 @@ func (s *TaskStore) Enqueue(ctx context.Context, trigger string, targets []TaskT
 			return nil, e
 		}
 		task := Task{ID: "AT-" + id, ParentID: parentID, Type: "application", HostID: target.HostID,
-			SourceID: target.SourceID, AppID: target.AppID, Action: target.Action,
+			SourceID: target.SourceID, AppID: target.AppID, Revision: target.Revision, Action: target.Action,
 			TriggerSource: trigger, State: "queued", CreatedAt: stamp}
 		if e := insert(task); e != nil {
 			return nil, e
@@ -188,11 +259,11 @@ func (s *TaskStore) Enqueue(ctx context.Context, trigger string, targets []TaskT
 	return result, nil
 }
 
-const taskColumns = "id,parent_id,type,host_id,source_id,app_id,action,trigger_source,state,message,created_at,started_at,finished_at"
+const taskColumns = "id,parent_id,type,host_id,source_id,app_id,revision,accepted_bundle_sha256,action,trigger_source,state,message,created_at,started_at,finished_at"
 
 func scanTask(row interface{ Scan(...any) error }) (Task, error) {
 	var t Task
-	err := row.Scan(&t.ID, &t.ParentID, &t.Type, &t.HostID, &t.SourceID, &t.AppID,
+	err := row.Scan(&t.ID, &t.ParentID, &t.Type, &t.HostID, &t.SourceID, &t.AppID, &t.Revision, &t.AcceptedBundleSHA256,
 		&t.Action, &t.TriggerSource, &t.State, &t.Message, &t.CreatedAt, &t.StartedAt, &t.FinishedAt)
 	return t, err
 }
@@ -276,10 +347,10 @@ func (s *TaskStore) SetState(ctx context.Context, task Task, state, message stri
 	if finished {
 		finishAt = now
 	}
-	result, err := tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?, message=?,
+	result, err := tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?, message=?, accepted_bundle_sha256=?,
 		started_at=CASE WHEN started_at='' AND ? IN ('preparing','running') THEN ? ELSE started_at END,
 		finished_at=CASE WHEN ?='' THEN '' ELSE ? END WHERE id=? AND state!='cancelled'`,
-		state, message, state, now, finishAt, finishAt, task.ID)
+		state, message, task.AcceptedBundleSHA256, state, now, finishAt, finishAt, task.ID)
 	if err != nil {
 		return err
 	}
@@ -321,18 +392,21 @@ func updateParentSummary(ctx context.Context, tx *sql.Tx, parentID, now string) 
 		return nil
 	}
 	parentState, parentFinished := "queued", ""
-	if done == total {
+	switch {
+	case interruptions > 0:
+		parentState = "interrupted"
+	case done == total:
 		parentState = "succeeded"
-		if interruptions > 0 {
-			parentState = "interrupted"
-		} else if failures > 0 {
+		if failures > 0 {
 			parentState = "failed"
 		} else if cancellations > 0 {
 			parentState = "cancelled"
 		}
-		parentFinished = now
-	} else if active > 0 || done > 0 {
+	case active > 0 || done > 0:
 		parentState = "running"
+	}
+	if done == total {
+		parentFinished = now
 	}
 	_, err = tx.ExecContext(ctx, `UPDATE execution_tasks SET state=?,
 		started_at=CASE WHEN started_at='' AND ?='running' THEN ? ELSE started_at END,

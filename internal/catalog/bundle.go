@@ -64,6 +64,11 @@ func (r *gitRepository) bundleContents(ctx context.Context, file string) ([]byte
 // BuildCandidateBundle 只在后端内存中构建不可执行的候选包，不上送、不安装。
 // previewManifest 不是 Deploy 完整 Schema+语义验证；本方法的结果不能作为可信发布授权。
 func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicationID string) (packagebuilder.Artifact, error) {
+	return s.BuildUpdateBundle(ctx, sourceID, applicationID, "")
+}
+
+// BuildUpdateBundle 对手动更新使用提交时确认的版本，Hook 空版本沿用执行时的目录快照。
+func (s *Service) BuildUpdateBundle(ctx context.Context, sourceID, applicationID, requestedRevision string) (packagebuilder.Artifact, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if !bundleSourceID.MatchString(sourceID) || !appID.MatchString(applicationID) {
@@ -87,8 +92,13 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 			break
 		}
 	}
+	// 已删除的来源和在最新成功目录中被移除或停用的应用都不能再创建包，即使保留了旧引用。
 	if appRevision == "" || appRevision != source.CurrentRevision {
 		return packagebuilder.Artifact{}, errors.New("应用与来源快照版本不匹配")
+	}
+	if requestedRevision != "" {
+		// 目录只保留最新清单摘要。历史版本由该来源的固定 Git 引用锁定整棵树。
+		appRevision = requestedRevision
 	}
 	repository, err := pinnedBundleRepository(ctx, filepath.Join(s.cacheDir, source.ID+".git"), appRevision)
 	if err != nil {
@@ -102,7 +112,7 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 		return packagebuilder.Artifact{}, fmt.Errorf("固定版本 Manifest 未通过 Deploy JSON Schema 校验: %w", err)
 	}
 	manifest, actualDigest, err := previewManifest(applicationID, manifestRaw, repository.objects)
-	if err != nil || actualDigest != digest {
+	if err != nil || (appRevision == source.CurrentRevision && actualDigest != digest) {
 		return packagebuilder.Artifact{}, errors.New("Manifest 与已索引快照不一致")
 	}
 	if !manifest.IsEnabled() {
@@ -152,7 +162,7 @@ func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicatio
 		}
 	}
 	artifact, err := packagebuilder.Build(packagebuilder.Identity{
-		SourceID: sourceID, ApplicationID: applicationID, GitRevision: appRevision, ManifestSHA256: digest,
+		SourceID: sourceID, ApplicationID: applicationID, GitRevision: appRevision, ManifestSHA256: actualDigest,
 	}, manifestRaw, bundleResources)
 	artifact.Config = fields
 	artifact.SchemaVersion = manifest.Version

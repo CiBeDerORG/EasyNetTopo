@@ -176,13 +176,13 @@ func (s *Service) process(task storage.Task) {
 	}
 	// running 任务可能在控制端重启前已下发。只恢复状态轮询，不重复执行更新。
 	if task.State == "running" {
-		s.monitor(taskCtx, task, "")
+		s.monitor(taskCtx, task)
 		return
 	}
 	if taskCtx.Err() != nil || !s.set(task, "preparing", "") {
 		return
 	}
-	pkg, err := s.catalog.BuildCandidateBundle(taskCtx, task.SourceID, task.AppID)
+	pkg, err := s.catalog.BuildUpdateBundle(taskCtx, task.SourceID, task.AppID, task.Revision)
 	if err != nil {
 		s.fail(taskCtx, task, "当前应用来源不可用或清单验证失败")
 		return
@@ -206,6 +206,24 @@ func (s *Service) process(task storage.Task) {
 	if taskCtx.Err() != nil || !s.taskActive(task) {
 		return
 	}
+	s.dispatchUpdate(taskCtx, task, pkg.SHA256)
+}
+
+type appUpdateRecord struct {
+	OperationID string `json:"operation_id"`
+	Source      string `json:"source_id"`
+	App         string `json:"app_id"`
+	Digest      string `json:"bundle_sha256"`
+	Action      string `json:"action"`
+	Result      string `json:"result"`
+}
+
+func (r appUpdateRecord) matches(task storage.Task, digest string) bool {
+	return r.OperationID == task.ID && r.Source == task.SourceID && r.App == task.AppID &&
+		r.Action == "update" && r.Digest == digest
+}
+
+func (s *Service) dispatchUpdate(taskCtx context.Context, task storage.Task, digest string) {
 	// 先持久化 running，再发命令。失联或重启后绝不盲目重复执行有副作用的更新。
 	if !s.set(task, "running", "") {
 		return
@@ -214,7 +232,7 @@ func (s *Service) process(task storage.Task) {
 		return
 	}
 	raw, err := s.hosts.AppAction(taskCtx, task.HostID, "update", map[string]string{
-		"source_id": task.SourceID, "app_id": task.AppID, "bundle_sha256": pkg.SHA256,
+		"source_id": task.SourceID, "app_id": task.AppID, "bundle_sha256": digest, "operation_id": task.ID,
 	})
 	// 新任务可能在请求期间替代本任务。Agent 已受理的远端脚本无法撤回，
 	// 但本地 Worker 必须停止；最新任务会受 Agent 独占锁保护并在旧操作结束后重试。
@@ -223,30 +241,33 @@ func (s *Service) process(task storage.Task) {
 	}
 	if err != nil {
 		var agentErr *hosts.AppError
-		if errors.As(err, &agentErr) {
-			if agentErr.Status == http.StatusConflict {
-				// Agent 的现有主机级独占锁依然有效。未接受的任务返回队列重试。
+		if errors.As(err, &agentErr) && agentErr.Status >= 400 && agentErr.Status < 500 {
+			switch {
+			case agentErr.Status == http.StatusConflict && agentErr.Code == "app_busy":
 				s.set(task, "queued", "主机正在执行其他操作，等待重试")
-			} else {
-				// 明确的业务拒绝并未启动脚本，不能无限等待一个不存在的任务。
+			case agentErr.Status == http.StatusConflict:
+				s.fail(taskCtx, task, "Agent 拒绝更新：应用归属或执行记录存在冲突")
+			case agentErr.Status == http.StatusBadRequest && agentErr.Code == "invalid_request":
+				s.fail(taskCtx, task, "Agent 拒绝带执行编号的更新请求，请先升级 EasyHostAgent 后重新提交")
+			default:
 				s.fail(taskCtx, task, "Agent 拒绝应用更新请求")
 			}
 			return
 		}
-		// 请求可能已送达，但回应丢失；先用 Agent 实际状态核对，避免重复更新。
-		slog.Warn("更新请求未获确认，等待 Agent 状态", "task_id", task.ID, "error", err)
-	} else {
-		var ack struct {
-			Action string `json:"action"`
-			Result string `json:"result"`
-			Digest string `json:"bundle_sha256"`
-		}
-		if json.Unmarshal(raw, &ack) != nil || ack.Action != "update" || ack.Digest != pkg.SHA256 {
-			s.set(task, "interrupted", "Agent 更新回执与目标任务不匹配，请人工核对")
-			return
-		}
+		slog.Warn("更新请求未获确认", "task_id", task.ID, "error", err)
+		s.set(task, "interrupted", "未收到 Agent 的更新回执，请人工核对本次更新")
+		return
 	}
-	s.monitor(taskCtx, task, pkg.SHA256)
+	var ack appUpdateRecord
+	if json.Unmarshal(raw, &ack) != nil || !ack.matches(task, digest) || ack.Result != "running" {
+		s.set(task, "interrupted", "Agent 更新回执与目标任务不匹配，请人工核对")
+		return
+	}
+	// 重启后继续用持久化的包摘要与本地任务号共同核对远端记录。
+	task.AcceptedBundleSHA256 = digest
+	if s.set(task, "running", "") {
+		s.monitor(taskCtx, task)
+	}
 }
 
 func (s *Service) fail(ctx context.Context, task storage.Task, reason string) {
@@ -255,71 +276,52 @@ func (s *Service) fail(ctx context.Context, task storage.Task, reason string) {
 	}
 }
 
-func (s *Service) monitor(ctx context.Context, task storage.Task, digest string) {
+func (s *Service) monitor(ctx context.Context, task storage.Task) {
+	if task.AcceptedBundleSHA256 == "" {
+		s.set(task, "interrupted", "未保存本次更新的受理回执，请人工核对")
+		return
+	}
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
 	// 启动后立即查一次，后续以固定间隔轮询，直到收到实际完成结果。
-	everSeenRunning := false
-	missingCount := 0
 	for {
 		if ctx.Err() != nil || !s.taskActive(task) {
 			return
 		}
 		raw, err := s.hosts.AppAction(ctx, task.HostID, "status", map[string]any{
-			"apps":            []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
-			"include_managed": false,
+			"apps":         []map[string]string{{"source_id": task.SourceID, "app_id": task.AppID}},
+			"operation_id": task.ID,
 		})
 		if ctx.Err() != nil || !s.taskActive(task) {
 			return
 		}
+		var agentErr *hosts.AppError
+		if errors.As(err, &agentErr) && agentErr.Status >= 400 && agentErr.Status < 500 &&
+			agentErr.Status != http.StatusTooManyRequests && agentErr.Status != http.StatusRequestTimeout {
+			s.set(task, "interrupted", "Agent 无法按执行编号查询本次更新，请核对版本和执行记录")
+			return
+		}
 		if err == nil {
 			var response struct {
-				Apps []struct {
-					Source string `json:"source_id"`
-					App    string `json:"app_id"`
-					Digest string `json:"bundle_sha256"`
-					Action string `json:"action"`
-					Result string `json:"result"`
-				} `json:"apps"`
+				Apps []appUpdateRecord `json:"apps"`
 			}
-			if json.Unmarshal(raw, &response) == nil {
-				matched := false
-				for _, row := range response.Apps {
-					if row.Source != task.SourceID || row.App != task.AppID || row.Action != "update" {
-						continue
-					}
-					if digest != "" && row.Digest != digest {
-						continue
-					}
-					matched = true
-					switch row.Result {
-					case "running":
-						everSeenRunning = true
-					case "succeeded":
-						// 没有 Agent 操作唯一标识时，不能把重启前旧的成功回执当作本次成功。
-						if digest == "" && !everSeenRunning {
-							s.set(task, "interrupted", "控制端重启，Agent 未提供本次更新的唯一执行回执")
-						} else {
-							s.set(task, "succeeded", "")
-						}
-						return
-					case "failed":
-						s.set(task, "failed", "Agent 更新脚本执行失败")
-						return
-					case "unknown":
-						s.set(task, "interrupted", "Agent 上次更新已中断，请人工确认")
-						return
-					}
-				}
-				if matched {
-					missingCount = 0
-				} else {
-					missingCount++
-				}
-				if missingCount >= 5 {
-					s.set(task, "interrupted", "无法在 Agent 中确认本次更新记录，请核对后处理")
-					return
-				}
+			if json.Unmarshal(raw, &response) != nil || len(response.Apps) != 1 ||
+				!response.Apps[0].matches(task, task.AcceptedBundleSHA256) {
+				s.set(task, "interrupted", "Agent 没有返回与本次执行编号和包摘要匹配的更新记录，请人工核对")
+				return
+			}
+			switch response.Apps[0].Result {
+			case "running":
+				// 已找到本次操作，继续轮询。
+			case "succeeded":
+				s.set(task, "succeeded", "")
+				return
+			case "failed":
+				s.set(task, "failed", "Agent 更新脚本执行失败")
+				return
+			default:
+				s.set(task, "interrupted", "Agent 无法确认本次更新结果，请人工核对")
+				return
 			}
 		}
 		// 主机暂时离线不是更新失败。持续轮询，保证同一主机不会运行下一条任务。

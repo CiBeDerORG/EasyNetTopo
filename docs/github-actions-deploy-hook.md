@@ -305,6 +305,8 @@ Content-Type: application/json
 
 HT 是主机级任务，AT 是应用级任务。同一台主机的应用更新串行调度，不同主机可以并发；更新失败不会把 HTTP 202 改成失败响应，因为 HTTP 请求早已结束。
 
+升级时先更新 EasyHostAgent，再更新 EasyNetTopo。普通应用更新使用 AT 编号查询该次执行的结果。旧 Agent 拒绝带执行编号的请求时，任务会提示升级，升级后可重新提交。切换版本前已受理的任务如果缺少可核对的回执，会显示 `interrupted`，需要在主机上核实。
+
 在 EasyNetTopo 页面查看主机/应用任务状态，或管理员登录后查询 `GET /api/v1/tasks`（该接口需要**登录会话**，不能只拿 Hook Bearer Token 调用）：
 
 - `queued`：排队中
