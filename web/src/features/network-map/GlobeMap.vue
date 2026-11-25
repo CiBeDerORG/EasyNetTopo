@@ -5,6 +5,7 @@ import 'cesium/Build/Cesium/Widgets/widgets.css'
 import { curveSeparationMeters, linkCurveLanes, type MapLink, type MapNode } from './topology'
 
 import { nodeViewRectangle, paddedCameraHeight } from './camera-fit'
+import { LINK_ENDPOINT_HEIGHT, makeLinkSegment } from './link-geometry'
 
 type Basemap = 'auto' | 'standard' | 'satellite' | 'dark'
 type Theme = 'light' | 'dark'
@@ -29,9 +30,21 @@ let themeObserver: MutationObserver | null = null
 let cancelled = false
 let initialViewFitted = false
 let tileFailureCount = 0
-let lastCurveSeparation = 0
-let cameraRedrawFrame: number | null = null
-let removeCameraChangedListener: (() => void) | null = null
+type LinkSegment = NonNullable<ReturnType<typeof makeLinkSegment>>
+type LinkPath = {
+  segments: { geometry: LinkSegment; points: Cesium.Cartesian3[] }[]
+  hasLane: boolean
+  points: Cesium.Cartesian3[]
+}
+const changingPaths: LinkPath[] = []
+const particleLinks = new WeakMap<Cesium.Entity, string>()
+const lastView = new Cesium.Matrix4()
+const lastProjection = new Cesium.Matrix4()
+let lastCanvasWidth = 0
+let lastCanvasHeight = 0
+let lastSeparation = 0
+let checkedThisFrame = false
+let removeFrameListener: (() => void) | null = null
 const nodeEntities = new Map<string, Cesium.Entity>()
 const located = () => props.nodes.filter(node => node.latitude !== null && node.longitude !== null)
 
@@ -117,96 +130,100 @@ function setBaseLayer() {
     error.value = '地图底图初始化失败。地球仍可操作，请切换底图重试。'
   }
 }
-function arcPoints(start: MapNode, end: MapNode, lateralOffsetMeters = 0): Cesium.Cartesian3[] {
-  const startPoint = Cesium.Cartographic.fromDegrees(start.longitude!, start.latitude!)
-  const endPoint = Cesium.Cartographic.fromDegrees(end.longitude!, end.latitude!)
-  const geodesic = new Cesium.EllipsoidGeodesic(startPoint, endPoint)
-  const distance = geodesic.surfaceDistance
-  const lift = Math.max(110000, Math.min(1150000, distance * 0.115))
-  const positions: Cesium.Cartesian3[] = []
-  for (let i = 0; i <= 72; i++) {
-    const fraction = i / 72
-    const point = geodesic.interpolateUsingFraction(fraction)
-    const height = 1600 + Math.sin(Math.PI * fraction) * lift
-    const position = Cesium.Cartesian3.fromRadians(point.longitude, point.latitude, height)
-
-    // 沿局部切线的左右方向做横向偏移；两端保持在真实节点坐标，中段形成相反弯曲。
-    if (lateralOffsetMeters !== 0 && i > 0 && i < 72) {
-      const beforePoint = geodesic.interpolateUsingFraction(Math.max(0, fraction - 1 / 72))
-      const afterPoint = geodesic.interpolateUsingFraction(Math.min(1, fraction + 1 / 72))
-      const before = Cesium.Cartesian3.fromRadians(beforePoint.longitude, beforePoint.latitude, 0)
-      const after = Cesium.Cartesian3.fromRadians(afterPoint.longitude, afterPoint.latitude, 0)
-      const tangent = Cesium.Cartesian3.normalize(
-        Cesium.Cartesian3.subtract(after, before, new Cesium.Cartesian3()),
-        new Cesium.Cartesian3()
-      )
-      const normal = Cesium.Ellipsoid.WGS84.geodeticSurfaceNormal(position, new Cesium.Cartesian3())
-      const side = Cesium.Cartesian3.normalize(
-        Cesium.Cartesian3.cross(tangent, normal, new Cesium.Cartesian3()),
-        new Cesium.Cartesian3()
-      )
-      const shift = lateralOffsetMeters * Math.sin(Math.PI * fraction)
-      Cesium.Cartesian3.add(
-        position,
-        Cesium.Cartesian3.multiplyByScalar(side, shift, new Cesium.Cartesian3()),
-        position
-      )
-    }
-    positions.push(position)
-  }
-  return positions
+function joinSegments(segments: LinkPath['segments']): Cesium.Cartesian3[] {
+  const first = segments[0].points
+  return segments.length === 1 ? first : first.concat(segments[1].points.slice(1))
 }
-function linkPoints(
-  link: MapLink,
-  byKey: Map<string, MapNode>,
-  curveOffsetMeters = 0
-): Cesium.Cartesian3[] | null {
+function createLinkPath(link: MapLink, byKey: Map<string, MapNode>, lane: number | undefined,
+  scene: Cesium.Scene, separation: number): LinkPath | null {
   const from = byKey.get(link.from), to = byKey.get(link.to)
   if (!from || !to || from.latitude === null || from.longitude === null ||
       to.latitude === null || to.longitude === null) return null
-  if (from.latitude === to.latitude && from.longitude === to.longitude) return null
   const via = link.via ? byKey.get(link.via) : undefined
-  if (via && via.latitude !== null && via.longitude !== null) {
-    return [...arcPoints(from, via), ...arcPoints(via, to).slice(1)]
-  }
-  return arcPoints(from, to, curveOffsetMeters)
+  // 即使某一段坐标重合，另一段仍从真实的中继位置起止。
+  const geometries = via && via.latitude !== null && via.longitude !== null
+    ? [makeLinkSegment(from, via), makeLinkSegment(via, to)]
+    : [makeLinkSegment(from, to, lane)]
+  const segments = geometries.filter((geometry): geometry is LinkSegment => geometry !== null)
+    .map(geometry => ({ geometry, points: geometry.positions(scene, separation) }))
+  if (!segments.length) return null
+  return { segments, hasLane: !!lane, points: joinSegments(segments) }
 }
-function addTrafficParticles(link: MapLink, points: Cesium.Cartesian3[], color: Cesium.Color) {
+function laneSeparation(scene: Cesium.Scene) {
+  return curveSeparationMeters(scene.camera.positionCartographic.height, scene.canvas.clientHeight,
+    (scene.camera.frustum as Cesium.PerspectiveFrustum).fovy)
+}
+function updateLinkView(scene: Cesium.Scene) {
+  // 一帧第一次取点时使用当前相机投影；主线、光晕与粒子随后使用同一份点列。
+  const { viewMatrix, frustum } = scene.camera
+  const { clientWidth, clientHeight } = scene.canvas
+  if (clientWidth === lastCanvasWidth && clientHeight === lastCanvasHeight &&
+      Cesium.Matrix4.equals(lastView, viewMatrix) && Cesium.Matrix4.equals(lastProjection, frustum.projectionMatrix)) return
+  Cesium.Matrix4.clone(viewMatrix, lastView)
+  Cesium.Matrix4.clone(frustum.projectionMatrix, lastProjection)
+  lastCanvasWidth = clientWidth
+  lastCanvasHeight = clientHeight
+  const separation = laneSeparation(scene)
+  for (const path of changingPaths) {
+    let changed = false
+    for (const segment of path.segments) {
+      if (segment.geometry.viewDependent || (path.hasLane && separation !== lastSeparation)) {
+        segment.points = segment.geometry.positions(scene, separation)
+        changed = true
+      }
+    }
+    if (changed) path.points = joinSegments(path.segments)
+  }
+  lastSeparation = separation
+}
+function currentPoints(path: LinkPath) {
+  if (!checkedThisFrame && viewer && !viewer.isDestroyed()) {
+    checkedThisFrame = true
+    updateLinkView(viewer.scene)
+  }
+  return path.points
+}
+function addTrafficParticles(link: MapLink, path: LinkPath, color: Cesium.Color) {
   const bps = (link.rxBps || 0) + (link.txBps || 0)
-  if (!props.showTraffic || bps <= 0) return
+  if (!viewer || !props.showTraffic || bps <= 0) return
   const count = Math.min(5, Math.max(1, Math.ceil(Math.log10(bps + 1) / 1.7)))
   const speed = Math.min(0.37, 0.06 + Math.log10(bps + 1) * 0.03)
   for (let i = 0; i < count; i++) {
     const offset = i / count
     const position = new Cesium.CallbackPositionProperty((_time, result) => {
+      const points = currentPoints(path)
+      if (points.length < 2) return undefined
       const fraction = ((performance.now() / 1000 * speed) + offset) % 1
       const segment = Math.min(points.length - 2, Math.floor(fraction * (points.length - 1)))
       const weight = fraction * (points.length - 1) - segment
       return Cesium.Cartesian3.lerp(points[segment], points[segment + 1], weight, result || new Cesium.Cartesian3())
     }, false)
-    viewer?.entities.add({
+    const particle = viewer.entities.add({
       position,
       point: { pixelSize: 7, color: Cesium.Color.WHITE, outlineColor: color, outlineWidth: 2 }
     })
+    particleLinks.set(particle, link.key)
   }
 }
 function redraw() {
   if (!viewer || viewer.isDestroyed()) return
   viewer.entities.removeAll()
   nodeEntities.clear()
+  changingPaths.length = 0
+  checkedThisFrame = false
   const byKey = new Map(props.nodes.map(node => [node.key, node]))
-  const separationMeters = curveSeparationMeters(viewer.camera.positionCartographic.height,
-    viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
-  lastCurveSeparation = separationMeters
+  const separationMeters = laneSeparation(viewer.scene)
   const curveLanes = linkCurveLanes(props.nodes, props.links)
 
   // 先绘制中继/未知线路，再绘制 P2P，确保连续直连线不会被虚线覆盖。
   const rank: Record<MapLink['kind'], number> = { relay: 0, unknown: 1, p2p: 2 }
   const orderedLinks = [...props.links].sort((a, b) => rank[a.kind] - rank[b.kind])
   for (const link of orderedLinks) {
-    const offsetMeters = (curveLanes.get(link.key) || 0) * separationMeters
-    const points = linkPoints(link, byKey, offsetMeters)
-    if (!points) continue
+    const path = createLinkPath(link, byKey, curveLanes.get(link.key), viewer.scene, separationMeters)
+    if (!path) continue
+    const changesWithView = path.hasLane || path.segments.some(segment => segment.geometry.viewDependent)
+    if (changesWithView) changingPaths.push(path)
+    const positions = changesWithView ? new Cesium.CallbackProperty(() => currentPoints(path), false) : path.points
     const highlight = props.selectedLinkKey === link.key
     const color = linkColor(link.kind)
     if (link.kind === 'p2p') {
@@ -214,7 +231,7 @@ function redraw() {
       viewer.entities.add({
         id: 'map-link-glow:' + link.key,
         polyline: {
-          positions: points, width: highlight ? 13 : 10,
+          positions, width: highlight ? 13 : 10,
           material: new Cesium.ColorMaterialProperty(color.withAlpha(highlight ? 0.32 : 0.2)),
           arcType: Cesium.ArcType.NONE, clampToGround: false
         }
@@ -222,7 +239,7 @@ function redraw() {
       viewer.entities.add({
         id: 'map-link:' + link.key,
         polyline: {
-          positions: points, width: highlight ? 7 : 5.2,
+          positions, width: highlight ? 7 : 5.2,
           material: new Cesium.ColorMaterialProperty(color.withAlpha(0.98)),
           arcType: Cesium.ArcType.NONE, clampToGround: false
         }
@@ -231,7 +248,7 @@ function redraw() {
       viewer.entities.add({
         id: 'map-link:' + link.key,
         polyline: {
-          positions: points, width: highlight ? 6 : 4.4,
+          positions, width: highlight ? 6 : 4.4,
           material: new Cesium.PolylineDashMaterialProperty({
             color: color.withAlpha(0.98),
             gapColor: color.withAlpha(0.035),
@@ -241,7 +258,7 @@ function redraw() {
         }
       })
     }
-    addTrafficParticles(link, points, color)
+    addTrafficParticles(link, path, color)
   }
 
   const relayNodeKeys = new Set(props.links
@@ -253,7 +270,7 @@ function redraw() {
     const color = Cesium.Color.fromCssColorString(relayNode
       ? (activeTheme.value === 'dark' ? '#ffb45c' : '#a85b0a')
       : node.flags.includes('公共服务器') ? '#22a879' : '#16a8c6')
-    const position = Cesium.Cartesian3.fromDegrees(node.longitude!, node.latitude!, 3500)
+    const position = Cesium.Cartesian3.fromDegrees(node.longitude!, node.latitude!, LINK_ENDPOINT_HEIGHT)
     const outline = Cesium.Color.fromCssColorString(activeTheme.value === 'dark' ? '#f4fbff' : '#12364b')
     const labelFill = Cesium.Color.fromCssColorString(activeTheme.value === 'dark' ? '#eaf7ff' : '#17344d')
     const labelOutline = Cesium.Color.fromCssColorString(activeTheme.value === 'dark' ? '#061323' : '#ffffff')
@@ -329,10 +346,12 @@ function resetCamera() {
   })
 }
 function zoomIn() {
-  if (viewer) viewer.camera.zoomIn(Math.max(3000, viewer.camera.positionCartographic.height * 0.27))
+  if (!viewer) return
+  const available = viewer.camera.positionCartographic.height - viewer.scene.screenSpaceCameraController.minimumZoomDistance
+  viewer.camera.zoomIn(Math.max(0, available) * 0.27)
 }
 function zoomOut() {
-  if (viewer) viewer.camera.zoomOut(Math.max(3000, viewer.camera.positionCartographic.height * 0.38))
+  if (viewer) viewer.camera.zoomOut(Math.max(1, viewer.camera.positionCartographic.height * 0.38))
 }
 defineExpose({ focusNode, resetCamera, zoomIn, zoomOut })
 watch(() => [props.basemap, activeTheme.value], () => {
@@ -367,27 +386,18 @@ function initializeViewer() {
     applySceneTheme()
     setBaseLayer()
     redraw()
-    // 相机高度变化时同步调整线路互斥距离；按阈值合帧，避免每个滚轮事件都重建整张地图。
-    viewer.camera.percentageChanged = 0.02
-    removeCameraChangedListener = viewer.camera.changed.addEventListener(() => {
-      if (!viewer || viewer.isDestroyed()) return
-      const nextSeparation = curveSeparationMeters(viewer.camera.positionCartographic.height,
-        viewer.scene.canvas.clientHeight, (viewer.camera.frustum as Cesium.PerspectiveFrustum).fovy)
-      const threshold = Math.max(300, lastCurveSeparation * 0.08)
-      if (Math.abs(nextSeparation - lastCurveSeparation) < threshold || cameraRedrawFrame !== null) return
-      cameraRedrawFrame = requestAnimationFrame(() => {
-        cameraRedrawFrame = null
-        redraw()
-      })
-    })
+    removeFrameListener = viewer.scene.postRender.addEventListener(() => { checkedThisFrame = false })
     viewer.screenSpaceEventHandler.setInputAction((movement: { position: Cesium.Cartesian2 }) => {
       if (!viewer) return
       const picked = viewer.scene.pick(movement.position) as { id?: Cesium.Entity } | undefined
-      const id = picked?.id?.id
-      if (id?.startsWith('map-node:')) emit('nodeClick', id.slice('map-node:'.length))
-      else if (id?.startsWith('map-node-halo:')) emit('nodeClick', id.slice('map-node-halo:'.length))
-      else if (id?.startsWith('map-link:')) emit('linkClick', id.slice('map-link:'.length))
-      else if (id?.startsWith('map-link-glow:')) emit('linkClick', id.slice('map-link-glow:'.length))
+      if (!(picked?.id instanceof Cesium.Entity)) return
+      const id = picked.id.id
+      const particleLink = particleLinks.get(picked.id)
+      if (particleLink) { emit('linkClick', particleLink); return }
+      if (id.startsWith('map-node:')) emit('nodeClick', id.slice('map-node:'.length))
+      else if (id.startsWith('map-node-halo:')) emit('nodeClick', id.slice('map-node-halo:'.length))
+      else if (id.startsWith('map-link:')) emit('linkClick', id.slice('map-link:'.length))
+      else if (id.startsWith('map-link-glow:')) emit('linkClick', id.slice('map-link-glow:'.length))
     }, Cesium.ScreenSpaceEventType.LEFT_CLICK)
     themeObserver = new MutationObserver(() => {
       const next = readTheme()
@@ -430,10 +440,9 @@ onUnmounted(() => {
   cancelInitialization = null
   themeObserver?.disconnect()
   themeObserver = null
-  removeCameraChangedListener?.()
-  removeCameraChangedListener = null
-  if (cameraRedrawFrame !== null) cancelAnimationFrame(cameraRedrawFrame)
-  cameraRedrawFrame = null
+  removeFrameListener?.()
+  removeFrameListener = null
+  changingPaths.length = 0
   if (viewer && !viewer.isDestroyed()) viewer.destroy()
   viewer = null
 })
