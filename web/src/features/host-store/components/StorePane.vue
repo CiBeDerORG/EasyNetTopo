@@ -50,7 +50,7 @@ const installedCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.managed || row.external).length + (props.snapshot ? 1 : 0))
 const runningCount = computed(() => Object.values(statusByKey.value)
   .filter(row => row.state === 'running').length + (props.snapshot ? 1 : 0))
-const availableCount = computed(() => props.apps.filter(app => !!app.revision).length + 1)
+const availableCount = computed(() => props.apps.filter(app => !!app.revision && !app.catalog_only).length + 1)
 const agentTask = computed(() => props.host ? currentAppTask(props.tasks, props.host.id, 'native', 'easyhostagent') : undefined)
 const agentState = computed(() => {
   if (!props.host?.agent_id) return { label: '未配对', type: 'info' as const }
@@ -72,7 +72,7 @@ const visibleApps = computed(() => props.apps.filter(app => {
   const row = statusByKey.value[appKey(app)]
   const permissions = getAppPermissions(app, row, props.snapshot?.platform)
   if (props.filter === 'installed') return !!row && (row.managed || row.external)
-  if (props.filter === 'available') return !row || (!row.managed && !row.external)
+  if (props.filter === 'available') return !app.catalog_only && (!row || (!row.managed && !row.external))
   if (props.filter === 'update') return permissions.canUpdate
   return true
 }))

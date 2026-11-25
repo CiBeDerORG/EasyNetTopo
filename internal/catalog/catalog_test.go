@@ -95,7 +95,7 @@ func TestGitHostAllowlistRejectsInvalidEntries(t *testing.T) {
 	}
 }
 
-func TestReadOnlyManifestValidation(t *testing.T) {
+func TestPackageManifestValidation(t *testing.T) {
 	raw := []byte(`schema_version: 1
 id: sub2api
 name: Sub2API
@@ -116,19 +116,19 @@ data:
   default_retain: true
 `)
 	objects := map[string]gitObject{"sub2api/deploy/docker-compose.yaml": {Mode: "100644", Object: strings.Repeat("a", 40)}}
-	manifest, sha, err := previewManifest("sub2api", raw, objects)
+	manifest, sha, err := validatePackageManifest("sub2api", raw, objects)
 	if err != nil || manifest.Name != "Sub2API" || len(sha) != 64 {
 		t.Fatalf("正常应用预览失败: %v", err)
 	}
-	if _, _, err := previewManifest("other", raw, objects); err == nil {
-		t.Fatal("允许不一致的目录 ID")
+	if _, _, err := validatePackageManifest("other", raw, objects); err == nil {
+		t.Fatal("允许不一致的应用 ID")
 	}
 	broken := strings.Replace(string(raw), "sub2api/deploy/docker-compose.yaml", "../etc/passwd", 1)
-	if _, _, err := previewManifest("sub2api", []byte(broken), objects); err == nil {
+	if _, _, err := validatePackageManifest("sub2api", []byte(broken), objects); err == nil {
 		t.Fatal("接受路径穿越")
 	}
 	symlink := map[string]gitObject{"sub2api/deploy/docker-compose.yaml": {Mode: "120000", Object: strings.Repeat("a", 40)}}
-	if _, _, err := previewManifest("sub2api", raw, symlink); err == nil {
+	if _, _, err := validatePackageManifest("sub2api", raw, symlink); err == nil {
 		t.Fatal("接受符号链接资源")
 	}
 }

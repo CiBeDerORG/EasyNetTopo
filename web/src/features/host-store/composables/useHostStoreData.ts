@@ -41,7 +41,8 @@ export function useHostStoreData(
   const selectedHost = computed(() =>
     hosts.value.find(host => host.id === selectedHostId.value) || null
   )
-  const appSignature = computed(() => catalogApps.value.map(appKey).join('|'))
+  const deployableApps = computed(() => catalogApps.value.filter(app => !app.catalog_only))
+  const appSignature = computed(() => deployableApps.value.map(appKey).join('|'))
 
   const snapshotQuery = useQuery({
     queryKey: computed(() => ['host-snapshot', selectedHostId.value]),
@@ -56,7 +57,7 @@ export function useHostStoreData(
   })
   const statusQuery = useQuery({
     queryKey: computed(() => ['host-app-status', selectedHostId.value, appSignature.value]),
-    queryFn: () => getAppStatuses(selectedHostId.value, catalogApps.value),
+    queryFn: () => getAppStatuses(selectedHostId.value, deployableApps.value),
     enabled: computed(() => authenticated.value && storePage.value && !!selectedHostId.value &&
       !!selectedHost.value?.agent_id && appsQuery.isSuccess.value),
     retry: 0,
@@ -86,6 +87,6 @@ export function useHostStoreData(
 
   return {
     hostsQuery, tasksQuery, sourcesQuery, appsQuery, snapshotQuery, statusQuery, dockerQuery, selfUpdatePending,
-    hosts, tasks, sources, catalogApps, selectedHost, rows, statusByKey, visibleApps
+    hosts, tasks, sources, catalogApps, deployableApps, selectedHost, rows, statusByKey, visibleApps
   }
 }

@@ -3,8 +3,6 @@ package catalog
 import (
 	"bytes"
 	"context"
-	"crypto/sha256"
-	"encoding/hex"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -69,9 +67,14 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 			t.Fatal(err)
 		}
 	}
-	write(app+"/app.yaml", manifestRaw)
+	manifestPath := "catalog/packages/app.yml"
+	write(manifestPath, manifestRaw)
+	nativePath := "macOS/开发工具/app.yaml"
+	write(nativePath, []byte("id: maestro\nname: Maestro\nenabled: true\ncatalog_only: true\ncategory: developer\nsummary: Mac 原生工具\nicon: assets/missing.svg\n"))
+	write("hidden/app.yml", []byte("id: hidden-tool\nname: 已停用\nenabled: false\n"))
+	write("broken-package/app.yaml", []byte("id: incomplete\nname: 缺少包资源的应用\nschema_version: 2\nruntime: {kind: docker_compose}\n"))
 	if independent {
-		write(app+"/assets/icon.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12"/></svg>`))
+		write("catalog/packages/assets/icon.svg", []byte(`<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><circle cx="16" cy="16" r="12"/></svg>`))
 	}
 	for _, resource := range resources {
 		write(resource.Source, resource.Content)
@@ -89,12 +92,37 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 	if _, err := gitCommand(ctx, 512, "--git-dir="+cache, "update-ref", "refs/easynettopo/catalog/"+revision, revision); err != nil {
 		t.Fatal(err)
 	}
-	hash := sha256.Sum256(manifestRaw)
-	if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, []storage.CatalogApp{{
-		SourceID: source.ID, AppID: app, Name: "Sub2API", Summary: "Service",
-		Category: "developer", Revision: revision, ManifestSHA256: hex.EncodeToString(hash[:]),
-	}}); err != nil {
+	repo, err := pinnedBundleRepository(ctx, cache, revision)
+	if err != nil {
 		t.Fatal(err)
+	}
+	apps, err := readCatalogApps(ctx, source.ID, repo)
+	if err != nil || len(apps) != 3 {
+		t.Fatalf("应收录 Compose、原生工具和缺少包资源的配置：%v, %v", apps, err)
+	}
+	if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, apps); err != nil {
+		t.Fatal(err)
+	}
+	native, err := db.CatalogAppByID(ctx, source.ID, "maestro")
+	if err != nil || !native.CatalogOnly || native.ManifestPath != nativePath {
+		t.Fatalf("原生工具未按配置 ID 和实际路径上架：%+v, %v", native, err)
+	}
+	if _, _, err := service.Icon(ctx, source.ID, "maestro", revision); err == nil {
+		t.Fatal("缺失的图标被当作有效资源")
+	}
+	for _, id := range []string{"maestro", "incomplete", "hidden-tool"} {
+		if _, err := service.BuildCandidateBundle(ctx, source.ID, id); err == nil {
+			t.Fatalf("应用 %s 意外获得可执行的候选包", id)
+		}
+	}
+	// 同一固定版本中两个同名 ID 会使路径、开关产生歧义。
+	repo.objects["second/app.yaml"] = repo.objects[nativePath]
+	if _, err := readCatalogApps(ctx, source.ID, repo); err == nil {
+		t.Fatal("重复 ID 被收录")
+	}
+	repo.objects = map[string]gitObject{"app.yaml": repo.objects["hidden/app.yml"]}
+	if apps, err := readCatalogApps(ctx, source.ID, repo); err != nil || len(apps) != 0 {
+		t.Fatalf("全部停用应生成空快照：%v, %v", apps, err)
 	}
 	first, err := service.BuildCandidateBundle(ctx, source.ID, app)
 	if err != nil {
@@ -116,14 +144,15 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 	// 模拟用户确认 A 后目录刷新到 B。两个版本均合法，包摘要确实不同。
 	git("restore", ".")
 	nextManifest := append(bytes.Clone(manifestRaw), []byte("\n# 新一版清单\n")...)
-	write(app+"/app.yaml", nextManifest)
+	git("mv", "catalog/packages", "catalog/moved")
+	manifestPath = "catalog/moved/app.yml"
+	write(manifestPath, nextManifest)
 	git("add", ".")
 	git("commit", "-qm", "测试：更新当前目录快照")
 	nextRevision := git("rev-parse", "HEAD")
 	git("push", "-q", cache, "HEAD:refs/easynettopo/catalog/"+nextRevision)
-	nextHash := sha256.Sum256(nextManifest)
 	if err := db.SaveCatalogSnapshot(ctx, source.ID, nextRevision, []storage.CatalogApp{{
-		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: hex.EncodeToString(nextHash[:]),
+		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: manifestDigest(nextManifest), ManifestPath: manifestPath,
 	}}); err != nil {
 		t.Fatal(err)
 	}
@@ -142,7 +171,7 @@ func testCandidateBundleUsesPinnedSnapshot(t *testing.T, independent bool) {
 		t.Fatal("当前成功目录已撤回应用，却仍用旧引用创建了包")
 	}
 	if err := db.SaveCatalogSnapshot(ctx, source.ID, nextRevision, []storage.CatalogApp{{
-		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: hex.EncodeToString(nextHash[:]),
+		SourceID: source.ID, AppID: app, Revision: nextRevision, ManifestSHA256: manifestDigest(nextManifest), ManifestPath: manifestPath,
 	}}); err != nil {
 		t.Fatal(err)
 	}

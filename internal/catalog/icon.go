@@ -3,9 +3,11 @@ package catalog
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/xml"
 	"errors"
 	"io"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -13,11 +15,11 @@ import (
 
 var iconPath = regexp.MustCompile(`^assets/[A-Za-z0-9_-]+\.(svg|png|webp)$`)
 
-func readIcon(ctx context.Context, repository *gitRepository, app, icon string) ([]byte, string, error) {
+func readIcon(ctx context.Context, repository *gitRepository, directory, icon string) ([]byte, string, error) {
 	if !iconPath.MatchString(icon) {
 		return nil, "", errors.New("应用图标路径不合法")
 	}
-	raw, err := repository.contents(ctx, app+"/"+icon)
+	raw, err := repository.contents(ctx, path.Join(directory, icon))
 	if err != nil || len(raw) == 0 || len(raw) > 128*1024 {
 		return nil, "", errors.New("图标缺失或超过 128 KiB")
 	}
@@ -84,13 +86,21 @@ func (s *Service) Icon(ctx context.Context, source, app, revision string) ([]byt
 	if err != nil {
 		return nil, "", err
 	}
-	raw, err := repo.contents(ctx, app+"/app.yaml")
+	current, err := s.store.CatalogAppByID(ctx, source, app)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, "", err
+	}
+	manifestPath, err := manifestPathAtRevision(ctx, repo, source, app, current)
 	if err != nil {
 		return nil, "", err
 	}
-	m, _, err := previewManifest(app, raw, repo.objects)
+	raw, err := repo.contents(ctx, manifestPath)
 	if err != nil {
 		return nil, "", err
 	}
-	return readIcon(ctx, repo, app, m.Icon)
+	m, err := readCatalogMetadata(raw)
+	if err != nil {
+		return nil, "", err
+	}
+	return readIcon(ctx, repo, path.Dir(manifestPath), m.Icon)
 }

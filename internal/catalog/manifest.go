@@ -15,15 +15,20 @@ import (
 var appID = regexp.MustCompile("^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$")
 var safeFile = regexp.MustCompile("^[A-Za-z0-9_.-]+(?:/[A-Za-z0-9_.-]+)*$")
 
+type catalogMetadata struct {
+	CatalogOnly bool   `yaml:"catalog_only"`
+	Enabled     *bool  `yaml:"enabled"`
+	Icon        string `yaml:"icon"`
+	Version     int    `yaml:"schema_version"`
+	ID          string `yaml:"id"`
+	Name        string `yaml:"name"`
+	Summary     string `yaml:"summary"`
+	Category    string `yaml:"category"`
+}
+
 type appManifest struct {
-	Enabled  *bool  `yaml:"enabled"`
-	Icon     string `yaml:"icon"`
-	Version  int    `yaml:"schema_version"`
-	ID       string `yaml:"id"`
-	Name     string `yaml:"name"`
-	Summary  string `yaml:"summary"`
-	Category string `yaml:"category"`
-	Runtime  struct {
+	catalogMetadata `yaml:",inline"`
+	Runtime         struct {
 		Kind    string `yaml:"kind"`
 		Project string `yaml:"compose_project"`
 		File    string `yaml:"compose_file"`
@@ -44,8 +49,8 @@ type appManifest struct {
 	} `yaml:"data"`
 }
 
-// enabled 缺省兼容旧清单；显式 false 时不作为可安装的商店应用。
-func (m appManifest) IsEnabled() bool {
+// 缺省值兼容已有 Deploy 清单。
+func (m catalogMetadata) IsEnabled() bool {
 	return m.Enabled == nil || *m.Enabled
 }
 
@@ -61,8 +66,25 @@ func safePath(p string) bool {
 	return path.Clean(p) == p
 }
 
-// previewManifest 仅用于只读商店展示；不能作为安装执行的全部 Schema/语义验证。
-func previewManifest(id string, raw []byte, objects map[string]gitObject) (appManifest, string, error) {
+// readCatalogMetadata 只解析商店字段。包资源和生命周期契约在构建候选包时校验。
+func readCatalogMetadata(raw []byte) (catalogMetadata, error) {
+	var m catalogMetadata
+	if err := yaml.Unmarshal(raw, &m); err != nil {
+		return m, err
+	}
+	if !appID.MatchString(m.ID) || len(m.ID) > 64 || strings.TrimSpace(m.Name) == "" {
+		return m, errors.New("应用配置缺少有效的 id 或 name")
+	}
+	return m, nil
+}
+
+func manifestDigest(raw []byte) string {
+	digest := sha256.Sum256(raw)
+	return hex.EncodeToString(digest[:])
+}
+
+// 校验已选中清单与部署包资源的身份、路径和 Git 文件类型。
+func validatePackageManifest(id string, raw []byte, objects map[string]gitObject) (appManifest, string, error) {
 	var m appManifest
 	if len(raw) > 128*1024 {
 		return m, "", errors.New("Manifest 超出大小限制")
@@ -75,7 +97,7 @@ func previewManifest(id string, raw []byte, objects map[string]gitObject) (appMa
 		return m, "", errors.New("Manifest 基本字段不满足 v1 约束")
 	}
 	if m.Runtime.Kind != "docker_compose" || m.Runtime.Project != id || !safePath(m.Runtime.File) || len(m.Package.Files) == 0 || len(m.Package.Files) > 128 || len(m.Verification.Services) == 0 || !m.Data.DefaultRetain {
-		return m, "", errors.New("Manifest 运行与数据声明不符合预览要求")
+		return m, "", errors.New("Manifest 运行与数据声明不符合部署包要求")
 	}
 	if m.Verification.State != "healthy" && m.Verification.State != "running" {
 		return m, "", errors.New("未知健康状态")
@@ -107,6 +129,5 @@ func previewManifest(id string, raw []byte, objects map[string]gitObject) (appMa
 	if !destinations[id+"/"+m.Runtime.File] {
 		return m, "", errors.New("Compose 文件未列入包")
 	}
-	digest := sha256.Sum256(raw)
-	return m, hex.EncodeToString(digest[:]), nil
+	return m, manifestDigest(raw), nil
 }

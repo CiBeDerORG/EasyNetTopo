@@ -112,6 +112,16 @@ func TestDeployRepositoryV2Contract(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
+			metadata, err := readCatalogMetadata(raw)
+			if err != nil {
+				t.Fatal(err)
+			}
+			if metadata.CatalogOnly {
+				if ValidateManifestSchema(raw) == nil {
+					t.Fatal("仅展示清单不应通过部署包契约校验")
+				}
+				return
+			}
 			if err := ValidateManifestSchema(raw); err != nil {
 				t.Fatal(err)
 			}
@@ -271,7 +281,7 @@ func TestV2EnabledFlagAndNormalization(t *testing.T) {
 			for _, item := range resources {
 				objects[item.Source] = gitObject{Mode: "100644", Object: strings.Repeat("a", 40)}
 			}
-			preview, _, err := previewManifest("unregistered-demo", manifestBytes, objects)
+			preview, _, err := validatePackageManifest("unregistered-demo", manifestBytes, objects)
 			if err != nil || preview.IsEnabled() != test.want {
 				t.Fatalf("商店预览未保留 enabled 语义: %v", err)
 			}

@@ -319,7 +319,7 @@ const autoLinking = ref(false)
 watch(() => data.statusQuery.data.value, async rows => {
   const host = selectedHost.value
   if (!rows?.length || !host?.agent_id || autoLinking.value || pendingAction.value || actionBusyKey.value || agentUpdating.value) return
-  const apps = new Map(data.catalogApps.value.map(app => [appKey(app), app]))
+  const apps = new Map(data.deployableApps.value.map(app => [appKey(app), app]))
   const candidates = rows.filter(row => row.external && row.adoptable &&
     row.blocked_reason === 'adoption_required')
   if (!candidates.length) return

@@ -36,6 +36,17 @@ export function getAppPermissions(app: CatalogApp, row?: AppStatus, platform = '
   else if (row.state === 'unknown') blockReason = '无法确认 Docker 状态，暂时禁止安装、更新或卸载。'
   else if (row.state === 'missing') blockReason = '已有受管安装记录，但服务容器缺失；可以重新安装。'
 
+  if (app.catalog_only) {
+    // 已存在的受管记录仍可通过 Agent 卸载，目录条目本身不提供部署包。
+    const showRetainedUninstall = managed && app.app_id !== 'easynettopo'
+    return {
+      showInstall: false, canInstall: false, showUpdate: false, canUpdate: false,
+      showUninstall: showRetainedUninstall, canUninstall: showRetainedUninstall && canUninstall,
+      showAdopt: false, canAdopt: false, showForceUpdate: false, canForceUpdate: false,
+      grantRequired: false, blockReason: showRetainedUninstall && !canUninstall ? blockReason : ''
+    }
+  }
+
   // EasyNetTopo 是控制台本身：应用商店仅允许更新已安装的受管实例。
   // 不展示安装、卸载、强制更新入口，也不自动赋予外部容器更新权限。
   if (app.app_id === 'easynettopo') {

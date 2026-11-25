@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -62,7 +63,6 @@ func (r *gitRepository) bundleContents(ctx context.Context, file string) ([]byte
 }
 
 // BuildCandidateBundle 只在后端内存中构建不可执行的候选包，不上送、不安装。
-// previewManifest 不是 Deploy 完整 Schema+语义验证；本方法的结果不能作为可信发布授权。
 func (s *Service) BuildCandidateBundle(ctx context.Context, sourceID, applicationID string) (packagebuilder.Artifact, error) {
 	return s.BuildUpdateBundle(ctx, sourceID, applicationID, "")
 }
@@ -81,21 +81,15 @@ func (s *Service) BuildUpdateBundle(ctx context.Context, sourceID, applicationID
 	if !commitID.MatchString(source.CurrentRevision) {
 		return packagebuilder.Artifact{}, errors.New("来源尚无可用的固定版本")
 	}
-	apps, err := s.store.CatalogApps(ctx)
-	if err != nil {
-		return packagebuilder.Artifact{}, err
-	}
-	var appRevision, digest string
-	for _, app := range apps {
-		if app.SourceID == sourceID && app.AppID == applicationID {
-			appRevision, digest = app.Revision, app.ManifestSHA256
-			break
-		}
-	}
-	// 已删除的来源和在最新成功目录中被移除或停用的应用都不能再创建包，即使保留了旧引用。
-	if appRevision == "" || appRevision != source.CurrentRevision {
+	// 当前索引控制是否还能创建包，包括使用历史版本的更新请求。
+	app, err := s.store.CatalogAppByID(ctx, sourceID, applicationID)
+	if err != nil || app.Revision != source.CurrentRevision {
 		return packagebuilder.Artifact{}, errors.New("应用与来源快照版本不匹配")
 	}
+	if app.CatalogOnly {
+		return packagebuilder.Artifact{}, errors.New("此应用仅提供商店展示，未声明远程部署包")
+	}
+	appRevision := app.Revision
 	if requestedRevision != "" {
 		// 目录只保留最新清单摘要。历史版本由该来源的固定 Git 引用锁定整棵树。
 		appRevision = requestedRevision
@@ -104,15 +98,19 @@ func (s *Service) BuildUpdateBundle(ctx context.Context, sourceID, applicationID
 	if err != nil {
 		return packagebuilder.Artifact{}, err
 	}
-	manifestRaw, err := repository.contents(ctx, applicationID+"/app.yaml")
+	manifestPath, err := manifestPathAtRevision(ctx, repository, sourceID, applicationID, app)
+	if err != nil {
+		return packagebuilder.Artifact{}, err
+	}
+	manifestRaw, err := repository.contents(ctx, manifestPath)
 	if err != nil {
 		return packagebuilder.Artifact{}, errors.New("固定版本 Manifest 不可读取")
 	}
 	if err := ValidateManifestSchema(manifestRaw); err != nil {
 		return packagebuilder.Artifact{}, fmt.Errorf("固定版本 Manifest 未通过 Deploy JSON Schema 校验: %w", err)
 	}
-	manifest, actualDigest, err := previewManifest(applicationID, manifestRaw, repository.objects)
-	if err != nil || (appRevision == source.CurrentRevision && actualDigest != digest) {
+	manifest, actualDigest, err := validatePackageManifest(applicationID, manifestRaw, repository.objects)
+	if err != nil || (appRevision == source.CurrentRevision && actualDigest != app.ManifestSHA256) {
 		return packagebuilder.Artifact{}, errors.New("Manifest 与已索引快照不一致")
 	}
 	if !manifest.IsEnabled() {
@@ -143,7 +141,7 @@ func (s *Service) BuildUpdateBundle(ctx context.Context, sourceID, applicationID
 		}
 	}
 	if manifest.Icon != "" {
-		if _, _, err := readIcon(ctx, repository, applicationID, manifest.Icon); err != nil {
+		if _, _, err := readIcon(ctx, repository, path.Dir(manifestPath), manifest.Icon); err != nil {
 			return packagebuilder.Artifact{}, err
 		}
 	}

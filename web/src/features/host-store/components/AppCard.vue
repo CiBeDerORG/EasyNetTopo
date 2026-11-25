@@ -85,7 +85,8 @@ const resultLabel = computed(() => {
     <p class="product-desc">{{ app.summary || '暂无应用简介' }}</p>
 
     <div class="product-meta">
-      <el-tag v-if="installing || status?.state !== 'not_installed'" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
+      <el-tag v-if="app.catalog_only && !status?.managed" size="small" type="info">仅展示</el-tag>
+      <el-tag v-else-if="installing || status?.state !== 'not_installed'" size="small" effect="dark" :type="statusType">{{ statusLabel }}</el-tag>
       <span v-if="app.revision" class="revision">版本 {{ app.revision.slice(0, 12) }}</span>
       <span v-else class="revision">本机保留记录</span>
       <el-tooltip

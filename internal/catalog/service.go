@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -85,48 +86,9 @@ func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 	if err != nil {
 		return fail(errors.New("无法访问 Git 来源"))
 	}
-	apps := make([]storage.CatalogApp, 0)
-	candidates := 0
-	validated := 0
-	for name, entry := range repository.objects {
-		if entry.Mode != "100644" && entry.Mode != "100755" {
-			continue
-		}
-		parts := strings.Split(name, "/")
-		if len(parts) != 2 || parts[1] != "app.yaml" || !appID.MatchString(parts[0]) {
-			continue
-		}
-		candidates++
-		if candidates > 300 {
-			return fail(errors.New("应用描述文件数量超过上限"))
-		}
-		raw, err := repository.contents(ctx, name)
-		if err != nil {
-			continue
-		}
-		manifest, digest, err := previewManifest(parts[0], raw, repository.objects)
-		if err != nil {
-			continue
-		}
-		if manifest.Icon != "" {
-			if _, _, err := readIcon(ctx, repository, manifest.ID, manifest.Icon); err != nil {
-				continue
-			}
-		}
-		validated++
-		// Deploy 显式停用的应用不写入商店快照。已安装状态由 Agent
-		// 独立保存，不会触发停止服务或删除数据。
-		if !manifest.IsEnabled() {
-			continue
-		}
-		apps = append(apps, storage.CatalogApp{
-			SourceID: id, AppID: manifest.ID, Name: manifest.Name,
-			Summary: manifest.Summary, Category: manifest.Category,
-			Revision: repository.revision, ManifestSHA256: digest,
-		})
-	}
-	if validated == 0 {
-		return fail(errors.New("仓库中没有受支持且校验通过的应用描述"))
+	apps, err := readCatalogApps(ctx, id, repository)
+	if err != nil {
+		return fail(err)
 	}
 	// 全部有效应用都被 enabled:false 停用也是一次有效同步，允许清空商店索引。
 	// 提前保留固定 Commit 的 Git 对象，后续 Fetch 不应使已展示版本消失。
@@ -137,4 +99,62 @@ func (s *Service) Refresh(ctx context.Context, id string) (int, string, error) {
 		return fail(err)
 	}
 	return len(apps), repository.revision, nil
+}
+
+// 应用 ID 和上架开关取自固定版本的配置，与清单所在目录无关。
+func readCatalogApps(ctx context.Context, sourceID string, repo *gitRepository) ([]storage.CatalogApp, error) {
+	apps := make([]storage.CatalogApp, 0)
+	seen := make(map[string]bool)
+	candidates := 0
+	for name, entry := range repo.objects {
+		base := path.Base(name)
+		if (base != "app.yaml" && base != "app.yml") || (entry.Mode != "100644" && entry.Mode != "100755") {
+			continue
+		}
+		candidates++
+		if candidates > 300 {
+			return nil, errors.New("应用描述文件数量超过上限")
+		}
+		raw, err := repo.contents(ctx, name)
+		if err != nil {
+			return nil, fmt.Errorf("读取应用配置 %q 失败: %w", name, err)
+		}
+		m, err := readCatalogMetadata(raw)
+		if err != nil {
+			continue
+		}
+		if seen[m.ID] {
+			return nil, fmt.Errorf("应用配置中存在重复 id %q", m.ID)
+		}
+		seen[m.ID] = true
+		if !m.IsEnabled() {
+			continue
+		}
+		apps = append(apps, storage.CatalogApp{
+			SourceID: sourceID, AppID: m.ID, Name: m.Name, Summary: m.Summary, Category: m.Category,
+			Revision: repo.revision, ManifestSHA256: manifestDigest(raw), ManifestPath: name,
+			CatalogOnly: m.CatalogOnly || (m.Version != 1 && m.Version != 2),
+		})
+	}
+	if len(seen) == 0 {
+		return nil, errors.New("仓库中没有可读取的应用配置")
+	}
+	return apps, nil
+}
+
+// 历史版本的清单可能已经移动，需要从对应 Commit 按配置 ID 重新定位。
+func manifestPathAtRevision(ctx context.Context, repo *gitRepository, sourceID, appID string, current storage.CatalogApp) (string, error) {
+	if current.Revision == repo.revision {
+		return current.ManifestPath, nil
+	}
+	apps, err := readCatalogApps(ctx, sourceID, repo)
+	if err != nil {
+		return "", err
+	}
+	for _, app := range apps {
+		if app.AppID == appID {
+			return app.ManifestPath, nil
+		}
+	}
+	return "", errors.New("固定版本中找不到启用的应用配置")
 }

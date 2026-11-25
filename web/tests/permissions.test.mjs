@@ -63,6 +63,23 @@ test('Other applications retain normal install and uninstall actions', () => {
   assert.equal(missing.showInstall, true)
 })
 
+test('仅展示的目录条目不提供远程操作，已有受管记录仍可卸载', () => {
+  const app = { ...easynettopo, app_id: 'maestro', catalog_only: true }
+  for (const status of [undefined, { ...row, managed: false, external: true }]) {
+    const permissions = getAppPermissions(app, status, 'macos')
+    for (const action of ['Install', 'Update', 'Uninstall', 'ForceUpdate', 'Adopt']) {
+      assert.equal(permissions['show' + action], false)
+      assert.equal(permissions['can' + action], false)
+    }
+  }
+  const retained = getAppPermissions(app, row, 'linux')
+  assert.equal(retained.showUninstall, true)
+  assert.equal(retained.canUninstall, true)
+  assert.equal(retained.showUpdate, false)
+  assert.equal(getAppPermissions(app, { ...row, allowed: false }, 'linux').canUninstall, false)
+  assert.equal(getAppPermissions({ ...easynettopo, catalog_only: true }, row, 'macos').showUninstall, false)
+})
+
 test('卸载失败仅在完整的远端 Docker 清单确认资源不存在时恢复卡片', () => {
   const app = { ...easynettopo, app_id: 'demo' }
   const failed = {

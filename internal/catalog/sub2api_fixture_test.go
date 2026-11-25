@@ -23,7 +23,7 @@ func TestPublishedSub2APIManifestIsPreviewable(t *testing.T) {
 	for _, f := range fixture.Package.Files {
 		objects[f.Source] = gitObject{Mode: "100644", Object: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}
 	}
-	m, digest, err := previewManifest("sub2api", raw, objects)
+	m, digest, err := validatePackageManifest("sub2api", raw, objects)
 	if err != nil {
 		t.Fatalf("发布模板无法显示在商店: %v", err)
 	}

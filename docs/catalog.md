@@ -4,7 +4,7 @@
 
 ## 通用配置与图标 v2
 
-维护者直接编辑来源仓库的 `<应用>/app.yaml`、`config.yaml`、`secrets.yaml`、`assets/icon.svg`，不提供定义管理页面。安装页只渲染预定义表单：`custom_input:false` 隐藏，开启输入且 `editable:false` 时显示只读；默认可编辑。隐藏、只读和未声明字段在 HTTP 请求和 Agent 两端拒绝覆盖。
+维护者直接编辑来源仓库的应用清单。可执行应用继续使用 Deploy 的 `<应用>/app.yaml`、`config.yaml`、`secrets.yaml`、`assets/icon.svg`，不提供定义管理页面。安装页只渲染预定义表单：`custom_input:false` 隐藏，开启输入且 `editable:false` 时显示只读；默认可编辑。隐藏、只读和未声明字段在 HTTP 请求和 Agent 两端拒绝覆盖。
 
 - `GET /api/v1/catalog/apps/{source}/{app}/config` 返回固定 Commit 的归一化字段和 `revision`，不读取主机真实密钥。
 - 应用列表增加 `icon_url`，指向需要管理员会话的图标接口，URL 包含来源、应用和 Commit；图标通过固定 Git 对象读取并限制格式、大小与 SVG 内容，浏览器使用图片元素展示，失败时回退统一文字占位。
@@ -100,7 +100,9 @@ Git 同步失败仅记录安全的通用错误，并**保留上次成功的 SQLi
 - 查询完成后使用固定 Git Commit 保存此次只读快照，保留对应 Git Ref；不通过移动的 `main` 代表安装版本。
 - 应用唯一身份是 `source_id + app_id`。目录切换由 SQLite 单事务完成，展示的来源版本及应用记录必须一致。
 - 快照清单只包含展示字段、来源 Commit 和 Manifest SHA-256，不含真实用户部署密钥。
-- 目录预览检查结构关键项、文件存在和安全路径；安装前另行执行完整的 Deploy Schema、配置定义和跨文件语义校验。通过校验不代表发布方身份认证。
+- 同步读取 Git 中任意目录的普通文件 `app.yaml` 或 `app.yml`。应用身份取自清单的 `id`，`enabled: true` 上架，`enabled: false` 下架，缺省沿用启用。全部停用会清空该源的商店列表。同一来源的多个清单声明相同 ID 时，同步失败并保留上次快照。
+- 卡片展示直接读取清单的名称、摘要和分类。原生 CLI 等仅展示条目声明 `catalog_only: true`。同步不读取安装脚本、Compose 资源或图标内容。请求图标时按清单所在目录定位并校验，读取失败则使用文字占位。
+- 构建候选包时校验固定 Commit 的 Deploy Schema、包文件、配置定义和跨文件语义。仅展示条目不会创建远程安装或更新包。
 
 ## 4. 当前验收与限制
 

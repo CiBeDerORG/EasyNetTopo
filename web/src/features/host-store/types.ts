@@ -66,6 +66,7 @@ export type CatalogSource = {
   updated_at?: string
 }
 export type CatalogApp = {
+  catalog_only?: boolean
   icon_url?: string
   source_id: string
   app_id: string

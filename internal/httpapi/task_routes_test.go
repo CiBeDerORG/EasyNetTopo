@@ -38,15 +38,14 @@ func TestManualUpdateRetainsConfirmedRevision(t *testing.T) {
 		t.Fatal(err)
 	}
 	first, next := strings.Repeat("a", 40), strings.Repeat("b", 40)
-	saveSnapshot := func(revision string) {
+	saveSnapshot := func(revision string, catalogOnly bool) {
 		t.Helper()
 		if err := db.SaveCatalogSnapshot(ctx, source.ID, revision, []storage.CatalogApp{{
-			SourceID: source.ID, AppID: "demo", Revision: revision,
+			SourceID: source.ID, AppID: "demo", Revision: revision, CatalogOnly: catalogOnly,
 		}}); err != nil {
 			t.Fatal(err)
 		}
 	}
-	saveSnapshot(first)
 	request := func() int {
 		body := fmt.Sprintf(`{"source_id":%q,"app_id":"demo","revision":%q}`, source.ID, first)
 		req := httptest.NewRequest(http.MethodPost, "/api/v1/hosts/host/apps/update", strings.NewReader(body))
@@ -55,10 +54,15 @@ func TestManualUpdateRetainsConfirmedRevision(t *testing.T) {
 		enqueueManualUpdate(w, req, "host", runner, svc)
 		return w.Code
 	}
+	saveSnapshot(first, true)
+	if code := request(); code != http.StatusUnprocessableEntity {
+		t.Fatalf("只展示的条目不应接受更新请求：HTTP %d", code)
+	}
+	saveSnapshot(first, false)
 	if code := request(); code != http.StatusAccepted {
 		t.Fatalf("当前版本未入队：HTTP %d", code)
 	}
-	saveSnapshot(next)
+	saveSnapshot(next, false)
 	if code := request(); code != http.StatusConflict {
 		t.Fatalf("刷新后仍然接受旧版本的新请求：HTTP %d", code)
 	}
@@ -116,5 +120,15 @@ func TestResolveHookTargetsAcceptsNativeAgentWithoutCatalogEntry(t *testing.T) {
 	if len(targets) != 1 || targets[0].SourceID != storage.NativeAgentSourceID ||
 		targets[0].AppID != storage.NativeAgentAppID || targets[0].Action != "update" {
 		t.Fatalf("native Agent target: %+v", targets)
+	}
+}
+
+func TestResolveHookTargetsRejectCatalogOnlyApp(t *testing.T) {
+	hosts := []storage.Host{{ID: "host", Name: "Mac mini", AgentID: "paired"}}
+	apps := []storage.CatalogApp{{AppID: "maestro", Name: "Maestro", CatalogOnly: true}}
+	for _, service := range []string{"maestro", "Maestro"} {
+		if _, err := resolveTargets([]hookTarget{{HostName: "Mac mini", ServiceName: service}}, hosts, apps); err == nil {
+			t.Fatalf("只展示的目录条目不能通过 %q 创建更新任务", service)
+		}
 	}
 }
